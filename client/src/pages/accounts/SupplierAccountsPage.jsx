@@ -427,7 +427,8 @@ export default function SupplierAccountsPage() {
                       </div>
                       <p className={`text-[13px] font-bold leading-relaxed ${isAdj ? "text-amber-900" : "text-slate-800"}`}>{n.note}</p>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
