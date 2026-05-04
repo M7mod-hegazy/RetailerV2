@@ -1,4 +1,25 @@
 {
   "app.title": "ElHegazi Retailer",
-  "app.ready": "Project scaffold is ready"
+  "app.ready": "Project scaffold is ready",
+  "currency.egp": "EGP",
+  "payment.multi.add": "Add another payment method",
+  "payment.multi.change": "Change due to customer",
+  "payment.multi.complete": "Complete",
+  "payment.multi.overpaid": "Overpaid",
+  "payment.multi.remaining": "Remaining",
+  "payment.multi.remove": "Remove payment method",
+  "print.doc.global": "Global settings",
+  "print.doc.pos_receipt": "POS receipt",
+  "print.doc.sales_invoice": "Sales invoice",
+  "print.doc.purchase_order": "Purchase order",
+  "print.doc.sales_return": "Sales return",
+  "print.doc.quotation": "Quotation",
+  "print.doc.branch_transfer": "Branch transfer",
+  "print.doc.bank_statement": "Bank statement",
+  "print.doc.ajal_statement": "Ajal statement",
+  "print.doc.ajal_schedule": "Installment schedule",
+  "print.doc.cheque_register": "Cheque register",
+  "print.doc.payment_receipt": "Payment receipt",
+  "print.doc.daily_treasury": "Daily treasury report",
+  "print.doc.payment_methods_report": "Payment methods report"
 }

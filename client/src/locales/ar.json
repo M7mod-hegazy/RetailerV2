@@ -1,4 +1,25 @@
 {
   "app.title": "الحجازي للتجزئة",
-  "app.ready": "تم تجهيز بنية المشروع بنجاح"
+  "app.ready": "تم تجهيز بنية المشروع بنجاح",
+  "currency.egp": "ج.م",
+  "payment.multi.add": "إضافة وسيلة دفع أخرى",
+  "payment.multi.change": "الباقي للعميل",
+  "payment.multi.complete": "مكتمل",
+  "payment.multi.overpaid": "زيادة",
+  "payment.multi.remaining": "متبقي",
+  "payment.multi.remove": "حذف وسيلة الدفع",
+  "print.doc.global": "الإعدادات العامة",
+  "print.doc.pos_receipt": "إيصال نقطة البيع",
+  "print.doc.sales_invoice": "فاتورة مبيعات",
+  "print.doc.purchase_order": "أمر شراء",
+  "print.doc.sales_return": "مرتجع مبيعات",
+  "print.doc.quotation": "عرض سعر",
+  "print.doc.branch_transfer": "تحويل فرع",
+  "print.doc.bank_statement": "كشف بنكي",
+  "print.doc.ajal_statement": "كشف آجل",
+  "print.doc.ajal_schedule": "جدول أقساط",
+  "print.doc.cheque_register": "سجل شيكات",
+  "print.doc.payment_receipt": "إيصال دفع",
+  "print.doc.daily_treasury": "تقرير الخزينة",
+  "print.doc.payment_methods_report": "تقرير وسائل الدفع"
 }
