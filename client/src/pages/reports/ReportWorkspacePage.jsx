@@ -47,33 +47,78 @@ function isValidDateString(value) {
 
 function prettifyLabel(key) {
   const labels = {
-    invoice_no: "Invoice #",
-    customer_name: "Customer",
-    supplier_name: "Supplier",
-    date: "Date",
-    total: "Total",
-    total_sales: "Total Sales",
-    invoice_count: "Invoice Count",
-    quantity: "Quantity",
-    quantity_sold: "Sold Qty",
-    item_name: "Item",
-    category_name: "Category",
-    payment_type: "Payment Method",
-    status: "Status",
-    balance: "Balance",
-    source: "Source",
-    tax_rate: "Tax Rate",
-    taxable_sales: "Taxable Sales",
-    outstanding_balance: "Outstanding Balance",
-    hour_slot: "Hour",
-    weekday: "Weekday",
-    action: "Action",
-    resource: "Resource",
-    created_at: "Created At",
-    line_total: "Line Total",
+    item_code: "كود الصنف (SKU)",
+    code: "كود الصنف (SKU)",
+    sku: "SKU",
+    item_id: "معرّف الصنف",
+    item_name: "اسم الصنف",
+    name: "الاسم",
+    invoice_no: "رقم الفاتورة",
+    customer_name: "العميل",
+    supplier_name: "المورد",
+    date: "التاريخ",
+    total: "الإجمالي",
+    total_sales: "إجمالي المبيعات",
+    invoice_count: "عدد الفواتير",
+    quantity: "الكمية",
+    quantity_sold: "الكمية المباعة",
+    stock_quantity: "رصيد المخزون",
+    system_quantity: "رصيد النظام",
+    category_name: "التصنيف",
+    payment_type: "طريقة الدفع",
+    status: "الحالة",
+    balance: "الرصيد",
+    source: "المصدر",
+    tax_rate: "نسبة الضريبة",
+    taxable_sales: "المبيعات الخاضعة",
+    outstanding_balance: "الرصيد المستحق",
+    hour_slot: "الساعة",
+    weekday: "يوم الأسبوع",
+    action: "الإجراء",
+    resource: "الكيان",
+    created_at: "تاريخ الإنشاء",
+    line_total: "إجمالي السطر",
+    movement_type: "نوع الحركة",
+    reference_type: "نوع المرجع",
+    reference_id: "رقم المرجع",
+    revenue: "الإيراد",
+    min_stock_qty: "حد أدنى للمخزون",
+    min_stock: "حد أدنى",
+    unit_name: "الوحدة",
+    total_quantity: "إجمالي الكمية",
+    cost_price: "سعر التكلفة",
+    total_value: "القيمة الإجمالية",
+    total_spent: "إجمالي الإنفاق",
+    barcode: "الباركود",
+    payload_json: "تفاصيل",
+    user_id: "المستخدم",
   };
   return labels[key] || key;
 }
+
+/** Keep SKU and product name columns first when present (preview order). */
+function orderReportColumnKeys(keys) {
+  const out = [];
+  const used = new Set();
+  for (const k of ["item_code", "code", "sku", "barcode"]) {
+    if (keys.includes(k) && !used.has(k)) {
+      out.push(k);
+      used.add(k);
+    }
+  }
+  for (const k of ["item_name", "name"]) {
+    if (keys.includes(k) && !used.has(k)) {
+      out.push(k);
+      used.add(k);
+    }
+  }
+  for (const k of keys) {
+    if (!used.has(k)) out.push(k);
+  }
+  return out;
+}
+
+const SKU_COLUMN_KEYS = new Set(["item_code", "code", "sku", "barcode"]);
 
 export default function ReportWorkspacePage() {
   const { reportSlug } = useParams();
@@ -141,7 +186,8 @@ export default function ReportWorkspacePage() {
   const columns = useMemo(() => {
     const sample = rows[0];
     if (!sample) return [];
-    return Object.keys(sample).map((key) => ({ key, label: prettifyLabel(key) }));
+    const keys = orderReportColumnKeys(Object.keys(sample));
+    return keys.map((key) => ({ key, label: prettifyLabel(key) }));
   }, [rows]);
 
   if (!definition) {
@@ -256,7 +302,7 @@ export default function ReportWorkspacePage() {
         )}
 
         <ReportExportBar
-          lang="en"
+          lang="ar"
           formats={definition.exportKind ? ["pdf", "excel", "print"] : ["print"]}
           showSchedule={false}
           onExport={handleExport}
@@ -270,11 +316,18 @@ export default function ReportWorkspacePage() {
           <div className="rounded-xl border border-slate-200 overflow-hidden bg-white">
             <DataGrid
               data={rows}
-              columns={columns.map(c => ({
+              columns={columns.map((c) => ({
                 id: c.key,
                 header: c.label,
-                width: 150,
-                sortable: true
+                width: SKU_COLUMN_KEYS.has(c.key) ? 130 : 150,
+                sortable: true,
+                render: SKU_COLUMN_KEYS.has(c.key)
+                  ? (row) => (
+                      <span className="font-mono tabular-nums text-slate-800" dir="ltr">
+                        {row[c.key] != null && row[c.key] !== "" ? String(row[c.key]) : "—"}
+                      </span>
+                    )
+                  : undefined,
               }))}
               rowKey={(row) => row.id || JSON.stringify(row)}
             />

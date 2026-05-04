@@ -451,6 +451,7 @@ export default function AnalyticsPage() {
                   <thead>
                     <tr className="text-slate-400 font-black uppercase tracking-widest text-[11px]">
                       <th className="pb-3 px-4 font-black">الصنف</th>
+                      <th className="pb-3 px-4 font-black">كود SKU</th>
                       <th className="pb-3 px-4 font-black">الكمية المباعة</th>
                       <th className="pb-3 px-4 font-black">الإيراد</th>
                     </tr>
@@ -463,6 +464,11 @@ export default function AnalyticsPage() {
                             <span className="w-6 h-6 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center text-[10px] font-black">{index + 1}</span>
                             <span className="font-bold text-slate-800">{item.item_name}</span>
                           </div>
+                        </td>
+                        <td className="bg-white group-hover:bg-slate-50 py-3.5 px-4 border-y border-slate-100 transition-colors">
+                          <span className="font-mono text-[12px] font-bold text-slate-600 tabular-nums" dir="ltr">
+                            {item.item_code || "—"}
+                          </span>
                         </td>
                         <td className="bg-white group-hover:bg-slate-50 py-3.5 px-4 font-black text-slate-600 border-y border-slate-100 transition-colors">
                           {item.quantity_sold} <span className="text-[10px] font-normal text-slate-400 ml-1">وحدة</span>
@@ -500,7 +506,14 @@ export default function AnalyticsPage() {
                 <div className="space-y-3">
                   {lowStock.map((item) => (
                     <div key={item.id} className="flex items-center justify-between rounded-[20px] border border-slate-100 bg-white p-4 hover:border-orange-200 transition-all hover:shadow-sm group">
-                      <span className="font-bold text-slate-800 text-[13px]">{item.name}</span>
+                      <div className="min-w-0 flex flex-col gap-0.5">
+                        <span className="font-bold text-slate-800 text-[13px]">{item.name}</span>
+                        {item.item_code ? (
+                          <span className="font-mono text-[11px] font-bold text-slate-500 tabular-nums" dir="ltr">
+                            SKU: {item.item_code}
+                          </span>
+                        ) : null}
+                      </div>
                       <div className="flex items-center gap-2">
                         <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">رصيد</span>
                         <span className="inline-flex items-center justify-center h-7 px-3 bg-red-50 text-red-600 rounded-full text-[12px] font-black ring-1 ring-red-100 group-hover:scale-105 transition-transform">

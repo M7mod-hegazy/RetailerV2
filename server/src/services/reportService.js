@@ -32,7 +32,6 @@ function getInventoryValuation() {
   const db = getDb();
   const query = `
     SELECT 
-      i.id,
       COALESCE(i.code, 'ITEM-' || i.id) as item_code,
       i.name,
       c.name as category_name,
@@ -83,7 +82,10 @@ function getCashierPerformance(startDate, endDate) {
 function getLowStock() {
   const db = getDb();
   return db.prepare(`
-    SELECT i.id, i.name, COALESCE(i.code, 'ITEM-' || i.id) as item_code, i.min_stock_qty as min_stock,
+    SELECT i.id,
+      COALESCE(i.code, 'ITEM-' || i.id) as item_code,
+      i.name,
+      i.min_stock_qty as min_stock,
       u.name as unit_name,
       COALESCE(SUM(sl.quantity), 0) as quantity
     FROM items i

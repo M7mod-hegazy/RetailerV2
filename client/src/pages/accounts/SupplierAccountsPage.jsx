@@ -174,7 +174,7 @@ export default function SupplierAccountsPage() {
   const bal = Number(selected?.opening_balance || 0);
 
   return (
-    <div className="flex h-full bg-slate-50 overflow-hidden" dir="rtl">
+    <div className="flex flex-1 min-h-0 bg-zinc-50 overflow-hidden" dir="rtl">
 
       {/* ── Left Panel ── */}
       <div className="w-[360px] bg-white border-l border-slate-200 flex flex-col shrink-0 shadow-lg">

@@ -39,7 +39,10 @@ function listRows(slug, startDate, endDate) {
       ).all(...params);
     case "sales-by-item":
       return db.prepare(
-        `SELECT items.name AS item_name, SUM(il.quantity) AS quantity_sold, SUM(il.line_total) AS revenue
+        `SELECT COALESCE(items.code, 'ITEM-' || items.id) AS item_code,
+                items.name AS item_name,
+                SUM(il.quantity) AS quantity_sold,
+                SUM(il.line_total) AS revenue
          FROM invoice_lines il
          JOIN invoices i ON i.id = il.invoice_id
          JOIN items ON items.id = il.item_id
@@ -89,7 +92,9 @@ function listRows(slug, startDate, endDate) {
     }
     case "slow-moving":
       return db.prepare(
-        `SELECT it.name, COALESCE(SUM(sl.quantity), 0) AS stock_quantity
+        `SELECT COALESCE(it.code, 'ITEM-' || it.id) AS item_code,
+                it.name AS item_name,
+                COALESCE(SUM(sl.quantity), 0) AS stock_quantity
          FROM items it
          LEFT JOIN stock_levels sl ON sl.item_id = it.id
          WHERE it.id NOT IN (
@@ -103,7 +108,11 @@ function listRows(slug, startDate, endDate) {
       ).all(...params);
     case "stock-levels":
       return db.prepare(
-        `SELECT it.name, COALESCE(SUM(sl.quantity), 0) AS quantity, it.min_stock_qty, u.name AS unit_name
+        `SELECT COALESCE(it.code, 'ITEM-' || it.id) AS item_code,
+                it.name AS item_name,
+                COALESCE(SUM(sl.quantity), 0) AS quantity,
+                it.min_stock_qty,
+                u.name AS unit_name
          FROM items it
          LEFT JOIN stock_levels sl ON sl.item_id = it.id
          LEFT JOIN units u ON u.id = it.unit_id
@@ -112,16 +121,25 @@ function listRows(slug, startDate, endDate) {
       ).all();
     case "stock-movements":
       return db.prepare(
-        `SELECT movement_type, reference_type, reference_id, quantity, DATE(created_at) AS date
-         FROM stock_movements
-         WHERE 1=1 ${addDateFilter()}
-         ORDER BY created_at DESC`,
+        `SELECT COALESCE(i.code, 'ITEM-' || i.id) AS item_code,
+                i.name AS item_name,
+                sm.movement_type,
+                sm.reference_type,
+                sm.reference_id,
+                sm.quantity,
+                DATE(sm.created_at) AS date
+         FROM stock_movements sm
+         LEFT JOIN items i ON i.id = sm.item_id
+         WHERE sm.deleted_at IS NULL ${addDateFilter("sm.created_at")}
+         ORDER BY sm.created_at DESC`,
       ).all(...params);
     case "stock-valuation":
       return getInventoryValuation();
     case "count-sheet":
       return db.prepare(
-        `SELECT it.code, it.name, COALESCE(SUM(sl.quantity), 0) AS system_quantity
+        `SELECT COALESCE(it.code, 'ITEM-' || it.id) AS item_code,
+                it.name AS item_name,
+                COALESCE(SUM(sl.quantity), 0) AS system_quantity
          FROM items it
          LEFT JOIN stock_levels sl ON sl.item_id = it.id
          GROUP BY it.id
