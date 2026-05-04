@@ -37,6 +37,7 @@ const loyaltyRoutes = require("./routes/loyalty.routes");
 const quotationsRoutes = require("./routes/quotations.routes");
 const licenseRoutes = require("./routes/license.routes");
 const paymentMethodsRoutes = require("./routes/paymentMethods.routes");
+const printSettingsRoutes = require("./routes/printSettings.routes");
 const uploadRoutes = require("./routes/upload.routes");
 const branchTransfersRoutes = require("./routes/branchTransfers.routes");
 const branchesRoutes = require("./routes/branches.routes");
@@ -102,6 +103,7 @@ function createApp() {
   app.use("/api/search", searchRoutes);
   app.use("/api/quotations", quotationsRoutes);
   app.use("/api/payment-methods", paymentMethodsRoutes);
+  app.use("/api/print-settings-per-doc", printSettingsRoutes);
   app.use("/api/upload", uploadRoutes);
   app.use("/api/branch-transfers", branchTransfersRoutes);
   app.use("/api/branches", branchesRoutes);
