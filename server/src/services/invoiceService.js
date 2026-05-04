@@ -44,7 +44,14 @@ function getInvoiceWithLines(invoiceId) {
     .all(invoiceId);
 
   const allocations = db
-    .prepare("SELECT * FROM payment_allocations WHERE invoice_id = ? ORDER BY id ASC")
+    .prepare(`
+      SELECT pa.*, p.method AS method, pm.name AS method_name
+      FROM payment_allocations pa
+      LEFT JOIN payments p ON p.id = pa.payment_id
+      LEFT JOIN payment_methods pm ON pm.type = p.method OR pm.category = p.method OR pm.name = p.method
+      WHERE pa.invoice_id = ?
+      ORDER BY pa.id ASC
+    `)
     .all(invoiceId);
 
   return {
@@ -54,6 +61,11 @@ function getInvoiceWithLines(invoiceId) {
       returnable_quantity: Math.max(0, line.quantity - (line.returned_quantity || 0)),
     })),
     allocations,
+    payments: allocations.map((allocation) => ({
+      method: allocation.method,
+      method_name: allocation.method_name || allocation.method,
+      amount: allocation.amount,
+    })),
   };
 }
 
@@ -129,7 +141,10 @@ function createInvoice(payload) {
     const increaseAmount = Math.max(0, Number(payload.increase || 0));
     const total = Math.max(0, subtotal - discount + increaseAmount);
     const paymentType = payload.payment_type || "cash";
-    const amountPaid = Number(payload.amount_paid ?? total);
+    const multiPaid = paymentType === "multi" && Array.isArray(payload.payments)
+      ? payload.payments.reduce((sum, line) => sum + Number(line.amount || 0), 0)
+      : null;
+    const amountPaid = Number(payload.amount_paid ?? multiPaid ?? total);
     const amountReceived = Number.isFinite(amountPaid) ? amountPaid : total;
     const remainingAmount = Math.max(0, total - Math.max(0, amountReceived));
     if (paymentType === "credit" && !payload.customer_id) {
@@ -200,9 +215,21 @@ function createInvoice(payload) {
             db.prepare("UPDATE banks SET balance = balance + ? WHERE id = ?").run(amount, method.target_id);
           }
           
-          // Log allocation
-          db.prepare("INSERT INTO payment_allocations (invoice_id, amount, source_type, source_id) VALUES (?, ?, ?, ?)")
-            .run(inv.lastInsertRowid, amount, method.type === 'bash' ? 'treasury' : 'bank', method.target_id);
+          const payment = db.prepare(`
+            INSERT INTO payments (party_type, party_id, amount, method, notes, treasury_id, bank_id, allocated_amount, unallocated_amount)
+            VALUES ('customer', ?, ?, ?, ?, ?, ?, ?, 0)
+          `).run(
+            payload.customer_id || 0,
+            amount,
+            method.type || method.category || method.name,
+            `Invoice ${invoiceNo}`,
+            method.type === "cash" ? method.target_id || payload.treasury_id || null : null,
+            method.type === "bank" ? method.target_id || payload.bank_id || null : null,
+            amount,
+          );
+
+          db.prepare("INSERT INTO payment_allocations (payment_id, invoice_id, amount) VALUES (?, ?, ?)")
+            .run(payment.lastInsertRowid, inv.lastInsertRowid, amount);
         }
       } else {
         // Fallback for legacy split_cash/split_bank if needed, but we prefer new format
