@@ -2,12 +2,12 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import api from "../services/api";
 
-function computeTotals(lines, discount) {
+function computeTotals(lines, discount, increase) {
   const subtotal = lines.reduce(
     (sum, line) => sum + line.quantity * line.unit_price - Number(line.line_discount || 0),
     0,
   );
-  const total = Math.max(0, subtotal - Number(discount || 0));
+  const total = Math.max(0, subtotal - Number(discount || 0) + Number(increase || 0));
   return { subtotal, total };
 }
 
@@ -17,6 +17,7 @@ export const usePosStore = create(
       lines: [],
       customer: null,
       discount: 0,
+      increase: 0,
       promotionDiscount: 0,
       appliedPromotions: [],
       paymentType: "cash",
@@ -99,13 +100,18 @@ export const usePosStore = create(
       },
       setCustomer: (customer) => set({ customer }),
       setDiscount: (discount) => set({ discount: Number(discount || 0) }),
+      setIncrease: (increase) => set({ increase: Math.max(0, Number(increase || 0)) }),
       setPaymentType: (paymentType) => set({ paymentType }),
       setSearch: (search) => set({ search }),
       setActiveCategory: (activeCategory) => set({ activeCategory }),
       holdCurrentInvoice: () => {
         const state = get();
         if (!state.lines.length) return;
-        const totals = computeTotals(state.lines, Number(state.discount || 0) + Number(state.promotionDiscount || 0));
+        const totals = computeTotals(
+          state.lines,
+          Number(state.discount || 0) + Number(state.promotionDiscount || 0),
+          Number(state.increase || 0),
+        );
         const slot = {
           id: `held-${Date.now()}`,
           heldAt: new Date().toISOString(),
@@ -115,6 +121,7 @@ export const usePosStore = create(
           lines: state.lines,
           customer: state.customer,
           discount: state.discount,
+          increase: state.increase,
           promotionDiscount: state.promotionDiscount,
           appliedPromotions: state.appliedPromotions,
           paymentType: state.paymentType,
@@ -124,6 +131,7 @@ export const usePosStore = create(
           lines: [],
           customer: null,
           discount: 0,
+          increase: 0,
           promotionDiscount: 0,
           appliedPromotions: [],
           paymentType: "cash",
@@ -138,13 +146,18 @@ export const usePosStore = create(
           lines: held.lines,
           customer: held.customer,
           discount: held.discount,
+          increase: held.increase || 0,
           promotionDiscount: held.promotionDiscount,
           appliedPromotions: held.appliedPromotions,
           paymentType: held.paymentType,
         });
       },
-      clear: () => set({ lines: [], customer: null, discount: 0, promotionDiscount: 0, appliedPromotions: [], paymentType: "cash", search: "", activeCategory: "all" }),
-      getTotals: () => computeTotals(get().lines, Number(get().discount || 0) + Number(get().promotionDiscount || 0)),
+      clear: () => set({ lines: [], customer: null, discount: 0, increase: 0, promotionDiscount: 0, appliedPromotions: [], paymentType: "cash", search: "", activeCategory: "all" }),
+      getTotals: () => computeTotals(
+        get().lines,
+        Number(get().discount || 0) + Number(get().promotionDiscount || 0),
+        Number(get().increase || 0),
+      ),
     }),
     {
       name: "pos-crash-recovery-storage", 
@@ -153,6 +166,7 @@ export const usePosStore = create(
         lines: state.lines, 
         customer: state.customer, 
         discount: state.discount, 
+        increase: state.increase,
         promotionDiscount: state.promotionDiscount,
         appliedPromotions: state.appliedPromotions,
         paymentType: state.paymentType,
