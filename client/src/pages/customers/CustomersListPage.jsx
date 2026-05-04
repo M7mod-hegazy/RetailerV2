@@ -1,0 +1,43 @@
+import React from "react";
+import { useNavigate } from "react-router-dom";
+import SimpleCrudPage from "../../components/crud/SimpleCrudPage";
+
+export default function CustomersListPage() {
+  const navigate = useNavigate();
+
+  return (
+    <SimpleCrudPage
+      title="العملاء"
+      description="عرض العملاء مع الرصيد والحد الائتماني. انقر على صف لعرض الملف الكامل."
+      endpoint="/api/customers"
+      fields={[
+        { name: "name", label: "اسم العميل", required: true },
+        { name: "phone", label: "الهاتف" },
+        { name: "code", label: "الكود" },
+        { name: "opening_balance", label: "الرصيد الافتتاحي", type: "number" },
+        { name: "credit_limit", label: "الحد الائتماني", type: "number" },
+      ]}
+      columns={[
+        { key: "code", label: "الكود" },
+        { key: "name", label: "العميل" },
+        { key: "phone", label: "الهاتف" },
+        {
+          key: "opening_balance",
+          label: "الرصيد",
+          render: (v) => (
+            <span className={Number(v) < 0 ? "text-rose-600 font-black" : "text-emerald-700 font-black"}>
+              {Number(v || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2 })}
+            </span>
+          ),
+        },
+        { key: "credit_limit", label: "الحد" },
+      ]}
+      buildPayload={(form) => ({
+        ...form,
+        opening_balance: Number(form.opening_balance || 0),
+        credit_limit: Number(form.credit_limit || 0),
+      })}
+      onRowClick={(row) => navigate(`/definitions/customers/${row.id}`)}
+    />
+  );
+}
