@@ -4,6 +4,11 @@ import {
   Calendar, User, FileText, BarChart2, Search, RefreshCw
 } from "lucide-react";
 import api from "../../services/api";
+import toast from "react-hot-toast";
+import MultiPaymentInput from "../../components/payment/MultiPaymentInput";
+import PrintPreviewModal from "../../components/print/PrintPreviewModal";
+import AjalStatementTemplate from "../../components/print/templates/AjalStatementTemplate";
+import AjalScheduleTemplate from "../../components/print/templates/AjalScheduleTemplate";
 
 const fmt = (n) => Number(n || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2 });
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString("ar-EG") : "—";
@@ -22,9 +27,14 @@ export default function AjalTrackerPage() {
   const [filters, setFilters] = useState({ status: "all", search: "" });
   const [selected, setSelected] = useState(null);
   const [payMethods, setPayMethods] = useState([]);
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkSelected, setBulkSelected] = useState([]);
+  const [bulkPayOpen, setBulkPayOpen] = useState(false);
+  const [bulkPayments, setBulkPayments] = useState([]);
+  const [printType, setPrintType] = useState(null);
 
   // Pay form
-  const [payForm, setPayForm] = useState({ amount: "", method_id: 1, notes: "" });
+  const [payForm, setPayForm] = useState({ amount: "", payments: [], notes: "" });
   const [paying, setPaying] = useState(false);
 
   // Schedule form
@@ -56,19 +66,53 @@ export default function AjalTrackerPage() {
     } catch {}
   }
 
+  function generateWhatsAppMessage(debt) {
+    return `السلام عليكم ${debt.customer_name}،\nنذكركم بموعد سداد قسط بمبلغ ${fmt(debt.remaining)} ج.م\nتاريخ الاستحقاق: ${fmtDate(debt.due_date)}\nنرجو التواصل لتسهيل الإجراءات.\nشكراً لتعاملكم معنا.`;
+  }
+
+  function handleWhatsAppReminder(debt) {
+    const msg = generateWhatsAppMessage(debt);
+    const phone = debt.customer_phone?.replace(/\D/g, "");
+    if (phone) {
+      window.open(`https://wa.me/2${phone}?text=${encodeURIComponent(msg)}`, "_blank");
+      return;
+    }
+    navigator.clipboard?.writeText(msg);
+    toast.success("تم نسخ الرسالة");
+  }
+
+  function getAgingClass(debt) {
+    if (debt.status !== "overdue") return "";
+    const days = Math.floor((Date.now() - new Date(debt.due_date)) / 86400000);
+    if (days <= 30) return "border-amber-400 bg-amber-50";
+    if (days <= 90) return "border-orange-400 bg-orange-50";
+    return "border-rose-500 bg-rose-50";
+  }
+
+  function getAgingLabel(debt) {
+    if (debt.status !== "overdue") return null;
+    const days = Math.max(0, Math.floor((Date.now() - new Date(debt.due_date)) / 86400000));
+    if (days <= 30) return `متأخر ${days} يوم`;
+    if (days <= 90) return `متأخر ${days} يوم — تحذير`;
+    return `متأخر ${days} يوم — عاجل`;
+  }
+
   async function handlePay() {
-    if (!payForm.amount || !selected) return;
+    if (!selected) return;
+    const totalPaid = payForm.payments.reduce((sum, line) => sum + Number(line.amount || 0), 0);
+    if (totalPaid <= 0) return toast.error("أدخل مبلغ الدفع");
     setPaying(true);
     try {
       await api.post(`/api/ajal-debts/${selected.id}/pay`, {
-        amount: Number(payForm.amount),
-        payment_method_id: payForm.method_id,
+        amount: totalPaid,
+        payments: payForm.payments,
         notes: payForm.notes,
       });
-      setPayForm({ amount: "", method_id: 1, notes: "" });
+      toast.success("تم تسجيل الدفع");
+      setPayForm({ amount: "", payments: [], notes: "" });
       await loadDetail(selected.id);
       loadAll();
-    } catch (e) { alert(e.response?.data?.message || "خطأ في السداد"); }
+    } catch (e) { toast.error(e.response?.data?.message || "خطأ في السداد"); }
     finally { setPaying(false); }
   }
 
@@ -84,6 +128,43 @@ export default function AjalTrackerPage() {
       await loadDetail(selected.id);
     } catch (e) { alert(e.response?.data?.message || "خطأ في الجدولة"); }
     finally { setScheduling(false); }
+  }
+
+  async function handleBulkPay() {
+    const selectedDebts = debts.filter((debt) => bulkSelected.includes(debt.id));
+    const totalRemaining = selectedDebts.reduce((sum, debt) => sum + Number(debt.remaining || 0), 0);
+    const totalPaid = bulkPayments.reduce((sum, line) => sum + Number(line.amount || 0), 0);
+    if (!selectedDebts.length || totalPaid <= 0) return toast.error("أدخل مبلغ الدفع");
+    if (totalPaid > totalRemaining) return toast.error("المبلغ أكبر من المتبقي");
+
+    setPaying(true);
+    try {
+      let remainingPayment = totalPaid;
+      for (const debt of selectedDebts) {
+        if (remainingPayment <= 0) break;
+        const amountForDebt = Math.min(remainingPayment, Number(debt.remaining || 0));
+        const scaledPayments = bulkPayments
+          .filter((line) => Number(line.amount || 0) > 0)
+          .map((line) => ({
+            ...line,
+            amount: Number(((Number(line.amount || 0) / totalPaid) * amountForDebt).toFixed(2)),
+          }))
+          .filter((line) => line.amount > 0);
+        await api.post(`/api/ajal-debts/${debt.id}/pay`, {
+          amount: amountForDebt,
+          payments: scaledPayments,
+          notes: "تحصيل متعدد",
+        });
+        remainingPayment -= amountForDebt;
+      }
+      toast.success("تم تحصيل المحدد");
+      setBulkPayOpen(false);
+      setBulkMode(false);
+      setBulkSelected([]);
+      setBulkPayments([]);
+      loadAll();
+    } catch (e) { toast.error(e.response?.data?.message || "خطأ في التحصيل"); }
+    finally { setPaying(false); }
   }
 
   const KPI = ({ label, value, sub, color = "slate" }) => (
@@ -136,6 +217,16 @@ export default function AjalTrackerPage() {
               {s === "all" ? "الكل" : STATUS_MAP[s]?.label}
             </button>
           ))}
+          <button onClick={() => { setBulkMode(!bulkMode); setBulkSelected([]); }}
+            className={`flex h-8 items-center gap-1.5 rounded-xl px-3 text-[11px] font-black ${bulkMode ? "bg-violet-600 text-white" : "bg-white border border-slate-200 text-slate-600"}`}>
+            {bulkMode ? "إلغاء التحديد" : "تحصيل متعدد"}
+          </button>
+          {bulkSelected.length > 0 && (
+            <button onClick={() => setBulkPayOpen(true)}
+              className="flex h-8 items-center gap-1.5 rounded-xl bg-emerald-600 px-3 text-[11px] font-black text-white">
+              تحصيل المحدد ({bulkSelected.length})
+            </button>
+          )}
         </div>
 
         {/* Table */}
@@ -160,9 +251,25 @@ export default function AjalTrackerPage() {
                   {debts.map(d => (
                     <tr key={d.id}
                       onClick={() => loadDetail(d.id)}
-                      className={`border-b border-slate-50 cursor-pointer transition-colors ${d.status === "overdue" ? "bg-rose-50/50 hover:bg-rose-50" : "hover:bg-amber-50/30"}`}
+                      className={`border-b border-slate-50 cursor-pointer transition-colors ${getAgingClass(d) || (d.status === "overdue" ? "bg-rose-50/50 hover:bg-rose-50" : "hover:bg-amber-50/30")}`}
                     >
-                      <td className="px-4 py-3 font-black text-slate-800">{d.customer_name}</td>
+                      <td className="px-4 py-3 font-black text-slate-800">
+                        <div className="flex items-center gap-2">
+                          {bulkMode && (
+                            <input
+                              type="checkbox"
+                              checked={bulkSelected.includes(d.id)}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                setBulkSelected((ids) => ids.includes(d.id) ? ids.filter((id) => id !== d.id) : [...ids, d.id]);
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          )}
+                          <span>{d.customer_name}</span>
+                        </div>
+                        {getAgingLabel(d) && <div className="mt-1 text-[10px] font-black text-rose-600">{getAgingLabel(d)}</div>}
+                      </td>
                       <td className="px-4 py-3 text-slate-500 font-mono text-[11px]">{d.invoice_no || "—"}</td>
                       <td className="px-4 py-3 font-black font-mono">{fmt(d.original_amount)}</td>
                       <td className="px-4 py-3 font-mono text-emerald-700">{fmt(d.paid_amount)}</td>
@@ -196,7 +303,21 @@ export default function AjalTrackerPage() {
               <div className="text-[14px] font-black text-slate-900">{selected.customer_name}</div>
               <div className="text-[11px] text-slate-400 font-bold">{selected.customer_phone}</div>
             </div>
-            <button onClick={() => setSelected(null)} className="text-slate-400 hover:text-slate-700"><X className="h-5 w-5" /></button>
+            <div className="flex items-center gap-1.5">
+              <button onClick={() => handleWhatsAppReminder(selected)}
+                className="rounded-lg bg-emerald-500 px-2 py-1 text-[10px] font-black text-white hover:bg-emerald-600">
+                واتساب
+              </button>
+              <button onClick={() => setPrintType("statement")}
+                className="rounded-lg bg-slate-800 px-2 py-1 text-[10px] font-black text-white hover:bg-slate-900">
+                كشف
+              </button>
+              <button onClick={() => setPrintType("schedule")}
+                className="rounded-lg bg-violet-600 px-2 py-1 text-[10px] font-black text-white hover:bg-violet-700">
+                أقساط
+              </button>
+              <button onClick={() => setSelected(null)} className="text-slate-400 hover:text-slate-700"><X className="h-5 w-5" /></button>
+            </div>
           </div>
 
           {/* Summary */}
@@ -233,13 +354,12 @@ export default function AjalTrackerPage() {
                     autoFocus placeholder={`المتبقي: ${fmt(selected.remaining)}`}
                     className="w-full h-10 rounded-xl border border-slate-300 px-4 text-[13px] font-black text-center outline-none focus:border-amber-500" />
                 </div>
-                <div>
-                  <label className="text-[11px] font-black text-slate-600 block mb-1.5">وسيلة الدفع</label>
-                  <select value={payForm.method_id} onChange={e => setPayForm(f => ({ ...f, method_id: e.target.value }))}
-                    className="w-full h-10 rounded-xl border border-slate-300 px-4 text-[12px] font-bold outline-none focus:border-amber-500 bg-white">
-                    {payMethods.map(m => <option key={m.id} value={m.id}>{m.icon} {m.name}</option>)}
-                  </select>
-                </div>
+                <MultiPaymentInput
+                  totalAmount={Number(payForm.amount) || 0}
+                  value={payForm.payments || []}
+                  onChange={(lines) => setPayForm(f => ({ ...f, payments: lines }))}
+                  allowPartial={true}
+                />
                 <div>
                   <label className="text-[11px] font-black text-slate-600 block mb-1.5">ملاحظات</label>
                   <input type="text" value={payForm.notes} onChange={e => setPayForm(f => ({ ...f, notes: e.target.value }))}
@@ -325,6 +445,43 @@ export default function AjalTrackerPage() {
             )}
           </div>
         </div>
+      )}
+      {bulkPayOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="w-[460px] rounded-2xl bg-white p-6 shadow-2xl" dir="rtl">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-[15px] font-black text-slate-900">تحصيل متعدد</h2>
+              <button onClick={() => setBulkPayOpen(false)}><X className="h-5 w-5 text-slate-400" /></button>
+            </div>
+            <div className="mb-3 rounded-xl bg-slate-50 border border-slate-200 p-3 text-center">
+              <div className="text-[10px] font-black text-slate-400">إجمالي المحدد</div>
+              <div className="text-[20px] font-black font-mono text-slate-900">
+                {fmt(debts.filter((debt) => bulkSelected.includes(debt.id)).reduce((sum, debt) => sum + Number(debt.remaining || 0), 0))} ج.م
+              </div>
+            </div>
+            <MultiPaymentInput
+              totalAmount={debts.filter((debt) => bulkSelected.includes(debt.id)).reduce((sum, debt) => sum + Number(debt.remaining || 0), 0)}
+              value={bulkPayments}
+              onChange={setBulkPayments}
+              allowPartial={true}
+            />
+            <button onClick={handleBulkPay} disabled={paying || !bulkPayments.length}
+              className="mt-4 w-full rounded-xl bg-emerald-600 py-3 text-[13px] font-black text-white hover:bg-emerald-700 disabled:opacity-40">
+              {paying ? "جاري التحصيل..." : "تأكيد التحصيل"}
+            </button>
+          </div>
+        </div>
+      )}
+      {selected && printType && (
+        <PrintPreviewModal
+          open={!!printType}
+          onClose={() => setPrintType(null)}
+          docType={printType === "schedule" ? "ajal_schedule" : "ajal_statement"}
+          renderContent={(settings) => printType === "schedule"
+            ? <AjalScheduleTemplate debt={selected} settings={settings} />
+            : <AjalStatementTemplate debt={selected} settings={settings} />
+          }
+        />
       )}
     </div>
   );

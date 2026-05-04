@@ -76,7 +76,7 @@ router.get("/:id", (req, res) => {
   try {
     const db = getDb();
     const debt = db.prepare(`
-      SELECT d.*, c.name AS customer_name, c.phone, i.invoice_no, (d.original_amount - d.paid_amount) AS remaining
+      SELECT d.*, c.name AS customer_name, c.phone AS customer_phone, i.invoice_no, (d.original_amount - d.paid_amount) AS remaining
       FROM ajal_debts d
       LEFT JOIN customers c ON c.id = d.customer_id
       LEFT JOIN invoices i ON i.id = d.invoice_id
@@ -97,29 +97,35 @@ router.get("/:id", (req, res) => {
 router.post("/:id/pay", (req, res) => {
   try {
     const db = getDb();
-    const { amount, payment_method_id, notes, payment_date } = req.body || {};
-    if (!amount || Number(amount) <= 0) return res.status(400).json({ success: false, message: "المبلغ مطلوب" });
+    const { amount, payments, payment_method_id, notes, payment_date } = req.body || {};
+    const paymentLines = Array.isArray(payments) && payments.length
+      ? payments.map((p) => ({ method_id: p.method_id || p.payment_method_id, amount: Number(p.amount || 0) })).filter((p) => p.method_id && p.amount > 0)
+      : [{ method_id: payment_method_id || 1, amount: Number(amount || 0) }];
+    const totalAmount = paymentLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
+    if (totalAmount <= 0) return res.status(400).json({ success: false, message: "المبلغ مطلوب" });
 
     const debt = db.prepare("SELECT * FROM ajal_debts WHERE id = ?").get(req.params.id);
     if (!debt) return res.status(404).json({ success: false, message: "الدين غير موجود" });
     if (debt.status === "paid") return res.status(400).json({ success: false, message: "تم سداد هذا الدين بالكامل" });
 
-    const payAmount = Math.min(Number(amount), debt.original_amount - debt.paid_amount);
+    const remaining = Math.max(0, debt.original_amount - debt.paid_amount);
+    if (totalAmount > remaining) return res.status(400).json({ success: false, message: "المبلغ أكبر من المتبقي" });
 
     db.transaction(() => {
-      db.prepare(`INSERT INTO ajal_payments (debt_id, amount, payment_method_id, payment_date, notes, created_by) VALUES (?, ?, ?, ?, ?, ?)`)
-        .run(debt.id, payAmount, payment_method_id || 1, payment_date || new Date().toISOString().slice(0, 10), notes || null, req.user?.id || 1);
-      db.prepare("UPDATE ajal_debts SET paid_amount = paid_amount + ? WHERE id = ?").run(payAmount, debt.id);
+      for (const line of paymentLines) {
+        db.prepare(`INSERT INTO ajal_payments (debt_id, amount, payment_method_id, payment_date, notes, created_by) VALUES (?, ?, ?, ?, ?, ?)`)
+          .run(debt.id, line.amount, line.method_id || 1, payment_date || new Date().toISOString().slice(0, 10), notes || null, req.user?.id || 1);
+
+        const pm = db.prepare("SELECT excludes_from_treasury FROM payment_methods WHERE id = ?").get(line.method_id || 1);
+        if (!pm || !pm.excludes_from_treasury) {
+          db.prepare("UPDATE treasuries SET balance = balance + ? WHERE id = 1").run(line.amount);
+        }
+      }
+      db.prepare("UPDATE ajal_debts SET paid_amount = paid_amount + ? WHERE id = ?").run(totalAmount, debt.id);
       recalcDebt(db, debt.id);
 
       // Update customer balance
-      db.prepare("UPDATE customers SET opening_balance = opening_balance - ? WHERE id = ?").run(payAmount, debt.customer_id);
-
-      // Update treasury only if payment method doesn't exclude from treasury
-      const pm = db.prepare("SELECT excludes_from_treasury FROM payment_methods WHERE id = ?").get(payment_method_id || 1);
-      if (!pm || !pm.excludes_from_treasury) {
-        db.prepare("UPDATE treasuries SET balance = balance + ? WHERE id = 1").run(payAmount);
-      }
+      db.prepare("UPDATE customers SET opening_balance = opening_balance - ? WHERE id = ?").run(totalAmount, debt.customer_id);
     })();
 
     res.json({ success: true, data: db.prepare("SELECT * FROM ajal_debts WHERE id = ?").get(req.params.id) });
