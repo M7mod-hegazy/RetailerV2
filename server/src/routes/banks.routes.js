@@ -3,12 +3,19 @@ const { getDb } = require("../config/database");
 
 const router = express.Router();
 
-function ensureBankOperationColumns() {
-  const db = getDb();
+function ensureBankOperationColumns(db) {
   try { db.prepare("ALTER TABLE banks ADD COLUMN alert_threshold REAL NOT NULL DEFAULT 0").run(); } catch (_) {}
   try { db.prepare("ALTER TABLE bank_transactions ADD COLUMN reconciled INTEGER NOT NULL DEFAULT 0").run(); } catch (_) {}
 }
-ensureBankOperationColumns();
+
+router.use((_req, _res, next) => {
+  try {
+    ensureBankOperationColumns(getDb());
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
 
 router.get("/", (_req, res) => {
   const rows = getDb().prepare("SELECT * FROM banks ORDER BY name ASC").all();
