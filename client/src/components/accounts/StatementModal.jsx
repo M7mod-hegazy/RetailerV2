@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Printer, X, FileText } from "lucide-react";
 import api from "../../services/api";
 import toast from "react-hot-toast";
+import PrintPreviewModal from "../print/PrintPreviewModal";
 
 const fmt = (n) => Number(n || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2 });
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString("ar-EG") : "—";
@@ -12,6 +13,7 @@ export default function StatementModal({ party, partyType, onClose }) {
   const [loading, setLoading] = useState(false);
   const [ledger, setLedger] = useState([]);
   const [totals, setTotals] = useState({ totalDebit: 0, totalCredit: 0 });
+  const [printOpen, setPrintOpen] = useState(false);
 
   async function loadLedger() {
     if (!from || !to) {
@@ -81,10 +83,6 @@ export default function StatementModal({ party, partyType, onClose }) {
     }
   }
 
-  function printArea() {
-    window.print();
-  }
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm print:bg-white print:p-0" dir="rtl">
       <div className="w-[820px] h-[90vh] flex flex-col bg-white rounded-2xl shadow-2xl overflow-hidden print:w-full print:h-auto print:shadow-none print:rounded-none">
@@ -112,7 +110,7 @@ export default function StatementModal({ party, partyType, onClose }) {
             {loading ? "جاري التحميل..." : "عرض الكشف"}
           </button>
           <div className="flex-1" />
-          <button onClick={printArea} disabled={ledger.length === 0} className="flex h-9 items-center gap-2 rounded-xl bg-blue-600 px-4 text-[12px] font-black text-white hover:bg-blue-700 disabled:opacity-40">
+          <button onClick={() => setPrintOpen(true)} disabled={ledger.length === 0} className="flex h-9 items-center gap-2 rounded-xl bg-blue-600 px-4 text-[12px] font-black text-white hover:bg-blue-700 disabled:opacity-40">
             <Printer className="h-4 w-4" /> طباعة
           </button>
         </div>
@@ -174,6 +172,39 @@ export default function StatementModal({ party, partyType, onClose }) {
           )}
         </div>
       </div>
+      {printOpen && (
+        <PrintPreviewModal
+          open={printOpen}
+          onClose={() => setPrintOpen(false)}
+          docType={partyType === "customer" ? "sales_invoice" : "purchase_order"}
+          renderContent={(settings) => (
+            <div style={{ fontFamily: settings.print_font || "Cairo", direction: "rtl", padding: 24, fontSize: 12, color: "#1e293b" }}>
+              <div style={{ borderBottom: `3px solid ${settings.accent_color || "#334155"}`, paddingBottom: 16, marginBottom: 16 }}>
+                <div style={{ fontSize: 20, fontWeight: 900 }}>كشف حساب {partyType === "customer" ? "عميل" : "مورد"}</div>
+                <div style={{ color: "#64748b" }}>{party.name}</div>
+                <div style={{ color: "#64748b", fontSize: 11 }}>الفترة: {from} إلى {to}</div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, marginBottom: 16 }}>
+                <div style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 12 }}><strong>الرصيد الحالي</strong><br />{fmt(party.opening_balance)} ج.م</div>
+                <div style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 12 }}><strong>إجمالي مدين</strong><br />{fmt(totals.totalDebit)} ج.م</div>
+                <div style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 12 }}><strong>إجمالي دائن</strong><br />{fmt(totals.totalCredit)} ج.م</div>
+              </div>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                <thead><tr style={{ background: settings.accent_color || "#334155", color: "white" }}>{["التاريخ", "البيان", "المرجع", "مدين", "دائن"].map((h) => <th key={h} style={{ padding: 8, textAlign: "right" }}>{h}</th>)}</tr></thead>
+                <tbody>{ledger.map((item, i) => (
+                  <tr key={i} style={{ background: i % 2 ? "white" : "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
+                    <td style={{ padding: 8 }}>{fmtDate(item.date)}</td>
+                    <td style={{ padding: 8 }}>{item.type}</td>
+                    <td style={{ padding: 8 }}>{item.doc_no}</td>
+                    <td style={{ padding: 8 }}>{item.debit ? fmt(item.debit) : ""}</td>
+                    <td style={{ padding: 8 }}>{item.credit ? fmt(item.credit) : ""}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          )}
+        />
+      )}
     </div>
   );
 }

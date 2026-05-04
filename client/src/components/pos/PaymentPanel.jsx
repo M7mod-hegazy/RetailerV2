@@ -4,6 +4,8 @@ import { usePosStore } from "../../stores/posStore";
 import { queueOfflineInvoice } from "../../services/offlineSync";
 import { Printer, Save, Trash2, Clock, PauseCircle, PlayCircle } from "lucide-react";
 import CurrencyDisplay from "../ui/CurrencyDisplay";
+import MultiPaymentInput from "../payment/MultiPaymentInput";
+import PrintPreviewModal from "../print/PrintPreviewModal";
 
 const paymentLabels = {
   cash: "نقدي",
@@ -29,6 +31,9 @@ export default function PaymentPanel({ onHold, heldCount, onResume, heldInvoices
   const [paymentDetails, setPaymentDetails] = useState({
     treasury_id: "", bank_id: "", split_cash_amount: "", split_bank_amount: "",
   });
+  const [payments, setPayments] = useState([]);
+  const [printOpen, setPrintOpen] = useState(false);
+  const [printInvoice, setPrintInvoice] = useState(null);
 
   const totals = getTotals();
   const isEmpty = lines.length === 0;
@@ -46,20 +51,31 @@ export default function PaymentPanel({ onHold, heldCount, onResume, heldInvoices
       bank_id: paymentDetails.bank_id ? Number(paymentDetails.bank_id) : null,
       split_cash_amount: Number(paymentDetails.split_cash_amount || 0),
       split_bank_amount: Number(paymentDetails.split_bank_amount || 0),
+      payments: paymentType === "multi" ? payments.map((p) => ({ method_id: p.method_id, method_name: p.method_name, amount: Number(p.amount || 0) })) : [],
     };
 
     try {
       const response = await api.post("/api/invoices", payload);
       setMessage(`تم حفظ الفاتورة بنجاح`);
       setTimeout(() => setMessage(""), 3000);
+      if (printAfter) {
+        setPrintInvoice({
+          ...(response.data.data || {}),
+          lines,
+          total: totals.total,
+          payments: paymentType === "multi" ? payments : [{ method: paymentLabels[paymentType], amount: totals.total }],
+        });
+        setPrintOpen(true);
+      }
       clear();
       setPaymentDetails({ treasury_id: "", bank_id: "", split_cash_amount: "", split_bank_amount: "" });
-      if (printAfter) window.print();
+      setPayments([]);
     } catch (error) {
       if (!error.response || error.code === "ERR_NETWORK") {
         await queueOfflineInvoice(payload);
         clear();
         setPaymentDetails({ treasury_id: "", bank_id: "", split_cash_amount: "", split_bank_amount: "" });
+        setPayments([]);
       } else {
         setMessage(error.response?.data?.message || "فشل حفظ الفاتورة");
       }
@@ -126,8 +142,11 @@ export default function PaymentPanel({ onHold, heldCount, onResume, heldInvoices
       {/* Multi / Bank Extra fields (Collapsible) */}
       {(paymentType === 'multi' || paymentType === 'bank_transfer' || paymentType === 'cash') && (
         <div style={{ marginBottom: '16px', background: 'var(--bg-overlay)', padding: '10px', borderRadius: '8px', fontSize: '12px' }}>
-          {/* Omitted intricate dropdowns to save code size, just showing standard inputs */}
-          <span style={{ color: 'var(--text-muted)' }}>تفاصيل الدفع: {paymentLabels[paymentType]} يتم تجهيزها.</span>
+          {paymentType === "multi" ? (
+            <MultiPaymentInput totalAmount={totals.total} value={payments} onChange={setPayments} />
+          ) : (
+            <span style={{ color: 'var(--text-muted)' }}>تفاصيل الدفع: {paymentLabels[paymentType]} يتم تجهيزها.</span>
+          )}
         </div>
       )}
 
@@ -214,6 +233,15 @@ export default function PaymentPanel({ onHold, heldCount, onResume, heldInvoices
       )}
 
       {message && <div style={{ marginTop: '12px', textAlign: 'center', fontSize: '12px', color: 'var(--success-text)', fontWeight: 600 }}>{message}</div>}
+      {printOpen && printInvoice && (
+        <PrintPreviewModal
+          open={printOpen}
+          onClose={() => setPrintOpen(false)}
+          docType="pos_receipt"
+          invoice={printInvoice}
+          operationLabel="فاتورة مبيعات"
+        />
+      )}
     </div>
   );
 }

@@ -4,8 +4,13 @@ import {
   AlertCircle, CheckCircle2, X, ArrowDownRight, Calculator,
   Calendar, ChevronRight, Flag, ExternalLink, TrendingUp,
   TrendingDown, Search, Clock, ArrowUpDown, Filter,
+  FileText, Coins, Banknote, History,
 } from "lucide-react";
 import api from "../../services/api";
+import { motion, AnimatePresence } from "framer-motion";
+import toast from "react-hot-toast";
+import SmartTooltip from "../../components/ui/SmartTooltip";
+import PrintPreviewModal from "../../components/print/PrintPreviewModal";
 
 const fmt = (n) =>
   Number(n || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -22,29 +27,29 @@ const DOC_TYPE_LABEL = {
 };
 
 const DOC_TYPE_COLOR = {
-  pos_invoice: "text-emerald-700 bg-emerald-50",
-  expense: "text-rose-700 bg-rose-50",
-  revenue: "text-blue-700 bg-blue-50",
-  purchase: "text-orange-700 bg-orange-50",
-  customer_payment: "text-purple-700 bg-purple-50",
-  withdrawal: "text-slate-700 bg-slate-100",
+  pos_invoice: "text-emerald-700 bg-emerald-50 border-emerald-200",
+  expense: "text-rose-700 bg-rose-50 border-rose-200",
+  revenue: "text-blue-700 bg-blue-50 border-blue-200",
+  purchase: "text-orange-700 bg-orange-50 border-orange-200",
+  customer_payment: "text-purple-700 bg-purple-50 border-purple-200",
+  withdrawal: "text-slate-700 bg-slate-100 border-slate-200",
 };
 
 const TABS = [
+  { id: "all", label: "كل الحركات" },
   { id: "pos", label: "فواتير POS" },
   { id: "expenses", label: "المصروفات" },
   { id: "revenues", label: "الإيرادات" },
   { id: "purchases", label: "المشتريات" },
   { id: "customer_payments", label: "مدفوعات العملاء" },
   { id: "withdrawals", label: "المسحوبات" },
-  { id: "all", label: "كل الحركات" },
 ];
 
 export default function DailyTreasuryPage() {
   const [date, setDate] = useState(todayStr());
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("pos");
+  const [activeTab, setActiveTab] = useState("all");
   const [transactions, setTransactions] = useState([]);
   const [txLoading, setTxLoading] = useState(false);
   const [txSearch, setTxSearch] = useState("");
@@ -84,6 +89,7 @@ export default function DailyTreasuryPage() {
 
   // Compare yesterday
   const [compareYesterday, setCompareYesterday] = useState(false);
+  const [printOpen, setPrintOpen] = useState(false);
 
   const isToday = date === todayStr();
   const isClosed = summary?.session?.status === "closed";
@@ -123,13 +129,15 @@ export default function DailyTreasuryPage() {
     try {
       const searchParam = globalAmountSearch || txSearch;
       const dateParam = isToday ? "" : `&date=${date}`;
+      const typeParam = activeTab === "all" ? "" : activeTab;
       const r = await api.get(
-        `/api/daily-sessions/today/transactions?type=${activeTab}&search=${encodeURIComponent(searchParam)}${dateParam}`
+        `/api/daily-sessions/today/transactions?type=${typeParam}&search=${encodeURIComponent(searchParam)}${dateParam}`
       );
       let rows = r.data.data || [];
       if (txSort === "amount_asc") rows = [...rows].sort((a, b) => a.amount - b.amount);
       else if (txSort === "amount_desc") rows = [...rows].sort((a, b) => b.amount - a.amount);
       else if (txSort === "time_asc") rows = [...rows].sort((a, b) => a.created_at?.localeCompare(b.created_at));
+      else if (txSort === "time_desc") rows = [...rows].sort((a, b) => b.created_at?.localeCompare(a.created_at));
       setTransactions(rows);
     } catch {
       setTransactions([]);
@@ -173,9 +181,10 @@ export default function DailyTreasuryPage() {
         actual_cash: Number(actualCash),
         notes: closeNotes,
       });
+      toast.success("تم إغلاق اليومية بنجاح");
       loadSummary();
     } catch (e) {
-      alert(e.response?.data?.message || "خطأ في الإغلاق");
+      toast.error(e.response?.data?.message || "خطأ في الإغلاق");
     } finally {
       setClosing(false);
     }
@@ -188,12 +197,13 @@ export default function DailyTreasuryPage() {
         amount: Number(wdAmount),
         note: wdNote,
       });
+      toast.success("تم تسجيل المسحوبات بنجاح");
       setWdOpen(false);
       setWdAmount("");
       setWdNote("");
       loadSummary();
     } catch (e) {
-      alert(e.response?.data?.message || "خطأ");
+      toast.error(e.response?.data?.message || "خطأ");
     }
   }
 
@@ -212,13 +222,14 @@ export default function DailyTreasuryPage() {
           notes: quickNote,
         });
       }
+      toast.success(quickModal === "expense" ? "تم تسجيل المصروف بنجاح" : "تم تسجيل الإيراد بنجاح");
       setQuickModal(null);
       setQuickAmount("");
       setQuickNote("");
       loadSummary();
       loadTransactions();
     } catch (e) {
-      alert(e.response?.data?.message || "خطأ");
+      toast.error(e.response?.data?.message || "خطأ");
     }
   }
 
@@ -226,113 +237,238 @@ export default function DailyTreasuryPage() {
     setClosingYesterday(true);
     try {
       await api.post("/api/daily-sessions/yesterday/force-close");
+      toast.success("تم إغلاق يوم أمس بالقوة");
       setYesterdayAlert(null);
     } catch (e) {
-      alert(e.response?.data?.message || "خطأ");
+      toast.error(e.response?.data?.message || "خطأ");
     } finally {
       setClosingYesterday(false);
     }
   }
 
   function handlePrint() {
-    window.print();
+    setPrintOpen(true);
   }
 
   const sortedTransactions = transactions;
   const txTotal = sortedTransactions.reduce((s, t) => s + Number(t.amount || 0), 0);
 
+  // Animation variants
+  const staggerContainer = {
+    hidden: { opacity: 0 },
+    show: {
+      opacity: 1,
+      transition: { staggerChildren: 0.1 }
+    }
+  };
+  const fadeInUp = {
+    hidden: { opacity: 0, y: 20 },
+    show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 100, damping: 20 } }
+  };
+  const modalVariants = {
+    hidden: { opacity: 0, scale: 0.95, y: 20 },
+    show: { opacity: 1, scale: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 25 } },
+    exit: { opacity: 0, scale: 0.95, y: 20, transition: { duration: 0.2 } }
+  };
+
   return (
-    <div className="flex flex-col h-full bg-slate-50" dir="rtl">
-      {/* ── Header ── */}
-      <header className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between gap-4 shrink-0 print:hidden">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600 shadow-lg shadow-emerald-200">
-            <BookOpen className="h-5 w-5 text-white" />
+    <div className="min-h-[100dvh] bg-slate-50 flex flex-col font-sans overflow-x-hidden w-full max-w-full relative" dir="rtl">
+      {/* Impeccable Animated Architectural Background */}
+      <div className="fixed inset-0 z-0 pointer-events-none select-none overflow-hidden">
+        {/* Base Grid */}
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:32px_32px]" />
+        {/* Cinematic Shimmer Sweep */}
+        <motion.div 
+          animate={{ x: ["-150%", "200%"] }}
+          transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
+          className="absolute inset-0 w-[40%] h-full bg-gradient-to-r from-transparent via-white/60 to-transparent skew-x-12 mix-blend-overlay"
+        />
+        {/* Center Spotlight / Vignette */}
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_80%_at_50%_30%,transparent_0%,rgba(248,250,252,0.95)_100%)]" />
+      </div>
+
+      {/* Cinematic Hero Header */}
+      <header className="relative z-10 w-full pt-12 pb-8 px-6 shrink-0">
+        <motion.div 
+          initial="hidden"
+          animate="show"
+          variants={staggerContainer}
+          className="max-w-[1400px] mx-auto flex flex-col md:flex-row md:items-end justify-between gap-6"
+        >
+          <div className="flex flex-col items-start justify-center">
+            <motion.div variants={fadeInUp} className="flex items-center gap-3 text-slate-400 mb-6">
+              <div className="h-px w-8 bg-slate-300"></div>
+              <Wallet className="h-4 w-4" />
+              <span className="text-[11px] font-black uppercase tracking-[0.2em] font-mono">المالية // تسوية ومراجعة الحركات</span>
+            </motion.div>
+            
+            <motion.h1 variants={fadeInUp} className="max-w-4xl text-5xl md:text-6xl font-black text-zinc-950 tracking-tighter leading-[1.1]">
+              الخزينة اليومية
+            </motion.h1>
           </div>
-          <div>
-            <h1 className="text-[18px] font-black text-slate-900">الخزينة اليومية</h1>
-            <p className="text-[11px] font-bold text-slate-400">تسوية ومراجعة الحركات اليومية</p>
-          </div>
-        </div>
 
-        <div className="flex items-center gap-2">
-          <input
-            type="date"
-            value={date}
-            max={todayStr()}
-            onChange={(e) => { setDate(e.target.value); setActiveTab("pos"); }}
-            className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-[13px] font-bold text-slate-700 outline-none focus:border-emerald-500"
-          />
-          <span className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-black ${isClosed ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"}`}>
-            {isClosed ? <><Lock className="h-3 w-3" /> مغلق</> : <><CheckCircle2 className="h-3 w-3" /> مفتوح</>}
-          </span>
+          <motion.div variants={fadeInUp} className="flex flex-wrap items-center gap-3 bg-white/80 backdrop-blur-md p-3 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100/50">
+            <div className="relative">
+              <input
+                type="date"
+                value={date}
+                max={todayStr()}
+                onChange={(e) => { setDate(e.target.value); setActiveTab("all"); }}
+                className="h-12 rounded-2xl border border-slate-200 bg-white/50 px-4 text-[13px] font-bold text-slate-700 outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 transition-all cursor-pointer"
+              />
+            </div>
+            
+            <div className={`flex items-center gap-2 h-12 px-4 rounded-2xl border ${isClosed ? "bg-rose-50 border-rose-100 text-rose-700" : "bg-emerald-50 border-emerald-100 text-emerald-700"}`}>
+              {isClosed ? <Lock className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
+              <span className="text-[13px] font-black">{isClosed ? "مغلق" : "مفتوح"}</span>
+            </div>
 
-          <label className="flex items-center gap-1.5 cursor-pointer rounded-lg border border-slate-200 px-3 py-1.5 text-[11px] font-black text-slate-600 hover:bg-slate-50 select-none">
-            <input
-              type="checkbox"
-              className="accent-emerald-600"
-              checked={compareYesterday}
-              onChange={(e) => setCompareYesterday(e.target.checked)}
-            />
-            مقارنة بالأمس
-          </label>
+            <label className="flex items-center gap-2 h-12 cursor-pointer rounded-2xl border border-slate-200 px-4 text-[13px] font-black text-slate-600 hover:bg-slate-50 transition-colors select-none">
+              <input
+                type="checkbox"
+                className="accent-emerald-600 h-4 w-4 rounded"
+                checked={compareYesterday}
+                onChange={(e) => setCompareYesterday(e.target.checked)}
+              />
+              مقارنة بالأمس
+            </label>
 
-          <button
-            onClick={() => { setHistoryOpen(true); loadPastSessions(); }}
-            className="flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-[12px] font-black text-slate-600 hover:bg-slate-50"
-          >
-            <Calendar className="h-4 w-4" /> أيام سابقة
-          </button>
-          <button
-            onClick={loadSummary}
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-500"
-          >
-            <RefreshCw className="h-4 w-4" />
-          </button>
-          <button
-            onClick={handlePrint}
-            className="flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-[12px] font-black text-slate-700 hover:bg-slate-50"
-          >
-            <Printer className="h-4 w-4" /> طباعة تقرير
-          </button>
-        </div>
+            <motion.button
+              whileHover={{ y: -2 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => { setHistoryOpen(true); loadPastSessions(); }}
+              className="flex h-12 items-center gap-2 rounded-2xl bg-slate-900 px-5 text-[13px] font-black text-white hover:bg-slate-800 transition-colors shadow-lg shadow-slate-900/10"
+            >
+              <History className="h-4 w-4 text-emerald-400" /> أيام سابقة
+            </motion.button>
+            
+            <motion.button
+              whileHover={{ y: -2 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={loadSummary}
+              className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 transition-colors shadow-sm"
+            >
+              <RefreshCw className="h-4 w-4" />
+            </motion.button>
+            
+            <motion.button
+              whileHover={{ y: -2 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={handlePrint}
+              className="flex h-12 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 text-[13px] font-black text-slate-700 hover:bg-slate-50 transition-colors shadow-sm"
+            >
+              <Printer className="h-4 w-4" /> طباعة تقرير
+            </motion.button>
+          </motion.div>
+        </motion.div>
       </header>
 
-      <div className="flex flex-1 min-h-0 overflow-hidden">
-        {/* ── Main Content ── */}
-        <div className="flex flex-col flex-1 min-w-0 overflow-y-auto p-4 gap-4 pb-0">
-
+      {/* Main Grid Layout (AIDA: Interest & Action) */}
+      <main className="relative z-10 flex-1 w-full max-w-[1400px] mx-auto px-8 pb-8">
+        <motion.div 
+          initial="hidden"
+          animate="show"
+          variants={staggerContainer}
+          className="flex flex-col gap-4"
+        >
           {/* Smart Alerts Banner */}
-          {yesterdayAlert?.unclosed && (
-            <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 shrink-0">
-              <div className="flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
-                <span className="text-[13px] font-black text-amber-800">
-                  يوم أمس ({yesterdayAlert.session?.date}) لم يُغلق بعد
-                </span>
-              </div>
-              <button
-                onClick={handleForceCloseYesterday}
-                disabled={closingYesterday}
-                className="rounded-lg bg-amber-600 px-3 py-1.5 text-[12px] font-black text-white hover:bg-amber-700 disabled:opacity-50"
+          <AnimatePresence>
+            {yesterdayAlert?.unclosed && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0, mb: 0 }}
+                animate={{ opacity: 1, height: 'auto', mb: 24 }}
+                exit={{ opacity: 0, height: 0, mb: 0 }}
+                className="flex items-center justify-between gap-4 rounded-3xl border border-amber-200 bg-amber-50/80 backdrop-blur-md px-6 py-4 shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden"
               >
-                {closingYesterday ? "جاري الإغلاق..." : "إغلاق يوم أمس"}
-              </button>
-            </div>
-          )}
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center justify-center h-10 w-10 rounded-2xl bg-amber-100 text-amber-600 shrink-0">
+                    <AlertCircle className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-[14px] font-black text-amber-900">تنبيه إغلاق جلسة سابقة</h3>
+                    <span className="text-[12px] font-bold text-amber-700">
+                      يوم أمس ({yesterdayAlert.session?.date}) لم يُغلق بعد. يجب إغلاق الجلسة السابقة لضمان صحة الأرصدة.
+                    </span>
+                  </div>
+                </div>
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={handleForceCloseYesterday}
+                  disabled={closingYesterday}
+                  className="rounded-2xl bg-amber-600 px-6 py-3 text-[13px] font-black text-white hover:bg-amber-700 disabled:opacity-50 shadow-lg shadow-amber-600/20 transition-all shrink-0"
+                >
+                  {closingYesterday ? "جاري الإغلاق..." : "إغلاق يوم أمس"}
+                </motion.button>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {loading ? (
-            <div className="flex items-center justify-center h-40 text-slate-400 font-black">
-              جاري التحميل...
+            <div className="flex items-center justify-center h-64">
+              <div className="flex flex-col items-center gap-4">
+                <RefreshCw className="h-8 w-8 animate-spin text-slate-300" />
+                <span className="text-[14px] font-black text-slate-400">جاري تحميل بيانات الخزينة...</span>
+              </div>
             </div>
           ) : !sess ? (
-            <div className="flex items-center justify-center h-40 text-slate-400 font-black">
-              لا توجد جلسة لهذا اليوم
+            <div className="flex items-center justify-center h-64 rounded-3xl border border-dashed border-slate-300 bg-white/50 backdrop-blur-md">
+              <span className="text-[15px] font-black text-slate-400">لا توجد جلسة مفتوحة لهذا اليوم.</span>
             </div>
           ) : (
             <>
+              {/* Read-only notice for historical days */}
+              {!isToday && (
+                <motion.div variants={fadeInUp} className="flex items-center gap-3 rounded-2xl bg-blue-50 border border-blue-100 px-6 py-4">
+                  <Lock className="h-5 w-5 text-blue-500" />
+                  <span className="text-[13px] font-black text-blue-800">عرض للقراءة فقط — سجلات يوم {date}</span>
+                </motion.div>
+              )}
+
+              {/* Quick Actions (If open and today) */}
+              {isToday && !isClosed && (
+                <motion.div variants={fadeInUp} className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <motion.button
+                    whileHover={{ y: -2 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => setQuickModal("expense")}
+                    className="flex items-center justify-center gap-3 rounded-3xl bg-rose-600 py-4 text-[14px] font-black text-white hover:bg-rose-700 transition-colors shadow-lg shadow-rose-600/20 border border-rose-500"
+                  >
+                    <div className="bg-white/20 p-1.5 rounded-xl"><TrendingDown className="h-4 w-4" /></div>
+                    تسجيل مصروف سريع
+                  </motion.button>
+                  <motion.button
+                    whileHover={{ y: -2 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => setQuickModal("revenue")}
+                    className="flex items-center justify-center gap-3 rounded-3xl bg-emerald-600 py-4 text-[14px] font-black text-white hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-600/20 border border-emerald-500"
+                  >
+                    <div className="bg-white/20 p-1.5 rounded-xl"><TrendingUp className="h-4 w-4" /></div>
+                    تسجيل إيراد سريع
+                  </motion.button>
+                  <motion.button
+                    whileHover={{ y: -2 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => setMoneyOpen(true)}
+                    className="flex items-center justify-center gap-3 rounded-3xl bg-blue-600 py-4 text-[14px] font-black text-white hover:bg-blue-700 transition-colors shadow-lg shadow-blue-600/20 border border-blue-500"
+                  >
+                    <div className="bg-white/20 p-1.5 rounded-xl"><Coins className="h-4 w-4" /></div>
+                    عد العملة (جرد الخزينة)
+                  </motion.button>
+                  <motion.button
+                    whileHover={{ y: -2 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => setWdOpen(true)}
+                    className="flex items-center justify-center gap-3 rounded-3xl bg-slate-900 py-4 text-[14px] font-black text-white hover:bg-slate-800 transition-colors shadow-lg shadow-slate-900/20 border border-slate-800"
+                  >
+                    <div className="bg-white/20 p-1.5 rounded-xl"><Banknote className="h-4 w-4" /></div>
+                    تسجيل مسحوبات
+                  </motion.button>
+                </motion.div>
+              )}
+
               {/* KPI Cards */}
-              <div className="grid grid-cols-4 gap-3 shrink-0">
+              <motion.div variants={fadeInUp} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {[
                   {
                     label: "إجمالي المبيعات",
@@ -361,551 +497,699 @@ export default function DailyTreasuryPage() {
                     color: discrepancy == null ? "slate" : discrepancy >= 0 ? "emerald" : "rose",
                   },
                 ].map(({ label, value, yesterday, icon: Icon, color }) => (
-                  <div key={label} className="rounded-xl bg-white border border-slate-200 p-4 shadow-sm">
-                    <div className="flex items-start justify-between mb-2">
-                      <span className="text-[11px] font-black text-slate-400 uppercase tracking-wider leading-tight">{label}</span>
-                      <div className={`flex h-7 w-7 items-center justify-center rounded-lg bg-${color}-50 shrink-0`}>
-                        <Icon className={`h-4 w-4 text-${color}-600`} />
+                  <div key={label} className="relative overflow-hidden rounded-2xl bg-white/80 backdrop-blur-xl border border-slate-200/60 p-4 shadow-[0_8px_30px_rgb(0,0,0,0.04)] group hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all">
+                    <div className={`absolute -right-4 -top-4 h-16 w-16 rounded-full bg-${color}-50/50 blur-xl group-hover:bg-${color}-100/50 transition-colors`}></div>
+                    <div className="relative z-10 flex flex-col h-full justify-between">
+                      <div className="flex items-start justify-between mb-2">
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-tight">{label}</span>
+                        <div className={`flex h-8 w-8 items-center justify-center rounded-xl bg-${color}-50 text-${color}-600 ring-1 ring-inset ring-${color}-100 shadow-sm shrink-0`}>
+                          <Icon className="h-4 w-4" />
+                        </div>
+                      </div>
+                      <div>
+                        <div className={`text-[22px] font-black font-mono tracking-tighter ${value != null && value < 0 ? "text-rose-600" : "text-zinc-900"}`}>
+                          {value != null ? fmt(value) : "—"}
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-bold mt-0.5">جنيه مصري</div>
+                        {compareYesterday && yesterday != null && (
+                          <div className="mt-2 text-[10px] text-slate-500 font-bold border-t border-slate-100/80 pt-2 flex items-center justify-between">
+                            <span>بالأمس:</span>
+                            <span className="font-mono">{fmt(yesterday)} ج.م</span>
+                          </div>
+                        )}
                       </div>
                     </div>
-                    <div className={`text-[20px] font-black font-mono tracking-tight ${value != null && value < 0 ? "text-rose-600" : "text-slate-900"}`}>
-                      {value != null ? fmt(value) : "—"}
-                    </div>
-                    <div className="text-[10px] text-slate-400 font-bold mt-0.5">ج.م</div>
-                    {compareYesterday && yesterday != null && (
-                      <div className="mt-1.5 text-[10px] text-slate-400 font-bold border-t border-slate-100 pt-1">
-                        أمس: {fmt(yesterday)} ج.م
-                      </div>
+                  </div>
+                ))}
+              </motion.div>
+
+              <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+                {/* Right Area: Transactions (8 columns) */}
+                <motion.div variants={fadeInUp} className="xl:col-span-8 flex flex-col gap-4">
+                  
+                  {/* Search Bar */}
+                  <div className="relative group w-full">
+                    <Search className="absolute right-5 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 group-focus-within:text-zinc-900 transition-colors" />
+                    <input
+                      value={globalAmountSearch}
+                      onChange={(e) => { setGlobalAmountSearch(e.target.value); if (e.target.value) setActiveTab("all"); }}
+                      placeholder="البحث الشامل برقم الفاتورة، المبلغ، أو اسم العميل..."
+                      className="w-full h-12 bg-white/80 backdrop-blur-xl rounded-2xl pr-12 pl-4 text-[13px] font-bold text-zinc-800 outline-none transition-all focus:bg-white focus:ring-2 focus:ring-zinc-900/5 shadow-sm border border-slate-200/60 placeholder:text-slate-400"
+                    />
+                    {globalAmountSearch && (
+                      <button onClick={() => setGlobalAmountSearch("")} className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-600 bg-slate-100 rounded-full p-1 transition-colors">
+                        <X className="h-4 w-4" />
+                      </button>
                     )}
                   </div>
-                ))}
-              </div>
 
-              {/* Read-only notice for historical days */}
-              {!isToday && (
-                <div className="flex items-center gap-2 rounded-lg bg-blue-50 border border-blue-200 px-4 py-2 shrink-0">
-                  <Lock className="h-4 w-4 text-blue-500" />
-                  <span className="text-[12px] font-black text-blue-700">عرض للقراءة فقط — يوم {date}</span>
-                </div>
-              )}
-
-              {/* Quick Actions — today only, open only */}
-              {isToday && !isClosed && (
-                <div className="grid grid-cols-4 gap-3 shrink-0">
-                  <button
-                    onClick={() => setQuickModal("expense")}
-                    className="flex items-center justify-center gap-2 rounded-xl bg-rose-600 py-3 text-[13px] font-black text-white hover:bg-rose-700 transition-colors shadow-lg shadow-rose-100"
-                  >
-                    <Plus className="h-4 w-4" /> مصروف سريع
-                  </button>
-                  <button
-                    onClick={() => setQuickModal("revenue")}
-                    className="flex items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 text-[13px] font-black text-white hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-100"
-                  >
-                    <Plus className="h-4 w-4" /> إيراد سريع
-                  </button>
-                  <button
-                    onClick={() => setMoneyOpen(true)}
-                    className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 py-3 text-[13px] font-black text-white hover:bg-blue-700 transition-colors shadow-lg shadow-blue-100"
-                  >
-                    <Calculator className="h-4 w-4" /> عد العملة
-                  </button>
-                  <button
-                    onClick={handlePrint}
-                    className="flex items-center justify-center gap-2 rounded-xl border-2 border-slate-300 bg-white py-3 text-[13px] font-black text-slate-700 hover:bg-slate-50"
-                  >
-                    <Printer className="h-4 w-4" /> طباعة تقرير اليوم
-                  </button>
-                </div>
-              )}
-
-              {/* Equation Card */}
-              <div className="rounded-xl bg-white border border-slate-200 shadow-sm shrink-0">
-                <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2">
-                  <Calculator className="h-4 w-4 text-slate-500" />
-                  <h3 className="text-[13px] font-black text-slate-700">معادلة الخزينة</h3>
-                </div>
-                <div className="p-5 space-y-1.5 font-mono text-[13px]">
-                  {[
-                    { label: "الرصيد الافتتاحي", value: summary?.opening_balance, tab: null, locked: true },
-                    { label: "+ مبيعات POS (نقدي)", value: summary?.pos_cash_sales, tab: "pos" },
-                    { label: "- مشتريات", value: summary?.purchases_cash, tab: "purchases", negative: true },
-                    { label: "- مصروفات", value: summary?.expenses_cash, tab: "expenses", negative: true },
-                    { label: "+ إيرادات", value: summary?.revenues_cash, tab: "revenues" },
-                    { label: "+ مدفوعات عملاء (نقدي)", value: summary?.customer_payments, tab: "customer_payments" },
-                    { label: "- مسحوبات", value: summary?.withdrawals, tab: "withdrawals", negative: true },
-                  ].map(({ label, value, tab, locked, negative }) => (
-                    <div
-                      key={label}
-                      onClick={() => { if (tab) { setActiveTab(tab); } }}
-                      className={`flex items-center justify-between py-1.5 px-2 rounded-lg ${tab ? "cursor-pointer hover:bg-slate-50" : ""}`}
-                    >
-                      <div className="flex items-center gap-2">
-                        {locked && <Lock className="h-3 w-3 text-slate-300" />}
-                        <span className="text-slate-600 font-bold">{label}</span>
-                        {tab && <ChevronRight className="h-3 w-3 text-slate-300" />}
-                      </div>
-                      <span className={`font-black ${negative && value > 0 ? "text-rose-700" : "text-slate-800"}`}>
-                        {fmt(value)} ج.م
-                      </span>
-                    </div>
-                  ))}
-                  <div className="border-t-2 border-slate-200 pt-3 mt-2 flex items-center justify-between">
-                    <span className="text-[14px] font-black text-slate-900">= المتوقع في الخزينة</span>
-                    <span className="text-[20px] font-black font-mono text-emerald-700">{fmt(expected)} ج.م</span>
-                  </div>
-                  {sess.actual_cash != null && (
-                    <div className={`flex items-center justify-between rounded-lg p-3 mt-1 ${discrepancy >= 0 ? "bg-emerald-50" : "bg-rose-50"}`}>
-                      <div>
-                        <div className="font-black text-[12px] text-slate-600">الرصيد الفعلي</div>
-                        <div className={`font-black text-[11px] mt-0.5 ${discrepancy >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
-                          الفرق: {discrepancy >= 0 ? "+" : ""}{fmt(discrepancy)} ج.م
-                        </div>
-                      </div>
-                      <span className={`font-black text-[18px] font-mono ${discrepancy >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
-                        {fmt(sess.actual_cash)} ج.م
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Global Amount Search */}
-              <div className="flex items-center gap-2 shrink-0">
-                <div className="flex-1 flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2">
-                  <Search className="h-4 w-4 text-slate-400 shrink-0" />
-                  <input
-                    value={globalAmountSearch}
-                    onChange={(e) => { setGlobalAmountSearch(e.target.value); if (e.target.value) setActiveTab("all"); }}
-                    placeholder="بحث بالمبلغ في كل الحركات..."
-                    className="flex-1 text-[13px] font-bold outline-none bg-transparent placeholder:text-slate-300"
-                  />
-                  {globalAmountSearch && (
-                    <button onClick={() => setGlobalAmountSearch("")} className="text-slate-300 hover:text-slate-500">
-                      <X className="h-4 w-4" />
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Tabbed Transaction Explorer */}
-              <div className="rounded-xl bg-white border border-slate-200 shadow-sm flex flex-col shrink-0" style={{ minHeight: 360 }}>
-                {/* Tab bar */}
-                <div className="flex items-center gap-1 border-b border-slate-100 px-3 py-2 overflow-x-auto">
-                  {TABS.map((t) => (
-                    <button
-                      key={t.id}
-                      onClick={() => { setActiveTab(t.id); setGlobalAmountSearch(""); }}
-                      className={`shrink-0 px-3 py-1.5 rounded-lg text-[12px] font-black transition-colors ${
-                        activeTab === t.id ? "bg-slate-800 text-white" : "text-slate-500 hover:bg-slate-100"
-                      }`}
-                    >
-                      {t.label}
-                    </button>
-                  ))}
-                  <div className="flex items-center gap-2 mr-auto shrink-0">
-                    <input
-                      value={txSearch}
-                      onChange={(e) => setTxSearch(e.target.value)}
-                      placeholder="بحث..."
-                      className="h-8 w-40 rounded-lg border border-slate-200 px-3 text-[12px] outline-none focus:border-slate-400"
-                    />
-                    <select
-                      value={txSort}
-                      onChange={(e) => setTxSort(e.target.value)}
-                      className="h-8 rounded-lg border border-slate-200 px-2 text-[11px] font-black outline-none text-slate-600"
-                    >
-                      <option value="time_desc">الأحدث أولاً</option>
-                      <option value="time_asc">الأقدم أولاً</option>
-                      <option value="amount_desc">المبلغ تنازلي</option>
-                      <option value="amount_asc">المبلغ تصاعدي</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* Table */}
-                <div className="overflow-y-auto flex-1">
-                  {txLoading ? (
-                    <div className="flex items-center justify-center h-24 text-slate-400 text-[12px] font-black">
-                      جاري التحميل...
-                    </div>
-                  ) : sortedTransactions.length === 0 ? (
-                    <div className="flex items-center justify-center h-24 text-slate-300 text-[12px] font-black">
-                      لا توجد حركات
-                    </div>
-                  ) : (
-                    <table className="w-full text-[12px]">
-                      <thead className="bg-slate-50 sticky top-0 z-10">
-                        <tr>
-                          {["الكود", "النوع", "المبلغ", "الطرف / الوصف", "الوقت", "إجراءات"].map((h) => (
-                            <th key={h} className="px-3 py-2 text-right font-black text-slate-500 text-[11px] border-b border-slate-100">
-                              {h}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {sortedTransactions.map((t, i) => (
-                          <tr key={i} className="border-b border-slate-50 hover:bg-slate-50/70">
-                            <td className="px-3 py-2 font-black text-slate-600">{t.doc_no || `#${t.id}`}</td>
-                            <td className="px-3 py-2">
-                              <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-black ${DOC_TYPE_COLOR[t.doc_type] || "text-slate-600 bg-slate-100"}`}>
-                                {DOC_TYPE_LABEL[t.doc_type] || t.doc_type}
-                              </span>
-                            </td>
-                            <td className="px-3 py-2 font-black text-slate-900 font-mono">{fmt(t.amount)}</td>
-                            <td className="px-3 py-2 text-slate-600 max-w-[180px] truncate">
-                              {t.party || t.description || "—"}
-                            </td>
-                            <td className="px-3 py-2 text-slate-400 whitespace-nowrap">
-                              {t.created_at
-                                ? new Date(t.created_at).toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })
-                                : "—"}
-                            </td>
-                            <td className="px-3 py-2">
-                              <div className="flex items-center gap-1.5">
-                                <button
-                                  onClick={() => setSlideOver(t)}
-                                  className="flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-[10px] font-black text-slate-600 hover:bg-slate-100"
-                                >
-                                  <ExternalLink className="h-3 w-3" /> فتح
-                                </button>
-                                <button
-                                  onClick={() => window.print()}
-                                  className="flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-[10px] font-black text-slate-600 hover:bg-slate-100"
-                                >
-                                  <Printer className="h-3 w-3" />
-                                </button>
-                                <button className="flex items-center gap-1 rounded-lg border border-amber-200 px-2 py-1 text-[10px] font-black text-amber-600 hover:bg-amber-50">
-                                  <Flag className="h-3 w-3" />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                      <tfoot className="bg-slate-50 sticky bottom-0">
-                        <tr>
-                          <td className="px-3 py-2 font-black text-slate-700" colSpan={2}>
-                            الإجمالي
-                          </td>
-                          <td className="px-3 py-2 font-black text-slate-900 font-mono">
-                            {fmt(txTotal)} ج.م
-                          </td>
-                          <td colSpan={3} />
-                        </tr>
-                      </tfoot>
-                    </table>
-                  )}
-                </div>
-              </div>
-
-              {/* Day Close Section — today open only */}
-              {isToday && !isClosed && (
-                <div className="rounded-xl bg-white border border-slate-200 shadow-sm shrink-0 mb-4">
-                  <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2">
-                    <Lock className="h-4 w-4 text-slate-500" />
-                    <h3 className="text-[13px] font-black text-slate-700">إغلاق اليوم</h3>
-                  </div>
-                  <div className="p-5 grid grid-cols-2 gap-6">
-                    {/* Left: actual cash + discrepancy */}
-                    <div className="space-y-3">
-                      <div>
-                        <label className="text-[11px] font-black text-slate-600 block mb-1">
-                          الرصيد الفعلي (ج.م)
-                        </label>
-                        <div className="flex gap-2">
-                          <input
-                            type="number"
-                            value={actualCash}
-                            onChange={(e) => setActualCash(e.target.value)}
-                            className="flex-1 h-11 rounded-xl border border-slate-300 px-4 text-[15px] font-black outline-none focus:border-emerald-500 text-center"
-                            placeholder="0.00"
-                          />
-                          <button
-                            onClick={() => setMoneyOpen(true)}
-                            className="h-11 rounded-xl border border-blue-200 bg-blue-50 px-3 text-[11px] font-black text-blue-700 hover:bg-blue-100"
-                          >
-                            <Calculator className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </div>
-                      {actualCash && (
-                        <div className={`text-center rounded-xl py-3 text-[13px] font-black ${Number(actualCash) - expected >= 0 ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
-                          الفرق: {Number(actualCash) - expected >= 0 ? "+" : ""}{fmt(Number(actualCash) - expected)} ج.م
-                        </div>
-                      )}
-                      <div>
-                        <label className="text-[11px] font-black text-slate-600 block mb-1">ملاحظات</label>
-                        <textarea
-                          value={closeNotes}
-                          onChange={(e) => setCloseNotes(e.target.value)}
-                          className="w-full h-16 rounded-xl border border-slate-300 px-3 py-2 text-[12px] outline-none resize-none focus:border-slate-400"
-                          placeholder="ملاحظات اختيارية..."
-                        />
-                      </div>
-                      <button
-                        onClick={handleClose}
-                        disabled={!actualCash || closing}
-                        className="w-full rounded-xl bg-slate-900 py-3 text-[14px] font-black text-white hover:bg-slate-800 disabled:opacity-40 transition-colors"
-                      >
-                        {closing ? "جاري الإغلاق..." : "إغلاق اليوم"}
-                      </button>
-                    </div>
-
-                    {/* Right: withdrawals list */}
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-[11px] font-black text-slate-600">المسحوبات اليومية</span>
+                  {/* Transaction Explorer */}
+                  <div className="rounded-2xl bg-white/80 backdrop-blur-xl border border-slate-200/60 shadow-sm flex flex-col overflow-hidden" style={{ minHeight: 350 }}>
+                    {/* Tab bar */}
+                    <div className="flex items-center gap-1.5 border-b border-slate-100/80 px-3 py-2 overflow-x-auto scrollbar-hide">
+                      {TABS.map((t) => (
                         <button
-                          onClick={() => setWdOpen(true)}
-                          className="flex items-center gap-1 rounded-lg bg-slate-800 px-2 py-1 text-[10px] font-black text-white hover:bg-slate-700"
+                          key={t.id}
+                          onClick={() => { setActiveTab(t.id); setGlobalAmountSearch(""); }}
+                          className={`shrink-0 px-3 py-1.5 rounded-xl text-[11px] font-black transition-all ${
+                            activeTab === t.id ? "bg-zinc-900 text-white shadow-md shadow-zinc-900/20" : "text-slate-500 hover:bg-slate-100"
+                          }`}
                         >
-                          <Plus className="h-3 w-3" /> إضافة
+                          {t.label}
                         </button>
+                      ))}
+                      <div className="flex items-center gap-2 mr-auto shrink-0 pr-3">
+                        <div className="relative">
+                          <Filter className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400" />
+                          <select
+                            value={txSort}
+                            onChange={(e) => setTxSort(e.target.value)}
+                            className="h-8 rounded-lg bg-slate-50 border border-slate-200 pl-3 pr-8 text-[11px] font-black outline-none text-slate-600 focus:border-zinc-400 appearance-none cursor-pointer"
+                          >
+                            <option value="time_desc">الأحدث أولاً</option>
+                            <option value="time_asc">الأقدم أولاً</option>
+                            <option value="amount_desc">المبلغ (تنازلي)</option>
+                            <option value="amount_asc">المبلغ (تصاعدي)</option>
+                          </select>
+                        </div>
                       </div>
-                      {wdList.length === 0 ? (
-                        <div className="flex items-center justify-center h-20 rounded-xl border border-dashed border-slate-200 text-slate-300 text-[12px] font-black">
-                          لا توجد مسحوبات
+                    </div>
+
+                    {/* Table */}
+                    <div className="flex-1 overflow-y-auto relative p-2">
+                      {txLoading ? (
+                        <div className="flex items-center justify-center h-full min-h-[300px]">
+                          <RefreshCw className="h-6 w-6 animate-spin text-slate-300" />
+                        </div>
+                      ) : sortedTransactions.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-slate-400 gap-3">
+                          <FileText className="h-10 w-10 text-slate-200" />
+                          <span className="text-[13px] font-black">لا توجد حركات مسجلة في هذا التبويب</span>
                         </div>
                       ) : (
-                        <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                          {wdList.map((w, i) => (
-                            <div key={i} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
-                              <span className="text-[11px] text-slate-600">{w.description || "مسحوبات"}</span>
-                              <span className="text-[12px] font-black text-rose-700 font-mono">{fmt(w.amount)} ج.م</span>
-                            </div>
-                          ))}
-                          <div className="flex items-center justify-between rounded-lg bg-rose-50 px-3 py-2">
-                            <span className="text-[11px] font-black text-rose-700">الإجمالي</span>
-                            <span className="text-[12px] font-black text-rose-700 font-mono">
-                              {fmt(wdList.reduce((s, w) => s + Number(w.amount || 0), 0))} ج.م
-                            </span>
-                          </div>
-                        </div>
+                        <table className="w-full text-right border-collapse">
+                          <thead className="sticky top-0 z-10 bg-white/95 backdrop-blur-xl shadow-[0_1px_0_0_#f1f5f9]">
+                            <tr>
+                              {["الكود", "النوع", "المبلغ", "الطرف / الوصف", "الوقت", "إجراءات"].map((h, i) => (
+                                <th key={h} className={`px-3 py-3 text-[10px] font-black uppercase text-slate-400 tracking-widest select-none ${i===0?'rounded-tr-xl':''} ${i===5?'rounded-tl-xl':''}`}>
+                                  {h}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-50">
+                            <AnimatePresence>
+                              {sortedTransactions.map((t) => (
+                                <motion.tr 
+                                  key={t.id}
+                                  layout
+                                  initial={{ opacity: 0, x: 20 }}
+                                  animate={{ opacity: 1, x: 0 }}
+                                  exit={{ opacity: 0, scale: 0.95 }}
+                                  whileHover={{ x: -2, backgroundColor: "rgba(248,250,252,0.8)" }}
+                                  className="group transition-colors relative"
+                                >
+                                  <td className="px-3 py-3 font-black text-slate-500 text-[11px] tracking-wider">{t.doc_no || `#${t.id}`}</td>
+                                  <td className="px-3 py-3">
+                                    <span className={`inline-flex items-center justify-center rounded-lg border px-2 py-0.5 text-[9px] font-black ${DOC_TYPE_COLOR[t.doc_type] || "text-slate-600 bg-slate-100 border-slate-200"}`}>
+                                      {DOC_TYPE_LABEL[t.doc_type] || t.doc_type}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-3 font-black text-zinc-950 font-mono text-[12px]">{fmt(t.amount)}</td>
+                                  <td className="px-3 py-3 text-slate-600 text-[11px] font-bold max-w-[180px] truncate">
+                                    {t.party || t.description || "—"}
+                                  </td>
+                                  <td className="px-3 py-3 text-slate-400 text-[10px] whitespace-nowrap font-medium">
+                                    {t.created_at
+                                      ? new Date(t.created_at).toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })
+                                      : "—"}
+                                  </td>
+                                  <td className="px-3 py-3">
+                                    <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <button
+                                        onClick={() => setSlideOver(t)}
+                                        className="flex h-7 w-7 items-center justify-center rounded-lg bg-white border border-slate-200 text-slate-600 hover:text-zinc-900 hover:bg-slate-50 shadow-sm transition-all"
+                                        title="عرض التفاصيل"
+                                      >
+                                        <ExternalLink className="h-3 w-3" />
+                                      </button>
+                                      <button
+                                        onClick={handlePrint}
+                                        className="flex h-7 w-7 items-center justify-center rounded-lg bg-white border border-slate-200 text-slate-600 hover:text-blue-600 hover:bg-blue-50 shadow-sm transition-all"
+                                        title="طباعة"
+                                      >
+                                        <Printer className="h-3 w-3" />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </motion.tr>
+                              ))}
+                            </AnimatePresence>
+                          </tbody>
+                          <tfoot className="sticky bottom-0 bg-white/95 backdrop-blur-xl shadow-[0_-1px_0_0_#f1f5f9]">
+                            <tr>
+                              <td className="px-3 py-3 font-black text-slate-500 uppercase tracking-widest text-[10px]" colSpan={2}>
+                                الإجمالي للتبويب الحالي
+                              </td>
+                              <td className="px-3 py-3 font-black text-zinc-950 font-mono text-[13px]">
+                                {fmt(txTotal)} ج.م
+                              </td>
+                              <td colSpan={3} />
+                            </tr>
+                          </tfoot>
+                        </table>
                       )}
                     </div>
                   </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      </div>
+                </motion.div>
 
-      {/* ── Slide-over Panel ── */}
-      {slideOver && (
-        <div className="fixed inset-0 z-50 flex justify-start" dir="rtl">
-          <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setSlideOver(null)} />
-          <div className="relative w-[420px] h-full bg-white shadow-2xl flex flex-col animate-slide-in-right">
-            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-              <div>
-                <h2 className="text-[15px] font-black text-slate-900">
-                  {DOC_TYPE_LABEL[slideOver.doc_type] || "مستند"}
-                </h2>
-                <p className="text-[11px] text-slate-400 font-bold">{slideOver.doc_no || `#${slideOver.id}`}</p>
-              </div>
-              <button onClick={() => setSlideOver(null)} className="text-slate-400 hover:text-slate-700">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-5 space-y-4">
-              <div className="rounded-xl bg-slate-50 p-4 space-y-3">
-                {[
-                  { label: "المبلغ", value: `${fmt(slideOver.amount)} ج.م` },
-                  { label: "الطرف", value: slideOver.party || "—" },
-                  { label: "الوصف", value: slideOver.description || slideOver.notes || "—" },
-                  { label: "النوع", value: DOC_TYPE_LABEL[slideOver.doc_type] || slideOver.doc_type },
-                  {
-                    label: "الوقت",
-                    value: slideOver.created_at
-                      ? new Date(slideOver.created_at).toLocaleString("ar-EG")
-                      : "—",
-                  },
-                ].map(({ label, value }) => (
-                  <div key={label} className="flex items-start justify-between gap-4">
-                    <span className="text-[11px] font-black text-slate-400 shrink-0">{label}</span>
-                    <span className="text-[13px] font-bold text-slate-800 text-left">{value}</span>
-                  </div>
-                ))}
-              </div>
-              <div className={`rounded-xl px-4 py-3 text-center text-[20px] font-black font-mono ${DOC_TYPE_COLOR[slideOver.doc_type] || ""}`}>
-                {fmt(slideOver.amount)} ج.م
-              </div>
-            </div>
-            <div className="border-t border-slate-100 p-4">
-              <button
-                onClick={() => window.print()}
-                className="w-full flex items-center justify-center gap-2 rounded-xl bg-slate-800 py-3 text-[13px] font-black text-white hover:bg-slate-700"
-              >
-                <Printer className="h-4 w-4" /> طباعة المستند
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── History Drawer ── */}
-      {historyOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end" dir="rtl">
-          <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setHistoryOpen(false)} />
-          <div className="relative w-[340px] h-full bg-white shadow-2xl flex flex-col">
-            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-              <h2 className="text-[15px] font-black text-slate-900">أيام سابقة</h2>
-              <button onClick={() => setHistoryOpen(false)} className="text-slate-400 hover:text-slate-700">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto">
-              {pastSessions.map((s) => (
-                <button
-                  key={s.id}
-                  onClick={() => { setDate(s.date); setHistoryOpen(false); }}
-                  className={`w-full flex items-center justify-between px-5 py-3.5 border-b border-slate-50 hover:bg-slate-50 text-right ${date === s.date ? "bg-emerald-50" : ""}`}
-                >
-                  <div>
-                    <div className="text-[13px] font-black text-slate-800">{s.date}</div>
-                    <div className="text-[11px] text-slate-400 font-bold mt-0.5">
-                      رصيد ختامي: {fmt(s.closing_balance)} ج.م
+                {/* Left Area: Equation & Close Day (4 columns) */}
+                <motion.div variants={fadeInUp} className="xl:col-span-4 flex flex-col gap-6 sticky top-6">
+                  
+                  {/* Equation Card */}
+                  <div className="rounded-[2.5rem] bg-white/80 backdrop-blur-xl border border-slate-200/60 shadow-[0_20px_40px_-15px_rgba(0,0,0,0.05)] flex flex-col overflow-hidden">
+                    <div className="px-8 py-5 border-b border-slate-100/80 flex items-center gap-3 bg-slate-50/50">
+                      <div className="h-8 w-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center ring-1 ring-inset ring-indigo-100">
+                        <Calculator className="h-4 w-4" />
+                      </div>
+                      <h3 className="text-[15px] font-black text-zinc-900 tracking-tight">معادلة الخزينة</h3>
+                    </div>
+                    <div className="p-8 space-y-2">
+                      {[
+                        { label: "الرصيد الافتتاحي", value: summary?.opening_balance, tab: null, locked: true },
+                        { label: "+ مبيعات POS (نقدي)", value: summary?.pos_cash_sales, tab: "pos" },
+                        { label: "- مشتريات", value: summary?.purchases_cash, tab: "purchases", negative: true },
+                        { label: "- مصروفات", value: summary?.expenses_cash, tab: "expenses", negative: true },
+                        { label: "+ إيرادات", value: summary?.revenues_cash, tab: "revenues" },
+                        { label: "+ مدفوعات عملاء (نقدي)", value: summary?.customer_payments, tab: "customer_payments" },
+                        { label: "- مسحوبات", value: summary?.withdrawals, tab: "withdrawals", negative: true },
+                      ].map(({ label, value, tab, locked, negative }) => (
+                        <div
+                          key={label}
+                          onClick={() => { if (tab) { setActiveTab(tab); setGlobalAmountSearch(""); } }}
+                          className={`flex items-center justify-between py-2.5 px-3 rounded-2xl transition-colors ${tab ? "cursor-pointer hover:bg-slate-50" : ""}`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            {locked ? <Lock className="h-3.5 w-3.5 text-slate-300" /> : <div className="h-1.5 w-1.5 rounded-full bg-slate-200" />}
+                            <span className="text-[13px] text-slate-600 font-bold">{label}</span>
+                          </div>
+                          <span className={`font-black text-[13px] font-mono ${negative && value > 0 ? "text-rose-600" : "text-zinc-800"}`}>
+                            {fmt(value)}
+                          </span>
+                        </div>
+                      ))}
+                      <div className="border-t border-slate-200/80 pt-4 mt-4 flex items-center justify-between px-2">
+                        <span className="text-[13px] font-black text-slate-500 uppercase tracking-widest">المتوقع في الخزينة</span>
+                        <span className="text-[22px] font-black font-mono text-emerald-600">{fmt(expected)} <span className="text-[12px] text-slate-400">ج.م</span></span>
+                      </div>
+                      
+                      {sess.actual_cash != null && (
+                        <motion.div 
+                          initial={{ opacity: 0, scale: 0.95 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          className={`flex flex-col rounded-2xl p-4 mt-4 border ${discrepancy >= 0 ? "bg-emerald-50/50 border-emerald-100" : "bg-rose-50/50 border-rose-100"}`}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-black text-[12px] text-slate-600">الرصيد الفعلي المدخل</span>
+                            <span className={`font-black text-[18px] font-mono ${discrepancy >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
+                              {fmt(sess.actual_cash)}
+                            </span>
+                          </div>
+                          <div className={`font-black text-[11px] ${discrepancy >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                            الفرق الجردي: {discrepancy >= 0 ? "+" : ""}{fmt(discrepancy)} ج.م
+                          </div>
+                        </motion.div>
+                      )}
                     </div>
                   </div>
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${s.status === "closed" ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"}`}>
-                    {s.status === "closed" ? "مغلق" : "مفتوح"}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
 
-      {/* ── Quick Expense/Revenue Modal ── */}
-      {quickModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="w-[380px] rounded-2xl bg-white shadow-2xl p-6" dir="rtl">
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-[16px] font-black text-slate-900">
-                {quickModal === "expense" ? "➕ مصروف سريع" : "➕ إيراد سريع"}
-              </h2>
-              <button onClick={() => setQuickModal(null)} className="text-slate-400 hover:text-slate-700">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="space-y-3">
-              <input
-                type="number"
-                value={quickAmount}
-                onChange={(e) => setQuickAmount(e.target.value)}
-                autoFocus
-                placeholder="المبلغ (ج.م)"
-                className="w-full h-12 rounded-xl border border-slate-300 px-4 text-[16px] font-black outline-none focus:border-emerald-500 text-center"
-              />
-              <input
-                type="text"
-                value={quickNote}
-                onChange={(e) => setQuickNote(e.target.value)}
-                placeholder="الوصف / الملاحظة"
-                className="w-full h-10 rounded-xl border border-slate-300 px-4 text-[13px] outline-none focus:border-slate-400"
-              />
-              <button
-                onClick={handleQuickSave}
-                disabled={!quickAmount}
-                className={`w-full rounded-xl py-3 text-[14px] font-black text-white transition-colors disabled:opacity-40 ${
-                  quickModal === "expense" ? "bg-rose-600 hover:bg-rose-700" : "bg-emerald-600 hover:bg-emerald-700"
-                }`}
-              >
-                حفظ
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+                  {/* Day Close Section */}
+                  {isToday && !isClosed && (
+                    <div className="rounded-[2.5rem] bg-white/80 backdrop-blur-xl border border-slate-200/60 shadow-[0_20px_40px_-15px_rgba(0,0,0,0.05)] flex flex-col overflow-hidden">
+                      <div className="px-8 py-5 border-b border-slate-100/80 flex items-center gap-3 bg-slate-50/50">
+                        <div className="h-8 w-8 rounded-xl bg-slate-800 text-white flex items-center justify-center">
+                          <Lock className="h-4 w-4" />
+                        </div>
+                        <h3 className="text-[15px] font-black text-zinc-900 tracking-tight">إغلاق الجلسة</h3>
+                      </div>
+                      <div className="p-8 flex flex-col gap-6">
+                        <div className="space-y-4">
+                          <div className="flex flex-col gap-2 relative group">
+                            <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">
+                              الرصيد الفعلي (ج.م)
+                            </label>
+                            <div className="flex gap-2">
+                              <div className="relative flex-1">
+                                <input
+                                  type="number"
+                                  value={actualCash}
+                                  onChange={(e) => setActualCash(e.target.value)}
+                                  className="w-full h-14 bg-white rounded-2xl px-4 text-[18px] font-black text-zinc-900 outline-none transition-all placeholder:text-slate-300 border border-slate-200 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 text-center font-mono"
+                                  placeholder="0.00"
+                                />
+                              </div>
+                              <SmartTooltip content="فتح آلة عد العملات النقدية">
+                                <motion.button
+                                  whileHover={{ y: -1 }}
+                                  whileTap={{ scale: 0.95 }}
+                                  onClick={() => setMoneyOpen(true)}
+                                  className="h-14 w-14 flex shrink-0 items-center justify-center rounded-2xl border border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors shadow-sm"
+                                >
+                                  <Coins className="h-5 w-5" />
+                                </motion.button>
+                              </SmartTooltip>
+                            </div>
+                          </div>
+                          
+                          {actualCash && (
+                            <motion.div 
+                              initial={{ opacity: 0, y: -10 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              className={`text-center rounded-2xl py-3 px-4 text-[13px] font-black border ${Number(actualCash) - expected >= 0 ? "bg-emerald-50 border-emerald-100 text-emerald-700" : "bg-rose-50 border-rose-100 text-rose-700"}`}
+                            >
+                              الفرق: {Number(actualCash) - expected >= 0 ? "+" : ""}{fmt(Number(actualCash) - expected)} ج.م
+                            </motion.div>
+                          )}
+                          
+                          <div className="flex flex-col gap-2">
+                            <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">ملاحظات الإغلاق</label>
+                            <textarea
+                              value={closeNotes}
+                              onChange={(e) => setCloseNotes(e.target.value)}
+                              className="w-full h-20 rounded-2xl bg-white border border-slate-200 px-4 py-3 text-[13px] font-bold text-zinc-800 outline-none resize-none focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 placeholder:text-slate-300 transition-all"
+                              placeholder="أضف أي ملاحظات تبرر العجز أو الزيادة..."
+                            />
+                          </div>
+                        </div>
 
-      {/* ── Withdrawal Modal ── */}
-      {wdOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="w-[380px] rounded-2xl bg-white shadow-2xl p-6" dir="rtl">
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-[16px] font-black text-slate-900">إضافة مسحوبات</h2>
-              <button onClick={() => setWdOpen(false)} className="text-slate-400 hover:text-slate-700">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="space-y-3">
-              <input
-                type="number"
-                value={wdAmount}
-                onChange={(e) => setWdAmount(e.target.value)}
-                autoFocus
-                placeholder="المبلغ (ج.م)"
-                className="w-full h-12 rounded-xl border border-slate-300 px-4 text-[16px] font-black outline-none focus:border-slate-800 text-center"
-              />
-              <input
-                type="text"
-                value={wdNote}
-                onChange={(e) => setWdNote(e.target.value)}
-                placeholder="السبب / الملاحظة"
-                className="w-full h-10 rounded-xl border border-slate-300 px-4 text-[13px] outline-none"
-              />
-              <button
-                onClick={handleWithdrawal}
-                disabled={!wdAmount}
-                className="w-full rounded-xl bg-slate-800 py-3 text-[14px] font-black text-white hover:bg-slate-700 disabled:opacity-40"
-              >
-                تسجيل المسحوبات
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Money Count Modal ── */}
-      {moneyOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="w-[440px] rounded-2xl bg-white shadow-2xl p-6 max-h-[90vh] overflow-y-auto" dir="rtl">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-[16px] font-black text-slate-900">🧮 عد العملة</h2>
-              <button onClick={() => setMoneyOpen(false)} className="text-slate-400 hover:text-slate-700">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="rounded-xl bg-slate-50 p-3 mb-4">
-              <div className="grid grid-cols-3 text-[10px] font-black text-slate-400 uppercase tracking-wider mb-2 px-2">
-                <span>الفئة</span>
-                <span className="text-center">العدد</span>
-                <span className="text-left">المجموع</span>
+                        <motion.button
+                          whileHover={{ y: -2 }}
+                          whileTap={{ scale: 0.98 }}
+                          onClick={handleClose}
+                          disabled={!actualCash || closing}
+                          className="w-full rounded-2xl bg-zinc-950 py-4 text-[15px] font-black text-white hover:bg-zinc-800 disabled:opacity-40 transition-all shadow-xl shadow-zinc-950/20"
+                        >
+                          {closing ? "جاري الإغلاق والتشفير..." : "إغلاق اليومية واعتماد الأرصدة"}
+                        </motion.button>
+                      </div>
+                    </div>
+                  )}
+                </motion.div>
               </div>
-              {DENOMS.map((d) => (
-                <div key={d} className="grid grid-cols-3 items-center gap-2 mb-2">
-                  <span className="text-[13px] font-black text-slate-700">
-                    {d >= 1 ? `${d} ج.م` : `${d * 100} قرش`}
-                  </span>
+            </>
+          )}
+        </motion.div>
+      </main>
+
+      {/* ── Modals & Drawers ── */}
+
+      {/* Detail Modal */}
+      <AnimatePresence>
+        {slideOver && (
+          <motion.div 
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 p-4 overflow-y-auto" dir="rtl"
+          >
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }} 
+              animate={{ opacity: 1, scale: 1, y: 0 }} 
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              transition={{ type: "spring", stiffness: 300, damping: 25 }}
+              className="relative w-full max-w-xl bg-white shadow-2xl rounded-[2rem] flex flex-col overflow-hidden my-20 mx-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 bg-slate-50/50">
+                <div>
+                  <h2 className="text-[16px] font-black text-zinc-900">
+                    {DOC_TYPE_LABEL[slideOver.doc_type] || "مستند مالية"}
+                  </h2>
+                  <p className="text-[11px] text-slate-400 font-bold font-mono tracking-wider mt-0.5">{slideOver.doc_no || `#${slideOver.id}`}</p>
+                </div>
+                <button onClick={() => setSlideOver(null)} className="h-8 w-8 flex items-center justify-center rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-zinc-900 hover:bg-slate-50 transition-colors shadow-sm">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-5 bg-[#fafafa]">
+                <div className="rounded-2xl bg-white border border-slate-200/60 shadow-sm overflow-hidden">
+                  <div className={`p-4 text-center border-b border-slate-100 ${DOC_TYPE_COLOR[slideOver.doc_type] || "bg-white"}`}>
+                    <div className="text-[10px] font-black uppercase tracking-widest opacity-60 mb-1">القيمة</div>
+                    <div className="text-[28px] font-black font-mono leading-none tracking-tighter">
+                      {fmt(slideOver.amount)}
+                    </div>
+                    <div className="text-[10px] font-bold mt-1 opacity-70">جنيه مصري</div>
+                  </div>
+                  <div className="p-2">
+                    {[
+                      { label: "الطرف ذو الصلة", value: slideOver.party || "—" },
+                      { label: "الوصف / البيان", value: slideOver.description || slideOver.notes || "—" },
+                      { label: "التصنيف", value: DOC_TYPE_LABEL[slideOver.doc_type] || slideOver.doc_type },
+                      {
+                        label: "تاريخ ووقت التسجيل",
+                        value: slideOver.created_at
+                          ? new Date(slideOver.created_at).toLocaleString("ar-EG")
+                          : "—",
+                      },
+                    ].map(({ label, value }) => (
+                      <div key={label} className="flex items-center justify-between gap-4 rounded-lg px-3 py-2.5 hover:bg-slate-50 transition-colors">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest shrink-0">{label}</span>
+                        <span className="text-[12px] font-bold text-zinc-900 text-right truncate">{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="border-t border-slate-100 p-3 bg-white">
+                <motion.button
+                  whileHover={{ y: -2 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={handlePrint}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-zinc-950 py-2.5 text-[12px] font-black text-white hover:bg-zinc-800 shadow-lg shadow-zinc-950/20"
+                >
+                  <Printer className="h-3.5 w-3.5" /> طباعة إيصال المستند
+                </motion.button>
+              </div>
+            </motion.div>
+            <div 
+              className="fixed inset-0 -z-10 bg-slate-900/50 backdrop-blur-md" 
+              onClick={() => setSlideOver(null)} 
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* History Drawer */}
+      <AnimatePresence>
+        {historyOpen && (
+          <div className="fixed inset-0 z-50 flex justify-end" dir="rtl">
+            <motion.div 
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" 
+              onClick={() => setHistoryOpen(false)} 
+            />
+            <motion.div 
+              initial={{ x: "-100%", opacity: 0.5 }} 
+              animate={{ x: 0, opacity: 1 }} 
+              exit={{ x: "-100%", opacity: 0.5 }}
+              transition={{ type: "spring", stiffness: 300, damping: 30 }}
+              className="relative w-[380px] max-w-full h-full bg-white shadow-2xl flex flex-col"
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5 bg-slate-50/50">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100">
+                    <History className="h-5 w-5" />
+                  </div>
+                  <h2 className="text-[18px] font-black text-zinc-900">سجل الأيام السابقة</h2>
+                </div>
+                <button onClick={() => setHistoryOpen(false)} className="h-10 w-10 flex items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-400 hover:text-zinc-900 hover:bg-slate-50 transition-colors shadow-sm">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-[#fafafa]">
+                {pastSessions.map((s) => (
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    key={s.id}
+                    onClick={() => { setDate(s.date); setHistoryOpen(false); }}
+                    className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all text-right ${date === s.date ? "bg-emerald-50 border-emerald-200 shadow-md shadow-emerald-100" : "bg-white border-slate-200/60 shadow-sm hover:shadow-md"}`}
+                  >
+                    <div>
+                      <div className="text-[14px] font-black text-zinc-900 flex items-center gap-2">
+                        <Calendar className="h-4 w-4 text-slate-400" />
+                        {s.date}
+                      </div>
+                      <div className="text-[12px] text-slate-500 font-bold mt-2 flex items-center gap-2">
+                        <Wallet className="h-3 w-3" />
+                        الختامي: <span className="font-mono text-zinc-800">{fmt(s.closing_balance)}</span> ج.م
+                      </div>
+                    </div>
+                    <span className={`rounded-xl px-3 py-1.5 text-[11px] font-black flex items-center gap-1.5 ${s.status === "closed" ? "bg-slate-100 text-slate-600 border border-slate-200" : "bg-emerald-100 text-emerald-700 border border-emerald-200"}`}>
+                      {s.status === "closed" ? <Lock className="h-3 w-3"/> : <CheckCircle2 className="h-3 w-3"/>}
+                      {s.status === "closed" ? "مغلق" : "مفتوح"}
+                    </span>
+                  </motion.button>
+                ))}
+                {pastSessions.length === 0 && (
+                  <div className="flex flex-col items-center justify-center h-40 text-slate-400 gap-3">
+                    <History className="h-8 w-8 text-slate-200" />
+                    <span className="text-[13px] font-black">لا توجد جلسات سابقة مسجلة</span>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Quick Modal (Expense/Revenue) */}
+      <AnimatePresence>
+        {quickModal && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" 
+              onClick={() => setQuickModal(null)} 
+            />
+            <motion.div 
+              variants={modalVariants} initial="hidden" animate="show" exit="exit"
+              className="relative w-full max-w-[420px] rounded-[2.5rem] bg-white shadow-2xl p-8 border border-slate-100" dir="rtl"
+            >
+              <div className="flex items-center justify-between mb-8">
+                <div className="flex items-center gap-3">
+                  <div className={`h-12 w-12 rounded-2xl flex items-center justify-center border ${quickModal === "expense" ? "bg-rose-50 text-rose-600 border-rose-100" : "bg-emerald-50 text-emerald-600 border-emerald-100"}`}>
+                    {quickModal === "expense" ? <TrendingDown className="h-6 w-6" /> : <TrendingUp className="h-6 w-6" />}
+                  </div>
+                  <div>
+                    <h2 className="text-[20px] font-black text-zinc-900 leading-tight">
+                      {quickModal === "expense" ? "تسجيل مصروف" : "تسجيل إيراد"}
+                    </h2>
+                    <p className="text-[11px] font-bold text-slate-400 mt-1 uppercase tracking-widest">Quick Entry</p>
+                  </div>
+                </div>
+                <button onClick={() => setQuickModal(null)} className="h-10 w-10 flex items-center justify-center rounded-xl bg-slate-50 text-slate-400 hover:text-zinc-900 hover:bg-slate-100 transition-colors">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="space-y-5">
+                <div className="flex flex-col gap-2">
+                  <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">القيمة (ج.م)</label>
                   <input
                     type="number"
-                    min="0"
-                    value={counts[d] || ""}
-                    onChange={(e) => setCounts((p) => ({ ...p, [d]: e.target.value }))}
-                    className="h-9 rounded-lg border border-slate-300 px-2 text-center text-[13px] font-black outline-none focus:border-emerald-500"
-                    placeholder="0"
+                    value={quickAmount}
+                    onChange={(e) => setQuickAmount(e.target.value)}
+                    autoFocus
+                    placeholder="0.00"
+                    className="w-full h-14 rounded-2xl bg-slate-50 border border-slate-200 px-4 text-[20px] font-black font-mono outline-none focus:border-zinc-400 focus:bg-white focus:ring-4 focus:ring-zinc-900/5 text-center transition-all shadow-inner"
                   />
-                  <span className="text-[13px] font-mono text-slate-600 text-left">
-                    {fmt(Number(counts[d] || 0) * d)}
-                  </span>
                 </div>
-              ))}
-            </div>
-            <div className="flex items-center justify-between rounded-xl bg-emerald-50 border border-emerald-200 p-4 mb-4">
-              <span className="font-black text-emerald-800 text-[14px]">الإجمالي</span>
-              <span className="text-[22px] font-black font-mono text-emerald-700">{fmt(moneyTotal)} ج.م</span>
-            </div>
-            <button
-              onClick={() => { setActualCash(String(moneyTotal)); setMoneyOpen(false); }}
-              className="w-full rounded-xl bg-emerald-600 py-3 text-[14px] font-black text-white hover:bg-emerald-700"
-            >
-              تأكيد وتعبئة الرصيد الفعلي
-            </button>
+                <div className="flex flex-col gap-2">
+                  <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">البيان / الوصف</label>
+                  <input
+                    type="text"
+                    value={quickNote}
+                    onChange={(e) => setQuickNote(e.target.value)}
+                    placeholder="سبب المعاملة..."
+                    className="w-full h-12 rounded-2xl bg-white border border-slate-200 px-4 text-[14px] font-bold text-zinc-800 outline-none focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 transition-all"
+                  />
+                </div>
+                <div className="pt-4">
+                  <motion.button
+                    whileHover={{ y: -2 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={handleQuickSave}
+                    disabled={!quickAmount}
+                    className={`w-full h-14 flex items-center justify-center gap-2 rounded-2xl text-[15px] font-black text-white transition-all shadow-xl disabled:opacity-40 ${
+                      quickModal === "expense" ? "bg-rose-600 hover:bg-rose-700 shadow-rose-600/20" : "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20"
+                    }`}
+                  >
+                    <CheckCircle2 className="h-5 w-5" /> حفظ واعتماد
+                  </motion.button>
+                </div>
+              </div>
+            </motion.div>
           </div>
-        </div>
+        )}
+      </AnimatePresence>
+
+      {/* Withdrawal Modal */}
+      <AnimatePresence>
+        {wdOpen && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" 
+              onClick={() => setWdOpen(false)} 
+            />
+            <motion.div 
+              variants={modalVariants} initial="hidden" animate="show" exit="exit"
+              className="relative w-full max-w-[420px] rounded-[2.5rem] bg-white shadow-2xl p-8 border border-slate-100" dir="rtl"
+            >
+              <div className="flex items-center justify-between mb-8">
+                <div className="flex items-center gap-3">
+                  <div className="h-12 w-12 rounded-2xl bg-slate-900 text-white flex items-center justify-center shadow-lg shadow-slate-900/20">
+                    <Banknote className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-[20px] font-black text-zinc-900 leading-tight">تسجيل مسحوبات</h2>
+                    <p className="text-[11px] font-bold text-slate-400 mt-1 uppercase tracking-widest">Withdrawal</p>
+                  </div>
+                </div>
+                <button onClick={() => setWdOpen(false)} className="h-10 w-10 flex items-center justify-center rounded-xl bg-slate-50 text-slate-400 hover:text-zinc-900 hover:bg-slate-100 transition-colors">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="space-y-5">
+                <div className="flex flex-col gap-2">
+                  <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">مبلغ السحب (ج.م)</label>
+                  <input
+                    type="number"
+                    value={wdAmount}
+                    onChange={(e) => setWdAmount(e.target.value)}
+                    autoFocus
+                    placeholder="0.00"
+                    className="w-full h-14 rounded-2xl bg-slate-50 border border-slate-200 px-4 text-[20px] font-black font-mono outline-none focus:border-zinc-400 focus:bg-white focus:ring-4 focus:ring-zinc-900/5 text-center transition-all shadow-inner"
+                  />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">البيان / المسحوب له</label>
+                  <input
+                    type="text"
+                    value={wdNote}
+                    onChange={(e) => setWdNote(e.target.value)}
+                    placeholder="توضيح السبب..."
+                    className="w-full h-12 rounded-2xl bg-white border border-slate-200 px-4 text-[14px] font-bold text-zinc-800 outline-none focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 transition-all"
+                  />
+                </div>
+                <div className="pt-4">
+                  <motion.button
+                    whileHover={{ y: -2 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={handleWithdrawal}
+                    disabled={!wdAmount}
+                    className="w-full h-14 flex items-center justify-center gap-2 rounded-2xl bg-zinc-950 text-[15px] font-black text-white transition-all shadow-xl shadow-zinc-950/20 hover:bg-zinc-800 disabled:opacity-40"
+                  >
+                    <CheckCircle2 className="h-5 w-5" /> اعتماد السحب
+                  </motion.button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Money Count Modal */}
+      <AnimatePresence>
+        {moneyOpen && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" 
+              onClick={() => setMoneyOpen(false)} 
+            />
+            <motion.div 
+              variants={modalVariants} initial="hidden" animate="show" exit="exit"
+              className="relative w-full max-w-[480px] max-h-[90vh] overflow-hidden flex flex-col rounded-[2.5rem] bg-white shadow-2xl border border-slate-100" dir="rtl"
+            >
+              <div className="flex items-center justify-between p-6 border-b border-slate-100/80 bg-slate-50/50 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="h-12 w-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100">
+                    <Coins className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-[18px] font-black text-zinc-900 leading-tight">آلة الجرد الفعلي</h2>
+                    <p className="text-[11px] font-bold text-slate-400 mt-1 uppercase tracking-widest">Cash Register</p>
+                  </div>
+                </div>
+                <button onClick={() => setMoneyOpen(false)} className="h-10 w-10 flex items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-400 hover:text-zinc-900 hover:bg-slate-50 transition-colors shadow-sm">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                <div className="rounded-3xl bg-slate-50 border border-slate-200/60 p-4">
+                  <div className="grid grid-cols-3 text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 px-2">
+                    <span>الفئة النقدية</span>
+                    <span className="text-center">العدد</span>
+                    <span className="text-left">الإجمالي الفرعي</span>
+                  </div>
+                  <div className="space-y-2">
+                    {DENOMS.map((d) => (
+                      <div key={d} className="grid grid-cols-3 items-center gap-3 bg-white p-2 rounded-2xl border border-slate-100 shadow-sm transition-colors hover:border-blue-200">
+                        <span className="text-[14px] font-black text-slate-800 px-2 flex items-center gap-2">
+                          <Banknote className="h-4 w-4 text-emerald-500 opacity-50" />
+                          {d >= 1 ? `${d} ج` : `${d * 100} قرش`}
+                        </span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={counts[d] || ""}
+                          onChange={(e) => setCounts((p) => ({ ...p, [d]: e.target.value }))}
+                          className="h-10 rounded-xl bg-slate-50 border border-slate-200 px-3 text-center text-[15px] font-black font-mono outline-none focus:bg-white focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 transition-all"
+                          placeholder="0"
+                        />
+                        <span className="text-[15px] font-black font-mono text-slate-500 text-left px-2">
+                          {fmt(Number(counts[d] || 0) * d)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-6 border-t border-slate-100 bg-white shrink-0 space-y-4">
+                <div className="flex items-center justify-between rounded-2xl bg-emerald-50 border border-emerald-100 p-5 shadow-inner">
+                  <span className="font-black text-emerald-800 text-[14px] uppercase tracking-widest">مجموع الجرد الفعلي</span>
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-[28px] font-black font-mono text-emerald-700 tracking-tighter leading-none">{fmt(moneyTotal)}</span>
+                    <span className="text-[12px] font-bold text-emerald-600">ج.م</span>
+                  </div>
+                </div>
+                <motion.button
+                  whileHover={{ y: -2 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => { setActualCash(String(moneyTotal)); setMoneyOpen(false); }}
+                  className="w-full h-14 flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 text-[15px] font-black text-white hover:bg-emerald-700 shadow-xl shadow-emerald-600/20 transition-all"
+                >
+                  <CheckCircle2 className="h-5 w-5" /> ترحيل الرصيد للإغلاق
+                </motion.button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {printOpen && (
+        <PrintPreviewModal
+          open={printOpen}
+          onClose={() => setPrintOpen(false)}
+          docType="daily_treasury"
+          renderContent={(settings) => (
+            <div style={{ fontFamily: settings.print_font || "Cairo", direction: "rtl", padding: 24, fontSize: 12, color: "#1e293b" }}>
+              <div style={{ borderBottom: `3px solid ${settings.accent_color || "#0f172a"}`, paddingBottom: 16, marginBottom: 16 }}>
+                <div style={{ fontSize: 22, fontWeight: 900 }}>تقرير الخزينة اليومية</div>
+                <div style={{ color: "#64748b" }}>التاريخ: {date}</div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 16 }}>
+                <div style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 12 }}><strong>المتوقع</strong><br />{fmt(expected)} ج.م</div>
+                <div style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 12 }}><strong>الفعلية</strong><br />{fmt(actualCash || moneyTotal)} ج.م</div>
+                <div style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 12 }}><strong>الفروقات</strong><br />{fmt(discrepancy)} ج.م</div>
+                <div style={{ border: "1px solid #e2e8f0", borderRadius: 8, padding: 12 }}><strong>عدد الحركات</strong><br />{sortedTransactions.length}</div>
+              </div>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                <thead><tr style={{ background: settings.accent_color || "#0f172a", color: "white" }}>{["التاريخ", "النوع", "المرجع", "الطرف", "المبلغ"].map((h) => <th key={h} style={{ padding: 8, textAlign: "right" }}>{h}</th>)}</tr></thead>
+                <tbody>{sortedTransactions.map((tx, i) => (
+                  <tr key={`${tx.doc_type}-${tx.id}-${i}`} style={{ background: i % 2 ? "white" : "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
+                    <td style={{ padding: 8 }}>{tx.created_at?.slice(0, 10) || date}</td>
+                    <td style={{ padding: 8 }}>{DOC_TYPE_LABEL[tx.doc_type] || tx.doc_type}</td>
+                    <td style={{ padding: 8 }}>{tx.doc_no || `#${tx.id}`}</td>
+                    <td style={{ padding: 8 }}>{tx.party || tx.description || "—"}</td>
+                    <td style={{ padding: 8, fontWeight: 900 }}>{fmt(tx.amount)} ج.م</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          )}
+        />
       )}
     </div>
   );
