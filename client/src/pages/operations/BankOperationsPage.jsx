@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { Landmark, Plus, Minus, ArrowUpCircle, ArrowDownCircle, RefreshCw, X, List } from "lucide-react";
+import { Landmark, Plus, Minus, ArrowUpCircle, ArrowDownCircle, RefreshCw, X, List, ArrowLeftRight, AlertCircle, Printer } from "lucide-react";
 import api from "../../services/api";
 import toast from "react-hot-toast";
+import PrintPreviewModal from "../../components/print/PrintPreviewModal";
+import BankStatementTemplate from "../../components/print/templates/BankStatementTemplate";
 
 const fmt = (n) => Number(n || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2 });
 
@@ -28,7 +30,13 @@ function BankModal({ bank, mode, onClose, onDone }) {
             <h2 className="text-[15px] font-black text-slate-900">{mode === "deposit" ? "إيداع" : "سحب"}</h2>
             <p className="text-[11px] text-slate-400 font-bold">{bank.name}</p>
           </div>
-          <button onClick={onClose}><X className="h-5 w-5 text-slate-400" /></button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setPrintOpen(true)}
+              className="flex h-8 items-center gap-1.5 rounded-xl bg-slate-800 px-3 text-[11px] font-black text-white hover:bg-slate-900">
+              <Printer className="h-4 w-4" /> طباعة الكشف
+            </button>
+            <button onClick={onClose}><X className="h-5 w-5 text-slate-400" /></button>
+          </div>
         </div>
         <div className="space-y-4">
           <div>
@@ -51,6 +59,22 @@ function BankModal({ bank, mode, onClose, onDone }) {
             {saving ? "جاري..." : mode === "deposit" ? "تأكيد الإيداع" : "تأكيد السحب"}
           </button>
         </div>
+        {printOpen && (
+          <PrintPreviewModal
+            open={printOpen}
+            onClose={() => setPrintOpen(false)}
+            docType="bank_statement"
+            renderContent={(settings) => (
+              <BankStatementTemplate
+                bank={bank}
+                transactions={txs}
+                from={from}
+                to={to}
+                settings={settings}
+              />
+            )}
+          />
+        )}
       </div>
     </div>
   );
@@ -61,6 +85,7 @@ function StatementPanel({ bank, onClose }) {
   const [loading, setLoading] = useState(true);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [printOpen, setPrintOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -76,8 +101,17 @@ function StatementPanel({ bank, onClose }) {
 
   useEffect(() => { load(); }, [load]);
 
+  async function toggleReconcile(id, reconciled) {
+    try {
+      await api.patch(`/api/banks/transactions/${id}/reconcile`, { reconciled: reconciled ? 0 : 1 });
+      load();
+    } catch (e) {
+      toast.error(e.response?.data?.message || "خطأ في التسوية");
+    }
+  }
+
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-end bg-black/30">
+    <div className="fixed inset-0 z-50 flex items-end justify-start bg-black/30">
       <div className="w-[500px] h-full bg-white shadow-2xl flex flex-col">
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-indigo-50">
           <div>
@@ -101,7 +135,7 @@ function StatementPanel({ bank, onClose }) {
             <table className="w-full text-[12px]">
               <thead className="bg-slate-50 sticky top-0">
                 <tr>
-                  {["التاريخ", "النوع", "المبلغ", "المرجع"].map(h => (
+                  {["التاريخ", "النوع", "المبلغ", "المرجع", "التسوية"].map(h => (
                     <th key={h} className="px-4 py-2 text-right font-black text-slate-500 text-[11px] border-b border-slate-100">{h}</th>
                   ))}
                 </tr>
@@ -120,6 +154,15 @@ function StatementPanel({ bank, onClose }) {
                       {tx.type === "deposit" ? "+" : "-"}{fmt(tx.amount)}
                     </td>
                     <td className="px-4 py-2.5 text-slate-400 text-[11px]">{tx.reference || "—"}</td>
+                    <td className="px-4 py-2.5">
+                      <button
+                        onClick={() => toggleReconcile(tx.id, tx.reconciled)}
+                        className={`h-6 w-6 rounded-lg flex items-center justify-center text-[10px] font-black ${tx.reconciled ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-400"}`}
+                        title={tx.reconciled ? "مسوّى" : "غير مسوّى"}
+                      >
+                        {tx.reconciled ? "✓" : "○"}
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -137,7 +180,9 @@ export default function BankOperationsPage() {
   const [modal, setModal] = useState(null); // { bank, mode: 'deposit'|'withdraw' }
   const [statement, setStatement] = useState(null);
   const [newBankOpen, setNewBankOpen] = useState(false);
-  const [newBank, setNewBank] = useState({ name: "", code: "", balance: "" });
+  const [newBank, setNewBank] = useState({ name: "", code: "", balance: "", alert_threshold: "" });
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferForm, setTransferForm] = useState({ from_id: "", to_id: "", amount: "", notes: "" });
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -155,10 +200,32 @@ export default function BankOperationsPage() {
     if (!newBank.name) return;
     setSaving(true);
     try {
-      await api.post("/api/banks", { name: newBank.name, code: newBank.code, balance: Number(newBank.balance || 0) });
+      await api.post("/api/banks", { name: newBank.name, code: newBank.code, balance: Number(newBank.balance || 0), alert_threshold: Number(newBank.alert_threshold || 0) });
       toast.success("تم إضافة البنك");
-      setNewBankOpen(false); setNewBank({ name: "", code: "", balance: "" }); load();
+      setNewBankOpen(false); setNewBank({ name: "", code: "", balance: "", alert_threshold: "" }); load();
     } catch (e) { toast.error(e.response?.data?.message || "خطأ"); }
+    finally { setSaving(false); }
+  }
+
+  async function handleTransfer() {
+    if (Number(transferForm.amount) <= 0) return toast.error("المبلغ غير صحيح");
+    const fromBank = banks.find((bank) => bank.id === Number(transferForm.from_id));
+    if (fromBank && Number(transferForm.amount) > Number(fromBank.balance || 0)) {
+      return toast.error("رصيد الحساب غير كافٍ");
+    }
+    setSaving(true);
+    try {
+      await api.post("/api/banks/transfer", {
+        from_id: Number(transferForm.from_id),
+        to_id: Number(transferForm.to_id),
+        amount: Number(transferForm.amount),
+        notes: transferForm.notes,
+      });
+      toast.success("تم التحويل بنجاح");
+      setTransferOpen(false);
+      setTransferForm({ from_id: "", to_id: "", amount: "", notes: "" });
+      load();
+    } catch (e) { toast.error(e.response?.data?.message || "خطأ في التحويل"); }
     finally { setSaving(false); }
   }
 
@@ -176,6 +243,10 @@ export default function BankOperationsPage() {
         </div>
         <div className="flex items-center gap-2">
           <button onClick={load} className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50"><RefreshCw className="h-4 w-4" /></button>
+          <button onClick={() => setTransferOpen(true)}
+            className="flex h-9 items-center gap-2 rounded-xl bg-blue-600 px-4 text-[12px] font-black text-white hover:bg-blue-700">
+            <ArrowLeftRight className="h-4 w-4" /> تحويل بين حسابات
+          </button>
           <button onClick={() => setNewBankOpen(!newBankOpen)} className="flex h-9 items-center gap-2 rounded-xl bg-indigo-600 px-4 text-[12px] font-black text-white hover:bg-indigo-700 shadow-lg shadow-indigo-200">
             <Plus className="h-4 w-4" /> إضافة حساب
           </button>
@@ -188,13 +259,15 @@ export default function BankOperationsPage() {
             <h3 className="text-[13px] font-black text-slate-800">إضافة حساب بنكي جديد</h3>
             <button onClick={() => setNewBankOpen(false)}><X className="h-4 w-4 text-slate-400" /></button>
           </div>
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-5 gap-3">
             <div><label className="text-[11px] font-black text-slate-500 block mb-1">اسم البنك *</label>
               <input value={newBank.name} onChange={e => setNewBank(f => ({ ...f, name: e.target.value }))} autoFocus className="w-full h-10 rounded-xl border border-slate-300 px-3 text-[12px] outline-none focus:border-indigo-500" /></div>
             <div><label className="text-[11px] font-black text-slate-500 block mb-1">الكود</label>
               <input value={newBank.code} onChange={e => setNewBank(f => ({ ...f, code: e.target.value }))} className="w-full h-10 rounded-xl border border-slate-300 px-3 text-[12px] outline-none" /></div>
             <div><label className="text-[11px] font-black text-slate-500 block mb-1">الرصيد الافتتاحي</label>
               <input type="number" value={newBank.balance} onChange={e => setNewBank(f => ({ ...f, balance: e.target.value }))} className="w-full h-10 rounded-xl border border-slate-300 px-3 text-[12px] text-center outline-none" /></div>
+            <div><label className="text-[11px] font-black text-slate-500 block mb-1">حد التنبيه</label>
+              <input type="number" value={newBank.alert_threshold} onChange={e => setNewBank(f => ({ ...f, alert_threshold: e.target.value }))} className="w-full h-10 rounded-xl border border-slate-300 px-3 text-[12px] text-center outline-none" /></div>
             <div className="flex items-end">
               <button onClick={createBank} disabled={!newBank.name || saving} className="w-full h-10 rounded-xl bg-indigo-600 text-[12px] font-black text-white hover:bg-indigo-700 disabled:opacity-40">حفظ</button>
             </div>
@@ -228,6 +301,11 @@ export default function BankOperationsPage() {
                   <div className={`text-[26px] font-black font-mono ${Number(bank.balance) >= 0 ? "text-slate-900" : "text-rose-600"}`}>
                     {fmt(bank.balance)} <span className="text-[12px] text-slate-400">ج.م</span>
                   </div>
+                  {Number(bank.alert_threshold || 0) > 0 && Number(bank.balance || 0) < Number(bank.alert_threshold || 0) && (
+                    <div className="flex items-center gap-1 text-[10px] font-black text-amber-600 bg-amber-50 rounded-lg px-2 py-1 mt-2 w-fit">
+                      <AlertCircle className="h-3 w-3" /> رصيد منخفض
+                    </div>
+                  )}
                 </div>
                 <div className="flex gap-2">
                   <button onClick={() => setModal({ bank, mode: "deposit" })}
@@ -248,6 +326,50 @@ export default function BankOperationsPage() {
           </div>
         )}
       </div>
+
+      {transferOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="w-[420px] rounded-2xl bg-white shadow-2xl p-6" dir="rtl">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-[15px] font-black text-slate-900">تحويل بين حسابات بنكية</h2>
+              <button onClick={() => setTransferOpen(false)}><X className="h-5 w-5 text-slate-400" /></button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-[11px] font-black text-slate-600 block mb-1.5">من حساب</label>
+                <select value={transferForm.from_id} onChange={e => setTransferForm(f => ({ ...f, from_id: e.target.value }))}
+                  className="w-full h-10 rounded-xl border border-slate-300 px-3 text-[12px] font-bold bg-white outline-none focus:border-blue-500">
+                  <option value="">اختر حساب المصدر</option>
+                  {banks.map(b => <option key={b.id} value={b.id}>{b.name} — {fmt(b.balance)} ج.م</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-[11px] font-black text-slate-600 block mb-1.5">إلى حساب</label>
+                <select value={transferForm.to_id} onChange={e => setTransferForm(f => ({ ...f, to_id: e.target.value }))}
+                  className="w-full h-10 rounded-xl border border-slate-300 px-3 text-[12px] font-bold bg-white outline-none focus:border-blue-500">
+                  <option value="">اختر الحساب الوجهة</option>
+                  {banks.filter(b => b.id !== Number(transferForm.from_id)).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-[11px] font-black text-slate-600 block mb-1.5">المبلغ</label>
+                <input type="number" min="0" step="0.01" value={transferForm.amount}
+                  onChange={e => setTransferForm(f => ({ ...f, amount: e.target.value }))}
+                  className="w-full h-10 rounded-xl border border-slate-300 px-3 text-[13px] font-black outline-none focus:border-blue-500" dir="ltr" />
+              </div>
+              <div>
+                <label className="text-[11px] font-black text-slate-600 block mb-1.5">ملاحظات</label>
+                <input value={transferForm.notes} onChange={e => setTransferForm(f => ({ ...f, notes: e.target.value }))}
+                  className="w-full h-10 rounded-xl border border-slate-300 px-3 text-[12px] outline-none" />
+              </div>
+              <button onClick={handleTransfer} disabled={!transferForm.from_id || !transferForm.to_id || !transferForm.amount || saving}
+                className="w-full rounded-xl bg-blue-600 py-3 text-[13px] font-black text-white hover:bg-blue-700 disabled:opacity-40">
+                {saving ? "جاري التحويل..." : "تأكيد التحويل"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {modal && <BankModal bank={modal.bank} mode={modal.mode} onClose={() => setModal(null)} onDone={() => { setModal(null); load(); }} />}
       {statement && <StatementPanel bank={statement} onClose={() => setStatement(null)} />}
