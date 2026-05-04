@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
   CreditCard, Plus, Pencil, Trash2, X, Lock, ArrowUpCircle, ArrowDownCircle,
-  BookOpen, RefreshCw, Search, Calendar
+  BookOpen, RefreshCw, Search, Calendar, Printer
 } from "lucide-react";
 import api from "../../services/api";
 import toast from "react-hot-toast";
+import PrintPreviewModal from "../../components/print/PrintPreviewModal";
+import PaymentMethodsReportTemplate from "../../components/print/templates/PaymentMethodsReportTemplate";
 
 const fmt = (n) => Number(n || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2 });
 
@@ -143,6 +145,22 @@ function MethodsTab() {
         )}
       </div>
 
+      <div className="mt-6">
+        <div className="text-[11px] font-black text-slate-500 uppercase tracking-wider mb-3">Ø¥Ø­ØµØ§Ø¦ÙŠØ§Øª Ø§Ù„Ø§Ø³ØªØ®Ø¯Ø§Ù…</div>
+        <div className="grid grid-cols-3 gap-3">
+          {methods.map((m) => (
+            <div key={m.id} className="bg-white rounded-xl border border-slate-200 p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xl">{m.icon || "card"}</span>
+                <span className="text-[12px] font-black text-slate-700">{m.name}</span>
+              </div>
+              <div className="text-[10px] text-slate-400 font-bold">Ù…Ø¹Ø§Ù…Ù„Ø§Øª Ø§Ù„Ø´Ù‡Ø±: <span className="text-slate-700">{m.monthly_count || 0}</span></div>
+              <div className="text-[10px] text-slate-400 font-bold">Ø¥Ø¬Ù…Ø§Ù„ÙŠ: <span className="text-emerald-700 font-black">{fmt(m.monthly_total || 0)} Ø¬.Ù…</span></div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Modal */}
       {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
@@ -190,18 +208,25 @@ function TransactionsTab() {
   const [loading, setLoading] = useState(true);
   const [methods, setMethods] = useState([]);
   const [filters, setFilters] = useState({ search: "", from: "", to: "", method: "", type: "" });
+  const [printOpen, setPrintOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      const params = new URLSearchParams();
+      if (filters.from) params.set("from", filters.from);
+      if (filters.to) params.set("to", filters.to);
+      if (filters.method) params.set("method_id", filters.method);
+      if (filters.type) params.set("type", filters.type);
+      if (filters.search) params.set("search", filters.search);
       const [txR, mR] = await Promise.all([
-        api.get("/api/daily-sessions/today/transactions?type=pos"),
+        api.get(`/api/payment-methods/transactions?${params}`),
         api.get("/api/payment-methods"),
       ]);
       setRows(txR.data.data || []);
       setMethods(mR.data.data || []);
     } catch { setRows([]); } finally { setLoading(false); }
-  }, []);
+  }, [filters]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -227,15 +252,26 @@ function TransactionsTab() {
       {/* Filters */}
       <div className="flex items-center gap-3 p-4 border-b border-slate-100 flex-wrap shrink-0">
         <div className="relative"><Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <input value={filters.search} onChange={e => setFilters(f => ({ ...f, search: e.target.value }))} placeholder="بحث..."
+          <input value={filters.search} onChange={e => setFilters(f => ({ ...f, search: e.target.value }))} onKeyDown={e => { if (e.key === "Enter") load(); }} placeholder="بحث..."
             className="h-9 w-52 rounded-xl border border-slate-200 pr-9 pl-3 text-[12px] outline-none focus:border-violet-400" /></div>
-        <input type="date" value={filters.from} onChange={e => setFilters(f => ({ ...f, from: e.target.value }))} className="h-9 rounded-xl border border-slate-200 px-3 text-[12px] outline-none" />
+        <input type="date" value={filters.from} onChange={e => setFilters(f => ({ ...f, from: e.target.value }))} onKeyDown={e => { if (e.key === "Enter") load(); }} className="h-9 rounded-xl border border-slate-200 px-3 text-[12px] outline-none" />
         <span className="text-slate-400 text-[12px]">إلى</span>
-        <input type="date" value={filters.to} onChange={e => setFilters(f => ({ ...f, to: e.target.value }))} className="h-9 rounded-xl border border-slate-200 px-3 text-[12px] outline-none" />
+        <input type="date" value={filters.to} onChange={e => setFilters(f => ({ ...f, to: e.target.value }))} onKeyDown={e => { if (e.key === "Enter") load(); }} className="h-9 rounded-xl border border-slate-200 px-3 text-[12px] outline-none" />
         <select value={filters.method} onChange={e => setFilters(f => ({ ...f, method: e.target.value }))} className="h-9 rounded-xl border border-slate-200 px-3 text-[12px] font-bold bg-white outline-none">
           <option value="">كل وسائل الدفع</option>
           {methods.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select>
+        <select value={filters.type} onChange={e => setFilters(f => ({ ...f, type: e.target.value }))} className="h-9 rounded-xl border border-slate-200 px-3 text-[12px] font-bold bg-white outline-none">
+          <option value="">كل الاتجاهات</option>
+          <option value="in">داخل</option>
+          <option value="out">خارج</option>
+        </select>
+        <button onClick={load} className="flex h-9 items-center gap-1.5 rounded-xl bg-violet-600 px-3 text-[11px] font-black text-white hover:bg-violet-700">
+          <Search className="h-4 w-4" /> بحث
+        </button>
+        <button onClick={() => setPrintOpen(true)} className="flex h-9 items-center gap-1.5 rounded-xl bg-slate-800 px-3 text-[11px] font-black text-white hover:bg-slate-900">
+          <Printer className="h-4 w-4" /> طباعة
+        </button>
         <button onClick={load} className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50"><RefreshCw className="h-4 w-4" /></button>
       </div>
 
@@ -251,7 +287,7 @@ function TransactionsTab() {
           ) : (
             <table className="w-full text-[12px]">
               <thead className="bg-slate-50 border-b border-slate-200">
-                <tr>{["الكود", "النوع", "المبلغ", "الاتجاه", "الطرف", "التاريخ"].map(h => <th key={h} className="px-4 py-3 text-right font-black text-slate-500 text-[11px] uppercase tracking-wider">{h}</th>)}</tr>
+                <tr>{["الكود", "النوع", "المبلغ", "الاتجاه", "الطرف", "وسيلة الدفع", "التاريخ"].map(h => <th key={h} className="px-4 py-3 text-right font-black text-slate-500 text-[11px] uppercase tracking-wider">{h}</th>)}</tr>
               </thead>
               <tbody>
                 {rows.map((r, i) => (
@@ -266,6 +302,7 @@ function TransactionsTab() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-slate-600 truncate max-w-[140px]">{r.party || r.description || "—"}</td>
+                    <td className="px-4 py-3 text-slate-500 text-[11px] font-bold">{r.method_name || "—"}</td>
                     <td className="px-4 py-3 text-slate-400 text-[11px]">{r.created_at ? new Date(r.created_at).toLocaleDateString("ar-EG") : "—"}</td>
                   </tr>
                 ))}
@@ -274,6 +311,22 @@ function TransactionsTab() {
           )}
         </div>
       </div>
+      {printOpen && (
+        <PrintPreviewModal
+          open={printOpen}
+          onClose={() => setPrintOpen(false)}
+          docType="payment_methods_report"
+          renderContent={(settings) => (
+            <PaymentMethodsReportTemplate
+              rows={rows}
+              filters={filters}
+              totalIn={totalIn}
+              totalOut={totalOut}
+              settings={settings}
+            />
+          )}
+        />
+      )}
     </div>
   );
 }
