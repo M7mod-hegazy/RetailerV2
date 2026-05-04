@@ -46,6 +46,24 @@ router.get("/", (req, res) => {
   }
 });
 
+// Returns the most recent unit_price this item was sold at
+router.get("/last-price/:itemId", (req, res) => {
+  try {
+    const db = getDb();
+    const row = db.prepare(`
+      SELECT il.unit_price
+      FROM invoice_lines il
+      JOIN invoices i ON i.id = il.invoice_id
+      WHERE il.item_id = ? AND i.status != 'cancelled'
+      ORDER BY i.created_at DESC
+      LIMIT 1
+    `).get(Number(req.params.itemId));
+    res.json({ success: true, data: row?.unit_price ?? null });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 router.get("/returns", (req, res) => {
   try {
     const db = getDb();

@@ -126,7 +126,8 @@ function createInvoice(payload) {
       throw error;
     }
 
-    const total = Math.max(0, subtotal - discount);
+    const increaseAmount = Math.max(0, Number(payload.increase || 0));
+    const total = Math.max(0, subtotal - discount + increaseAmount);
     const paymentType = payload.payment_type || "cash";
     const amountPaid = Number(payload.amount_paid ?? total);
     const amountReceived = Number.isFinite(amountPaid) ? amountPaid : total;
@@ -139,16 +140,18 @@ function createInvoice(payload) {
 
     const inv = db
       .prepare(
-        "INSERT INTO invoices (invoice_no, customer_id, subtotal, discount, total, payment_type, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO invoices (invoice_no, customer_id, subtotal, discount, increase, total, payment_type, status, seller_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         invoiceNo,
         payload.customer_id || null,
         subtotal,
         discount,
+        increaseAmount,
         total,
         paymentType,
         remainingAmount > 0 ? (amountReceived > 0 ? "partial" : "unpaid") : "paid",
+        payload.seller_id ? Number(payload.seller_id) : null,
       );
 
     for (const line of normalizedLines) {
