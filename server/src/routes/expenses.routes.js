@@ -1,6 +1,7 @@
 const express = require("express");
 const { getDb } = require("../config/database");
 const { generateDocNumber } = require("../utils/docNumber");
+const { assertCanWriteForDate, normalizeDate } = require("../services/dailySessionService");
 
 const router = express.Router();
 
@@ -51,12 +52,14 @@ router.post("/", (req, res) => {
   const db = getDb();
   const result = db
     .transaction(() => {
+      const createdDate = normalizeDate(payload.created_at);
+      assertCanWriteForDate(db, createdDate);
       const docNo = generateDocNumber('expense');
       const created = db
         .prepare(
           `INSERT INTO expenses
-           (doc_no, amount, category_id, notes, description, payment_method, employee_id, receipt_image, is_recurring, recurring_frequency, treasury_id, bank_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+           (doc_no, amount, category_id, notes, description, payment_method, employee_id, receipt_image, is_recurring, recurring_frequency, treasury_id, bank_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
         )
         .run(
           docNo,
@@ -70,6 +73,7 @@ router.post("/", (req, res) => {
           payload.is_recurring ? 1 : 0,
           payload.recurring_frequency || null,
           payload.bank_id || null,
+          `${createdDate} ${new Date().toTimeString().slice(0, 8)}`,
         );
       const amount = Number(payload.amount || 0);
       if ((payload.payment_method || "cash") === "cash") {

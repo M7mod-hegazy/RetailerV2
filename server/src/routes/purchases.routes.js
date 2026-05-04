@@ -2,6 +2,7 @@ const express = require("express");
 const { getDb } = require("../config/database");
 const { adjustStock } = require("../services/stockService");
 const { generateDocNumber } = require("../utils/docNumber");
+const { assertCanWriteForDate, normalizeDate } = require("../services/dailySessionService");
 
 const router = express.Router();
 
@@ -106,13 +107,15 @@ router.post("/", (req, res, next) => {
   try {
     const purchase = db.transaction(() => {
       const payload = req.body || {};
+      const createdDate = normalizeDate(payload.created_at);
+      assertCanWriteForDate(db, createdDate);
       let total = 0;
       for (const line of payload.lines || []) total += Number(line.quantity) * Number(line.unit_cost);
 
       const docNo = generateDocNumber('purchase_receipt');
       const result = db
-        .prepare("INSERT INTO purchases (doc_no, supplier_id, total) VALUES (?, ?, ?)")
-        .run(docNo, payload.supplier_id || null, total);
+        .prepare("INSERT INTO purchases (doc_no, supplier_id, total, created_at) VALUES (?, ?, ?, ?)")
+        .run(docNo, payload.supplier_id || null, total, `${createdDate} ${new Date().toTimeString().slice(0, 8)}`);
 
       for (const line of payload.lines || []) {
         db.prepare(
@@ -183,6 +186,8 @@ router.post("/:id/return", (req, res, next) => {
       }
 
       const payload = req.body || {};
+      const createdDate = normalizeDate(payload.created_at);
+      assertCanWriteForDate(db, createdDate);
       let total = 0;
       const preparedLines = [];
 
@@ -222,8 +227,8 @@ router.post("/:id/return", (req, res, next) => {
 
       const returnDocNo = generateDocNumber('purchase_return');
       const purchaseReturnResult = db
-        .prepare("INSERT INTO purchase_returns (doc_no, purchase_id, supplier_id, total) VALUES (?, ?, ?, ?)")
-        .run(returnDocNo, purchase.id, purchase.supplier_id || null, total);
+        .prepare("INSERT INTO purchase_returns (doc_no, purchase_id, supplier_id, total, created_at) VALUES (?, ?, ?, ?, ?)")
+        .run(returnDocNo, purchase.id, purchase.supplier_id || null, total, `${createdDate} ${new Date().toTimeString().slice(0, 8)}`);
 
       for (const line of preparedLines) {
         db.prepare(

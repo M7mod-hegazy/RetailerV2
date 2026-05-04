@@ -2,6 +2,7 @@ const { getDb } = require("../config/database");
 const { adjustStock } = require("./stockService");
 const { calculateEarnedPoints, earnPointsForInvoice } = require("./loyaltyService");
 const { generateDocNumber } = require("../utils/docNumber");
+const { assertCanWriteForDate, normalizeDate } = require("./dailySessionService");
 
 function generateInvoiceNumber(db) {
   const settings = db.prepare("SELECT branch_code, invoice_prefix FROM settings WHERE id = 1").get() || {};
@@ -72,6 +73,8 @@ function getInvoiceWithLines(invoiceId) {
 function createInvoice(payload) {
   const db = getDb();
   const tx = db.transaction(() => {
+    const createdDate = normalizeDate(payload.created_at);
+    assertCanWriteForDate(db, createdDate);
     const invoiceNo = generateDocNumber('pos_sale');
     let subtotal = 0;
     const lineErrors = [];
@@ -168,6 +171,9 @@ function createInvoice(payload) {
         remainingAmount > 0 ? (amountReceived > 0 ? "partial" : "unpaid") : "paid",
         payload.seller_id ? Number(payload.seller_id) : null,
       );
+
+    db.prepare("UPDATE invoices SET created_at = ? WHERE id = ?")
+      .run(`${createdDate} ${new Date().toTimeString().slice(0, 8)}`, inv.lastInsertRowid);
 
     for (const line of normalizedLines) {
       db.prepare(

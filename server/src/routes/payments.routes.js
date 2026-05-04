@@ -1,6 +1,7 @@
 const express = require("express");
 const { getDb } = require("../config/database");
 const { recalculateInvoiceStatus } = require("../services/invoiceService");
+const { assertCanWriteForDate, normalizeDate } = require("../services/dailySessionService");
 
 const router = express.Router();
 
@@ -69,6 +70,8 @@ router.post("/", (req, res, next) => {
       const amount = Number(payload.amount || 0);
       const partyType = payload.party_type || "customer";
       const partyId = Number(payload.party_id || 0);
+      const createdDate = normalizeDate(payload.created_at);
+      assertCanWriteForDate(db, createdDate);
       let method = payload.method || "cash";
       if (payload.method_id) {
         const pm = db.prepare("SELECT type, category FROM payment_methods WHERE id = ?").get(payload.method_id);
@@ -105,8 +108,8 @@ router.post("/", (req, res, next) => {
       const paymentResult = db
         .prepare(
           `INSERT INTO payments
-           (party_type, party_id, amount, method, reference_number, notes, treasury_id, bank_id, allocated_amount, unallocated_amount)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (party_type, party_id, amount, method, reference_number, notes, treasury_id, bank_id, allocated_amount, unallocated_amount, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           partyType,
@@ -119,6 +122,7 @@ router.post("/", (req, res, next) => {
           payload.bank_id || null,
           requestedAllocated,
           amount - requestedAllocated,
+          `${createdDate} ${new Date().toTimeString().slice(0, 8)}`,
         );
 
       if (method === "cash") {

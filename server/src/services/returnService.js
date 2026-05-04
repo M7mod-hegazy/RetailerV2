@@ -1,11 +1,14 @@
 const { getDb } = require("../config/database");
 const { adjustStock } = require("./stockService");
 const { generateDocNumber } = require("../utils/docNumber");
+const { assertCanWriteForDate, normalizeDate } = require("./dailySessionService");
 
 function createReturn(invoiceId, payload) {
   const db = getDb();
 
   return db.transaction(() => {
+    const createdDate = normalizeDate(payload.created_at);
+    assertCanWriteForDate(db, createdDate);
     const invoice = db.prepare("SELECT * FROM invoices WHERE id = ?").get(invoiceId);
     if (!invoice) {
       const err = new Error("Invoice not found");
@@ -54,9 +57,17 @@ function createReturn(invoiceId, payload) {
     const docNo = generateDocNumber('sales_return');
     const result = db
       .prepare(
-        "INSERT INTO sales_returns (doc_no, invoice_id, customer_id, total, reason, refund_method) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO sales_returns (doc_no, invoice_id, customer_id, total, reason, refund_method, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
       )
-      .run(docNo, invoiceId, invoice.customer_id || null, total, payload.reason || null, payload.refund_method || "cash_back");
+      .run(
+        docNo,
+        invoiceId,
+        invoice.customer_id || null,
+        total,
+        payload.reason || null,
+        payload.refund_method || "cash_back",
+        `${createdDate} ${new Date().toTimeString().slice(0, 8)}`,
+      );
 
     for (const line of preparedLines) {
       db.prepare(

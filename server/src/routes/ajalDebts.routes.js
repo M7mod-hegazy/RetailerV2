@@ -1,6 +1,7 @@
 const express = require("express");
 const { getDb } = require("../config/database");
 const { generateDocNumber } = require("../utils/docNumber");
+const { assertCanWriteForDate, normalizeDate } = require("../services/dailySessionService");
 
 const router = express.Router();
 
@@ -98,6 +99,8 @@ router.post("/:id/pay", (req, res) => {
   try {
     const db = getDb();
     const { amount, payments, payment_method_id, notes, payment_date } = req.body || {};
+    const createdDate = normalizeDate(payment_date);
+    assertCanWriteForDate(db, createdDate);
     const paymentLines = Array.isArray(payments) && payments.length
       ? payments.map((p) => ({ method_id: p.method_id || p.payment_method_id, amount: Number(p.amount || 0) })).filter((p) => p.method_id && p.amount > 0)
       : [{ method_id: payment_method_id || 1, amount: Number(amount || 0) }];
@@ -114,7 +117,7 @@ router.post("/:id/pay", (req, res) => {
     db.transaction(() => {
       for (const line of paymentLines) {
         db.prepare(`INSERT INTO ajal_payments (debt_id, amount, payment_method_id, payment_date, notes, created_by) VALUES (?, ?, ?, ?, ?, ?)`)
-          .run(debt.id, line.amount, line.method_id || 1, payment_date || new Date().toISOString().slice(0, 10), notes || null, req.user?.id || 1);
+          .run(debt.id, line.amount, line.method_id || 1, createdDate, notes || null, req.user?.id || 1);
 
         const pm = db.prepare("SELECT excludes_from_treasury FROM payment_methods WHERE id = ?").get(line.method_id || 1);
         if (!pm || !pm.excludes_from_treasury) {

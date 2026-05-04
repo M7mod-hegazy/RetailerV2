@@ -5,16 +5,22 @@ import {
   Calendar, ChevronRight, Flag, ExternalLink, TrendingUp,
   TrendingDown, Search, Clock, ArrowUpDown, Filter,
   FileText, Coins, Banknote, History,
+  Edit3, RotateCcw, Eye, Sparkles,
 } from "lucide-react";
 import api from "../../services/api";
 import { motion, AnimatePresence } from "framer-motion";
 import toast from "react-hot-toast";
 import SmartTooltip from "../../components/ui/SmartTooltip";
 import PrintPreviewModal from "../../components/print/PrintPreviewModal";
+import ExpenseFormModal from "../expenses/ExpenseFormModal";
+import RevenueFormModal from "../expenses/RevenueFormModal";
 
 const fmt = (n) =>
   Number(n || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const todayStr = () => new Date().toISOString().slice(0, 10);
+const todayStr = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 const DENOMS = [200, 100, 50, 20, 10, 5, 1, 0.5, 0.25];
 
 const DOC_TYPE_LABEL = {
@@ -22,6 +28,10 @@ const DOC_TYPE_LABEL = {
   expense: "مصروف",
   revenue: "إيراد",
   purchase: "مشتريات",
+  supplier_payment: "مدفوعات موردين",
+  sales_return: "مرتجعات مبيعات",
+  purchase_return: "مرتجعات مشتريات",
+  ajal_payment: "تحصيل آجل",
   customer_payment: "دفعة عميل",
   withdrawal: "مسحوبات",
 };
@@ -31,6 +41,10 @@ const DOC_TYPE_COLOR = {
   expense: "text-rose-700 bg-rose-50 border-rose-200",
   revenue: "text-blue-700 bg-blue-50 border-blue-200",
   purchase: "text-orange-700 bg-orange-50 border-orange-200",
+  supplier_payment: "text-red-700 bg-red-50 border-red-200",
+  sales_return: "text-pink-700 bg-pink-50 border-pink-200",
+  purchase_return: "text-teal-700 bg-teal-50 border-teal-200",
+  ajal_payment: "text-cyan-700 bg-cyan-50 border-cyan-200",
   customer_payment: "text-purple-700 bg-purple-50 border-purple-200",
   withdrawal: "text-slate-700 bg-slate-100 border-slate-200",
 };
@@ -41,7 +55,11 @@ const TABS = [
   { id: "expenses", label: "المصروفات" },
   { id: "revenues", label: "الإيرادات" },
   { id: "purchases", label: "المشتريات" },
+  { id: "supplier_payments", label: "مدفوعات موردين" },
+  { id: "sales_returns", label: "مرتجعات المبيعات" },
+  { id: "purchase_returns", label: "مرتجعات المشتريات" },
   { id: "customer_payments", label: "مدفوعات العملاء" },
+  { id: "ajal_payments", label: "تحصيلات الآجل" },
   { id: "withdrawals", label: "المسحوبات" },
 ];
 
@@ -75,6 +93,8 @@ export default function DailyTreasuryPage() {
   const [quickModal, setQuickModal] = useState(null);
   const [quickAmount, setQuickAmount] = useState("");
   const [quickNote, setQuickNote] = useState("");
+  const [expenseOpen, setExpenseOpen] = useState(false);
+  const [revenueOpen, setRevenueOpen] = useState(false);
 
   // Alerts
   const [yesterdayAlert, setYesterdayAlert] = useState(null);
@@ -86,10 +106,18 @@ export default function DailyTreasuryPage() {
   // History drawer
   const [historyOpen, setHistoryOpen] = useState(false);
   const [pastSessions, setPastSessions] = useState([]);
+  const [historySearch, setHistorySearch] = useState("");
+  const [historyStatus, setHistoryStatus] = useState("");
 
   // Compare yesterday
   const [compareYesterday, setCompareYesterday] = useState(false);
   const [printOpen, setPrintOpen] = useState(false);
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
+  const [openingEditOpen, setOpeningEditOpen] = useState(false);
+  const [openingDraft, setOpeningDraft] = useState("");
+  const [openingReason, setOpeningReason] = useState("");
+  const [reopenReason, setReopenReason] = useState("");
+  const [reopening, setReopening] = useState(false);
 
   const isToday = date === todayStr();
   const isClosed = summary?.session?.status === "closed";
@@ -157,7 +185,10 @@ export default function DailyTreasuryPage() {
 
   async function loadPastSessions() {
     try {
-      const r = await api.get("/api/daily-sessions/");
+      const params = new URLSearchParams();
+      if (historySearch) params.set("search", historySearch);
+      if (historyStatus) params.set("status", historyStatus);
+      const r = await api.get(`/api/daily-sessions/?${params.toString()}`);
       setPastSessions(r.data.data || []);
     } catch {
       setPastSessions([]);
@@ -167,6 +198,7 @@ export default function DailyTreasuryPage() {
   useEffect(() => { loadSummary(); }, [loadSummary]);
   useEffect(() => { loadTransactions(); }, [loadTransactions]);
   useEffect(() => { loadYesterdayAlert(); }, []);
+  useEffect(() => { if (historyOpen) loadPastSessions(); }, [historyOpen, historySearch, historyStatus]);
 
   const moneyTotal = DENOMS.reduce((s, d) => s + Number(counts[d] || 0) * d, 0);
   const sess = summary?.session;
@@ -252,6 +284,84 @@ export default function DailyTreasuryPage() {
 
   const sortedTransactions = transactions;
   const txTotal = sortedTransactions.reduce((s, t) => s + Number(t.amount || 0), 0);
+  const draftDiscrepancy = actualCash !== "" ? Number(actualCash || 0) - Number(expected || 0) : null;
+  const cashIn = Number(summary?.cash_in || 0);
+  const cashOut = Number(summary?.cash_out || 0);
+  const discrepancySuggestions = (() => {
+    const diff = draftDiscrepancy ?? discrepancy;
+    if (diff == null || Math.abs(diff) < 0.01) {
+      return ["الرصيد متطابق. أغلق اليومية بعد مراجعة آخر حركة فقط."];
+    }
+    const abs = fmt(Math.abs(diff));
+    if (diff < 0) {
+      return [
+        `يوجد عجز ${abs} ج.م. راجع المصروفات والمسحوبات ومدفوعات الموردين المسجلة اليوم.`,
+        "قارن آخر فواتير POS النقدية مع درج النقد، وتأكد من عدم تسجيل تحصيل كاش كبنك أو العكس.",
+        "إذا كان العجز حقيقياً، اكتب سبب واضح في ملاحظات الإغلاق قبل الاعتماد.",
+      ];
+    }
+    return [
+      `يوجد زيادة ${abs} ج.م. ابحث عن إيراد أو تحصيل عميل غير مسجل.`,
+      "راجع مرتجعات المبيعات لأن أي رد نقدي ناقص التسجيل يظهر كزيادة في الدرج.",
+      "استخدم بحث المبلغ بنفس قيمة الفرق للوصول السريع لحركة محتملة.",
+    ];
+  })();
+
+  async function confirmCloseDay() {
+    if (!actualCash) return;
+    setClosing(true);
+    try {
+      await api.post(isToday ? "/api/daily-sessions/today/close" : `/api/daily-sessions/${date}/close`, {
+        actual_cash: Number(actualCash),
+        notes: closeNotes,
+      });
+      toast.success("تم إغلاق اليومية بنجاح");
+      setCloseConfirmOpen(false);
+      loadSummary();
+      loadPastSessions();
+    } catch (e) {
+      toast.error(e.response?.data?.message || "خطأ في الإغلاق");
+    } finally {
+      setClosing(false);
+    }
+  }
+
+  async function saveOpeningBalance() {
+    if (openingDraft === "") return;
+    try {
+      await api.patch(`/api/daily-sessions/${date}/opening-balance`, {
+        opening_balance: Number(openingDraft),
+        reason: openingReason,
+      });
+      toast.success("تم تعديل الرصيد الافتتاحي");
+      setOpeningEditOpen(false);
+      setOpeningReason("");
+      loadSummary();
+    } catch (e) {
+      toast.error(e.response?.data?.message || "تعذر تعديل الرصيد الافتتاحي");
+    }
+  }
+
+  async function reopenDay() {
+    setReopening(true);
+    try {
+      await api.post(`/api/daily-sessions/${date}/reopen`, { reason: reopenReason });
+      toast.success("تمت إعادة فتح اليومية");
+      setReopenReason("");
+      loadSummary();
+      loadPastSessions();
+    } catch (e) {
+      toast.error(e.response?.data?.message || "تعذر إعادة فتح اليومية");
+    } finally {
+      setReopening(false);
+    }
+  }
+
+  function refreshAfterFinanceModal() {
+    loadSummary();
+    loadTransactions();
+    loadYesterdayAlert();
+  }
 
   // Animation variants
   const staggerContainer = {
@@ -317,6 +427,17 @@ export default function DailyTreasuryPage() {
                 className="h-12 rounded-2xl border border-slate-200 bg-white/50 px-4 text-[13px] font-bold text-slate-700 outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 transition-all cursor-pointer"
               />
             </div>
+
+            <motion.button
+              whileHover={{ y: -2 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => { setDate(todayStr()); setActiveTab("all"); setGlobalAmountSearch(""); }}
+              className={`flex h-12 items-center gap-2 rounded-2xl px-4 text-[13px] font-black transition-colors ${
+                isToday ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/20" : "bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              <Calendar className="h-4 w-4" /> اليوم
+            </motion.button>
             
             <div className={`flex items-center gap-2 h-12 px-4 rounded-2xl border ${isClosed ? "bg-rose-50 border-rose-100 text-rose-700" : "bg-emerald-50 border-emerald-100 text-emerald-700"}`}>
               {isClosed ? <Lock className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
@@ -339,7 +460,7 @@ export default function DailyTreasuryPage() {
               onClick={() => { setHistoryOpen(true); loadPastSessions(); }}
               className="flex h-12 items-center gap-2 rounded-2xl bg-slate-900 px-5 text-[13px] font-black text-white hover:bg-slate-800 transition-colors shadow-lg shadow-slate-900/10"
             >
-              <History className="h-4 w-4 text-emerald-400" /> أيام سابقة
+              <History className="h-4 w-4 text-emerald-400" /> الأيام السابقة
             </motion.button>
             
             <motion.button
@@ -419,9 +540,28 @@ export default function DailyTreasuryPage() {
             <>
               {/* Read-only notice for historical days */}
               {!isToday && (
-                <motion.div variants={fadeInUp} className="flex items-center gap-3 rounded-2xl bg-blue-50 border border-blue-100 px-6 py-4">
-                  <Lock className="h-5 w-5 text-blue-500" />
-                  <span className="text-[13px] font-black text-blue-800">عرض للقراءة فقط — سجلات يوم {date}</span>
+                <motion.div variants={fadeInUp} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-blue-50 border border-blue-100 px-6 py-4">
+                  <div className="flex items-center gap-3">
+                    <Lock className="h-5 w-5 text-blue-500" />
+                    <span className="text-[13px] font-black text-blue-800">عرض يوم {date} للقراءة والمراجعة. لا يتم السماح بإدخال حركات على يوم مغلق.</span>
+                  </div>
+                  {isClosed && (
+                    <div className="flex items-center gap-2">
+                      <input
+                        value={reopenReason}
+                        onChange={(e) => setReopenReason(e.target.value)}
+                        placeholder="سبب إعادة الفتح"
+                        className="h-9 w-48 rounded-xl border border-blue-200 bg-white px-3 text-[11px] font-bold outline-none focus:border-blue-500"
+                      />
+                      <button
+                        onClick={reopenDay}
+                        disabled={reopening || !reopenReason.trim()}
+                        className="flex h-9 items-center gap-1.5 rounded-xl bg-blue-700 px-3 text-[11px] font-black text-white hover:bg-blue-800 disabled:opacity-40"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" /> إعادة فتح آخر يوم
+                      </button>
+                    </div>
+                  )}
                 </motion.div>
               )}
 
@@ -431,7 +571,7 @@ export default function DailyTreasuryPage() {
                   <motion.button
                     whileHover={{ y: -2 }}
                     whileTap={{ scale: 0.98 }}
-                    onClick={() => setQuickModal("expense")}
+                    onClick={() => setExpenseOpen(true)}
                     className="flex items-center justify-center gap-3 rounded-3xl bg-rose-600 py-4 text-[14px] font-black text-white hover:bg-rose-700 transition-colors shadow-lg shadow-rose-600/20 border border-rose-500"
                   >
                     <div className="bg-white/20 p-1.5 rounded-xl"><TrendingDown className="h-4 w-4" /></div>
@@ -440,7 +580,7 @@ export default function DailyTreasuryPage() {
                   <motion.button
                     whileHover={{ y: -2 }}
                     whileTap={{ scale: 0.98 }}
-                    onClick={() => setQuickModal("revenue")}
+                    onClick={() => setRevenueOpen(true)}
                     className="flex items-center justify-center gap-3 rounded-3xl bg-emerald-600 py-4 text-[14px] font-black text-white hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-600/20 border border-emerald-500"
                   >
                     <div className="bg-white/20 p-1.5 rounded-xl"><TrendingUp className="h-4 w-4" /></div>
@@ -615,7 +755,14 @@ export default function DailyTreasuryPage() {
                                       {DOC_TYPE_LABEL[t.doc_type] || t.doc_type}
                                     </span>
                                   </td>
-                                  <td className="px-3 py-3 font-black text-zinc-950 font-mono text-[12px]">{fmt(t.amount)}</td>
+                                  <td className="px-3 py-3">
+                                    <div className="flex flex-col">
+                                      <span className={`font-black font-mono text-[12px] ${Number(t.cash_effect ?? t.amount) < 0 ? "text-rose-700" : "text-emerald-700"}`}>
+                                        {Number(t.cash_effect ?? t.amount) > 0 ? "+" : ""}{fmt(t.cash_effect ?? t.amount)}
+                                      </span>
+                                      <span className="text-[9px] font-bold text-slate-400">أصل الحركة: {fmt(t.amount)}</span>
+                                    </div>
+                                  </td>
                                   <td className="px-3 py-3 text-slate-600 text-[11px] font-bold max-w-[180px] truncate">
                                     {t.party || t.description || "—"}
                                   </td>
@@ -625,13 +772,13 @@ export default function DailyTreasuryPage() {
                                       : "—"}
                                   </td>
                                   <td className="px-3 py-3">
-                                    <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <div className="flex items-center gap-1.5 opacity-100 transition-opacity">
                                       <button
                                         onClick={() => setSlideOver(t)}
                                         className="flex h-7 w-7 items-center justify-center rounded-lg bg-white border border-slate-200 text-slate-600 hover:text-zinc-900 hover:bg-slate-50 shadow-sm transition-all"
                                         title="عرض التفاصيل"
                                       >
-                                        <ExternalLink className="h-3 w-3" />
+                                        <Eye className="h-3 w-3" />
                                       </button>
                                       <button
                                         onClick={handlePrint}
@@ -679,9 +826,13 @@ export default function DailyTreasuryPage() {
                         { label: "الرصيد الافتتاحي", value: summary?.opening_balance, tab: null, locked: true },
                         { label: "+ مبيعات POS (نقدي)", value: summary?.pos_cash_sales, tab: "pos" },
                         { label: "- مشتريات", value: summary?.purchases_cash, tab: "purchases", negative: true },
+                        { label: "- مدفوعات موردين", value: summary?.supplier_payments, tab: "supplier_payments", negative: true },
+                        { label: "- مرتجعات مبيعات", value: summary?.sales_returns_cash, tab: "sales_returns", negative: true },
                         { label: "- مصروفات", value: summary?.expenses_cash, tab: "expenses", negative: true },
                         { label: "+ إيرادات", value: summary?.revenues_cash, tab: "revenues" },
+                        { label: "+ مرتجعات مشتريات", value: summary?.purchase_returns_cash, tab: "purchase_returns" },
                         { label: "+ مدفوعات عملاء (نقدي)", value: summary?.customer_payments, tab: "customer_payments" },
+                        { label: "+ تحصيلات آجل", value: summary?.ajal_payments, tab: "ajal_payments" },
                         { label: "- مسحوبات", value: summary?.withdrawals, tab: "withdrawals", negative: true },
                       ].map(({ label, value, tab, locked, negative }) => (
                         <div
@@ -693,11 +844,33 @@ export default function DailyTreasuryPage() {
                             {locked ? <Lock className="h-3.5 w-3.5 text-slate-300" /> : <div className="h-1.5 w-1.5 rounded-full bg-slate-200" />}
                             <span className="text-[13px] text-slate-600 font-bold">{label}</span>
                           </div>
-                          <span className={`font-black text-[13px] font-mono ${negative && value > 0 ? "text-rose-600" : "text-zinc-800"}`}>
-                            {fmt(value)}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className={`font-black text-[13px] font-mono ${negative && value > 0 ? "text-rose-600" : "text-zinc-800"}`}>
+                              {fmt(value)}
+                            </span>
+                            {locked && !isClosed && (
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); setOpeningDraft(String(summary?.opening_balance || 0)); setOpeningEditOpen(true); }}
+                                className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"
+                                title="تعديل الرصيد الافتتاحي"
+                              >
+                                <Edit3 className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </div>
                       ))}
+                      <div className="grid grid-cols-2 gap-2 border-t border-slate-100 pt-3 mt-3">
+                        <div className="rounded-2xl bg-emerald-50 border border-emerald-100 p-3">
+                          <div className="text-[10px] font-black text-emerald-600">إجمالي الداخل النقدي</div>
+                          <div className="mt-1 text-[15px] font-black font-mono text-emerald-800">{fmt(cashIn)}</div>
+                        </div>
+                        <div className="rounded-2xl bg-rose-50 border border-rose-100 p-3">
+                          <div className="text-[10px] font-black text-rose-600">إجمالي الخارج النقدي</div>
+                          <div className="mt-1 text-[15px] font-black font-mono text-rose-800">{fmt(cashOut)}</div>
+                        </div>
+                      </div>
                       <div className="border-t border-slate-200/80 pt-4 mt-4 flex items-center justify-between px-2">
                         <span className="text-[13px] font-black text-slate-500 uppercase tracking-widest">المتوقع في الخزينة</span>
                         <span className="text-[22px] font-black font-mono text-emerald-600">{fmt(expected)} <span className="text-[12px] text-slate-400">ج.م</span></span>
@@ -770,6 +943,19 @@ export default function DailyTreasuryPage() {
                               الفرق: {Number(actualCash) - expected >= 0 ? "+" : ""}{fmt(Number(actualCash) - expected)} ج.م
                             </motion.div>
                           )}
+
+                          {actualCash && (
+                            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                              <div className="mb-2 flex items-center gap-2 text-[11px] font-black text-slate-700">
+                                <Sparkles className="h-3.5 w-3.5 text-amber-500" /> مساعد العجز والزيادة
+                              </div>
+                              <div className="space-y-1">
+                                {discrepancySuggestions.map((tip, idx) => (
+                                  <div key={idx} className="text-[11px] font-bold text-slate-500 leading-5">• {tip}</div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                           
                           <div className="flex flex-col gap-2">
                             <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">ملاحظات الإغلاق</label>
@@ -785,7 +971,7 @@ export default function DailyTreasuryPage() {
                         <motion.button
                           whileHover={{ y: -2 }}
                           whileTap={{ scale: 0.98 }}
-                          onClick={handleClose}
+                          onClick={() => setCloseConfirmOpen(true)}
                           disabled={!actualCash || closing}
                           className="w-full rounded-2xl bg-zinc-950 py-4 text-[15px] font-black text-white hover:bg-zinc-800 disabled:opacity-40 transition-all shadow-xl shadow-zinc-950/20"
                         >
@@ -876,65 +1062,42 @@ export default function DailyTreasuryPage() {
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* History Drawer */}
+      {/* History Modal */}
       <AnimatePresence>
         {historyOpen && (
-          <div className="fixed inset-0 z-50 flex justify-end" dir="rtl">
-            <motion.div 
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" 
-              onClick={() => setHistoryOpen(false)} 
-            />
-            <motion.div 
-              initial={{ x: "-100%", opacity: 0.5 }} 
-              animate={{ x: 0, opacity: 1 }} 
-              exit={{ x: "-100%", opacity: 0.5 }}
-              transition={{ type: "spring", stiffness: 300, damping: 30 }}
-              className="relative w-[380px] max-w-full h-full bg-white shadow-2xl flex flex-col"
-            >
-              <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5 bg-slate-50/50">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" dir="rtl">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-slate-900/45 backdrop-blur-sm" onClick={() => setHistoryOpen(false)} />
+            <motion.div variants={modalVariants} initial="hidden" animate="show" exit="exit" className="relative w-full max-w-5xl max-h-[86vh] overflow-hidden rounded-[2rem] bg-white shadow-2xl border border-slate-100 flex flex-col">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/70 px-6 py-5">
                 <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100">
-                    <History className="h-5 w-5" />
-                  </div>
-                  <h2 className="text-[18px] font-black text-zinc-900">سجل الأيام السابقة</h2>
+                  <div className="h-10 w-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center border border-indigo-100"><History className="h-5 w-5" /></div>
+                  <div><h2 className="text-[18px] font-black text-zinc-900">سجل اليوميات السابقة</h2><p className="text-[11px] font-bold text-slate-400">بحث، فلترة، ومعاينة مركزية بدون درج جانبي</p></div>
                 </div>
-                <button onClick={() => setHistoryOpen(false)} className="h-10 w-10 flex items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-400 hover:text-zinc-900 hover:bg-slate-50 transition-colors shadow-sm">
-                  <X className="h-5 w-5" />
-                </button>
+                <button onClick={() => setHistoryOpen(false)} className="h-10 w-10 flex items-center justify-center rounded-xl bg-white border border-slate-200 text-slate-400 hover:text-zinc-900 hover:bg-slate-50 transition-colors shadow-sm"><X className="h-5 w-5" /></button>
               </div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-[#fafafa]">
-                {pastSessions.map((s) => (
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    key={s.id}
-                    onClick={() => { setDate(s.date); setHistoryOpen(false); }}
-                    className={`w-full flex items-center justify-between p-4 rounded-2xl border transition-all text-right ${date === s.date ? "bg-emerald-50 border-emerald-200 shadow-md shadow-emerald-100" : "bg-white border-slate-200/60 shadow-sm hover:shadow-md"}`}
-                  >
-                    <div>
-                      <div className="text-[14px] font-black text-zinc-900 flex items-center gap-2">
-                        <Calendar className="h-4 w-4 text-slate-400" />
-                        {s.date}
-                      </div>
-                      <div className="text-[12px] text-slate-500 font-bold mt-2 flex items-center gap-2">
-                        <Wallet className="h-3 w-3" />
-                        الختامي: <span className="font-mono text-zinc-800">{fmt(s.closing_balance)}</span> ج.م
-                      </div>
-                    </div>
-                    <span className={`rounded-xl px-3 py-1.5 text-[11px] font-black flex items-center gap-1.5 ${s.status === "closed" ? "bg-slate-100 text-slate-600 border border-slate-200" : "bg-emerald-100 text-emerald-700 border border-emerald-200"}`}>
-                      {s.status === "closed" ? <Lock className="h-3 w-3"/> : <CheckCircle2 className="h-3 w-3"/>}
-                      {s.status === "closed" ? "مغلق" : "مفتوح"}
-                    </span>
-                  </motion.button>
-                ))}
-                {pastSessions.length === 0 && (
-                  <div className="flex flex-col items-center justify-center h-40 text-slate-400 gap-3">
-                    <History className="h-8 w-8 text-slate-200" />
-                    <span className="text-[13px] font-black">لا توجد جلسات سابقة مسجلة</span>
-                  </div>
-                )}
+              <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 px-6 py-3">
+                <div className="relative flex-1 min-w-[240px]"><Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input value={historySearch} onChange={(e) => setHistorySearch(e.target.value)} placeholder="بحث بتاريخ اليوم أو ملاحظات الإغلاق" className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pr-9 pl-3 text-[12px] font-bold outline-none focus:border-indigo-500 focus:bg-white" /></div>
+                <select value={historyStatus} onChange={(e) => setHistoryStatus(e.target.value)} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-[12px] font-black text-slate-600 outline-none focus:border-indigo-500"><option value="">كل الحالات</option><option value="open">مفتوح</option><option value="closed">مغلق</option></select>
+                <button onClick={() => { setHistorySearch(""); setHistoryStatus(""); }} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-[11px] font-black text-slate-500 hover:bg-slate-50">مسح الفلاتر</button>
+              </div>
+              <div className="flex-1 overflow-auto p-4 bg-[#fafafa]">
+                <table className="w-full min-w-[760px] border-separate border-spacing-y-2 text-right">
+                  <thead><tr className="text-[10px] font-black text-slate-400 uppercase tracking-widest"><th className="px-3 py-2">التاريخ</th><th className="px-3 py-2">الحالة</th><th className="px-3 py-2">افتتاحي</th><th className="px-3 py-2">فعلي</th><th className="px-3 py-2">ختامي</th><th className="px-3 py-2">عجز / زيادة</th><th className="px-3 py-2">إجراءات</th></tr></thead>
+                  <tbody>
+                    {pastSessions.map((s) => (
+                      <tr key={s.id} className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70">
+                        <td className="rounded-r-2xl px-3 py-3 font-black text-zinc-900">{s.date}</td>
+                        <td className="px-3 py-3"><span className={`inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1 text-[10px] font-black ${s.status === "closed" ? "bg-slate-100 text-slate-600" : "bg-emerald-100 text-emerald-700"}`}>{s.status === "closed" ? <Lock className="h-3 w-3" /> : <CheckCircle2 className="h-3 w-3" />}{s.status === "closed" ? "مغلق" : "مفتوح"}</span></td>
+                        <td className="px-3 py-3 font-mono text-[12px] font-black text-slate-600">{fmt(s.opening_balance)}</td>
+                        <td className="px-3 py-3 font-mono text-[12px] font-black text-slate-600">{s.actual_cash == null ? "—" : fmt(s.actual_cash)}</td>
+                        <td className="px-3 py-3 font-mono text-[12px] font-black text-slate-600">{s.closing_balance == null ? "—" : fmt(s.closing_balance)}</td>
+                        <td className={`px-3 py-3 font-mono text-[12px] font-black ${Number(s.discrepancy || 0) < 0 ? "text-rose-600" : "text-emerald-600"}`}>{s.discrepancy == null ? "—" : fmt(s.discrepancy)}</td>
+                        <td className="rounded-l-2xl px-3 py-3"><button onClick={() => { setDate(s.date); setHistoryOpen(false); setActiveTab("all"); }} className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-slate-900 px-3 text-[11px] font-black text-white hover:bg-slate-800"><Eye className="h-3.5 w-3.5" /> معاينة</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {pastSessions.length === 0 && <div className="flex flex-col items-center justify-center h-48 text-slate-400 gap-3"><History className="h-8 w-8 text-slate-200" /><span className="text-[13px] font-black">لا توجد يوميات مطابقة</span></div>}
               </div>
             </motion.div>
           </div>
@@ -1152,6 +1315,97 @@ export default function DailyTreasuryPage() {
                 >
                   <CheckCircle2 className="h-5 w-5" /> ترحيل الرصيد للإغلاق
                 </motion.button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <ExpenseFormModal
+        open={expenseOpen}
+        onClose={() => setExpenseOpen(false)}
+        onSuccess={refreshAfterFinanceModal}
+      />
+      <RevenueFormModal
+        open={revenueOpen}
+        onClose={() => setRevenueOpen(false)}
+        onSuccess={refreshAfterFinanceModal}
+      />
+
+      <AnimatePresence>
+        {openingEditOpen && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" dir="rtl">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-slate-900/45 backdrop-blur-sm" onClick={() => setOpeningEditOpen(false)} />
+            <motion.div variants={modalVariants} initial="hidden" animate="show" exit="exit" className="relative w-full max-w-md rounded-[2rem] bg-white p-6 shadow-2xl border border-slate-100">
+              <div className="mb-5 flex items-center justify-between">
+                <div>
+                  <h3 className="text-[17px] font-black text-zinc-900">تعديل الرصيد الافتتاحي</h3>
+                  <p className="text-[11px] font-bold text-slate-400">مسموح فقط قبل إغلاق اليومية، ويحتاج سبب واضح للمراجعة.</p>
+                </div>
+                <button onClick={() => setOpeningEditOpen(false)} className="h-9 w-9 rounded-xl bg-slate-50 text-slate-400 hover:text-zinc-900"><X className="mx-auto h-4 w-4" /></button>
+              </div>
+              <div className="space-y-3">
+                <input
+                  type="number"
+                  value={openingDraft}
+                  onChange={(e) => setOpeningDraft(e.target.value)}
+                  className="h-12 w-full rounded-xl border border-slate-200 px-4 text-center text-[18px] font-black font-mono outline-none focus:border-indigo-500"
+                  placeholder="0.00"
+                />
+                <textarea
+                  value={openingReason}
+                  onChange={(e) => setOpeningReason(e.target.value)}
+                  className="h-24 w-full resize-none rounded-xl border border-slate-200 p-3 text-[12px] font-bold outline-none focus:border-indigo-500"
+                  placeholder="سبب التعديل: مثال، تم نقل رصيد إغلاق أمس يدوياً..."
+                />
+                <button
+                  onClick={saveOpeningBalance}
+                  disabled={!openingDraft || openingReason.trim().length < 4}
+                  className="w-full rounded-xl bg-indigo-700 py-3 text-[13px] font-black text-white hover:bg-indigo-800 disabled:opacity-40"
+                >
+                  حفظ الرصيد الافتتاحي
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {closeConfirmOpen && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" dir="rtl">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-slate-900/55 backdrop-blur-sm" onClick={() => setCloseConfirmOpen(false)} />
+            <motion.div variants={modalVariants} initial="hidden" animate="show" exit="exit" className="relative w-full max-w-2xl overflow-hidden rounded-[2rem] bg-white shadow-2xl border border-slate-100">
+              <div className="border-b border-slate-100 bg-slate-50 px-6 py-5">
+                <h3 className="text-[18px] font-black text-zinc-900">مراجعة إغلاق اليومية</h3>
+                <p className="mt-1 text-[12px] font-bold text-slate-500">راجع النتيجة قبل الاعتماد. بعد الإغلاق سيتم منع إدخال حركات على هذا اليوم حتى تعيد فتحه.</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3 p-6">
+                {[
+                  ["الرصيد الافتتاحي", summary?.opening_balance],
+                  ["إجمالي الداخل النقدي", cashIn],
+                  ["إجمالي الخارج النقدي", cashOut],
+                  ["المتوقع في الخزينة", expected],
+                  ["الرصيد الفعلي", actualCash],
+                  ["العجز / الزيادة", draftDiscrepancy],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="text-[10px] font-black text-slate-400">{label}</div>
+                    <div className={`mt-1 font-mono text-[18px] font-black ${label === "العجز / الزيادة" && Number(value) < 0 ? "text-rose-700" : "text-zinc-900"}`}>
+                      {label === "العجز / الزيادة" && Number(value) > 0 ? "+" : ""}{fmt(value)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="mx-6 mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                <div className="mb-2 flex items-center gap-2 text-[12px] font-black text-amber-800"><AlertCircle className="h-4 w-4" /> اقتراحات قبل الإغلاق</div>
+                {discrepancySuggestions.map((tip, idx) => <div key={idx} className="text-[11px] font-bold text-amber-700 leading-5">• {tip}</div>)}
+              </div>
+              <div className="flex items-center justify-end gap-3 border-t border-slate-100 px-6 py-4">
+                <button onClick={() => setCloseConfirmOpen(false)} className="rounded-xl border border-slate-200 px-4 py-2 text-[12px] font-black text-slate-600 hover:bg-slate-50">رجوع للمراجعة</button>
+                <button onClick={confirmCloseDay} disabled={closing} className="rounded-xl bg-zinc-950 px-6 py-2 text-[12px] font-black text-white hover:bg-zinc-800 disabled:opacity-40">
+                  {closing ? "جاري الإغلاق..." : "اعتماد الإغلاق النهائي"}
+                </button>
               </div>
             </motion.div>
           </div>
