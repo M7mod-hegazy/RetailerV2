@@ -4,7 +4,9 @@ import {
   ArrowDownCircle,
   ArrowUpDown,
   Banknote,
+  ChevronLeft,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   CreditCard,
   Gift,
@@ -80,9 +82,14 @@ function LookupList({ items, onPick, activeIndex, query, emptyLabel = "لا تو
               ) : (
                 <div className="w-8 h-8 rounded-md bg-slate-100 flex items-center justify-center border border-slate-200"><Package className="w-4 h-4 text-slate-300"/></div>
               )}
-              <div className="flex flex-col gap-0.5">
-                <span className={`text-[13px] font-black ${activeIndex === i ? "text-indigo-900" : "text-slate-800"}`}><Highlight text={item.name} query={query} /></span>
-                <span className="font-mono text-[10px] text-slate-400 font-bold"><Highlight text={item.item_code || item.code || item.barcode || `#${item.id}`} query={query} /></span>
+              <div className="flex flex-col gap-0">
+                <span className="font-mono text-[11px] font-black text-indigo-700 tracking-wide leading-tight">
+                  <Highlight text={item.item_code || item.code || item.barcode || `#${item.id}`} query={query} />
+                </span>
+                <div className="h-px bg-slate-200 my-0.5" />
+                <span className={`text-[12px] font-black leading-tight ${activeIndex === i ? "text-indigo-900" : "text-slate-800"}`}>
+                  <Highlight text={item.name} query={query} />
+                </span>
               </div>
             </div>
             <div className="flex flex-col items-end">
@@ -97,6 +104,95 @@ function LookupList({ items, onPick, activeIndex, query, emptyLabel = "لا تو
 }
 
 // ─── Formatters ──────────────────────────────────────────────────────────────
+
+function GalleryModal({ open, onClose, images, idx, setIdx, zoom, setZoom }) {
+  if (!open || !images.length) return null;
+  const current = images[idx];
+  return (
+    <Modal open={open} onClose={onClose} title="معاينة الصورة" size="lg">
+      <div className="flex flex-col items-center gap-3 p-3 bg-slate-900 rounded-lg" style={{ minHeight: 320 }}>
+        <div
+          className="flex items-center justify-center w-full overflow-hidden rounded-md"
+          style={{ minHeight: 260, maxHeight: "60vh" }}
+        >
+          <img
+            src={current}
+            alt="product"
+            style={{
+              transform: `scale(${zoom})`,
+              transition: "transform 0.2s ease",
+              maxWidth: "100%",
+              maxHeight: "60vh",
+              objectFit: "contain",
+            }}
+            className="rounded-md"
+          />
+        </div>
+
+        <div className="flex items-center gap-3 flex-wrap justify-center">
+          <button
+            type="button"
+            onClick={() => { setIdx(i => Math.max(0, i - 1)); setZoom(1); }}
+            disabled={idx === 0}
+            className="p-2 rounded-full bg-slate-700 text-white hover:bg-slate-600 disabled:opacity-30 transition-colors"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setZoom(z => parseFloat(Math.max(0.5, z - 0.25).toFixed(2)))}
+            className="px-3 py-1.5 rounded-sm bg-slate-700 text-white text-[12px] font-bold hover:bg-slate-600 transition-colors"
+          >
+            -
+          </button>
+          <span className="text-white text-[11px] font-mono w-10 text-center">
+            {Math.round(zoom * 100)}%
+          </span>
+          <button
+            type="button"
+            onClick={() => setZoom(z => parseFloat(Math.min(4, z + 0.25).toFixed(2)))}
+            className="px-3 py-1.5 rounded-sm bg-slate-700 text-white text-[12px] font-bold hover:bg-slate-600 transition-colors"
+          >
+            +
+          </button>
+          <button
+            type="button"
+            onClick={() => setZoom(1)}
+            className="px-3 py-1.5 rounded-sm bg-slate-600 text-slate-300 text-[10px] font-bold hover:bg-slate-500 transition-colors"
+          >
+            100%
+          </button>
+          <button
+            type="button"
+            onClick={() => { setIdx(i => Math.min(images.length - 1, i + 1)); setZoom(1); }}
+            disabled={idx === images.length - 1}
+            className="p-2 rounded-full bg-slate-700 text-white hover:bg-slate-600 disabled:opacity-30 transition-colors"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+        </div>
+
+        {images.length > 1 && (
+          <div className="flex gap-2 flex-wrap justify-center">
+            {images.map((_, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => { setIdx(i); setZoom(1); }}
+                className={`w-2.5 h-2.5 rounded-full transition-colors ${
+                  i === idx ? "bg-white" : "bg-slate-600 hover:bg-slate-400"
+                }`}
+              />
+            ))}
+          </div>
+        )}
+        {images.length > 1 && (
+          <span className="text-slate-400 text-[10px] font-mono">{idx + 1} / {images.length}</span>
+        )}
+      </div>
+    </Modal>
+  );
+}
 
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("ar-EG", {
@@ -298,6 +394,8 @@ export default function POSPage() {
   const setCustomer       = usePosStore((s) => s.setCustomer);
   const discount          = usePosStore((s) => s.discount);
   const setDiscount       = usePosStore((s) => s.setDiscount);
+  const increase          = usePosStore((s) => s.increase);
+  const setIncrease       = usePosStore((s) => s.setIncrease);
   const promotionDiscount = usePosStore((s) => s.promotionDiscount);
   const appliedPromotions = usePosStore((s) => s.appliedPromotions);
   const paymentType       = usePosStore((s) => s.paymentType);
@@ -317,6 +415,7 @@ export default function POSPage() {
   const [banks, setBanks]                 = useState([]);
   const [treasuries, setTreasuries]       = useState([]);
   const [units, setUnits]                 = useState([]);
+  const [employees, setEmployees]         = useState([]);
   const [stockLevels, setStockLevels]     = useState({});
   const [storeSettings, setStoreSettings] = useState({ company_name: "المتجر", address: "" });
   const [printPreview, setPrintPreview] = useState(false);
@@ -385,6 +484,17 @@ export default function POSPage() {
   const [selectedItem, setSelectedItem] = useState(null);
   const [staging, setStaging] = useState({ warehouseId: "", quantity: "1", unitPrice: "", lineDiscount: "0" });
   const [activeEntryField, setActiveEntryField] = useState(null);
+  const [sellerId, setSellerId] = useState("");
+  const [invoiceDiscountMode, setInvoiceDiscountMode] = useState("flat");
+  const [invoiceIncreaseMode, setInvoiceIncreaseMode] = useState("flat");
+  const [lastSalePrice, setLastSalePrice] = useState(null);
+  const [priceType, setPriceType] = useState("retail");
+  const [discountModes, setDiscountModes] = useState({});
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [galleryImages, setGalleryImages] = useState([]);
+  const [galleryIdx, setGalleryIdx] = useState(0);
+  const [galleryZoom, setGalleryZoom] = useState(1);
+  const [pendingBelowCostAdd, setPendingBelowCostAdd] = useState(false);
 
   // Save feedback
   const [saveMessage, setSaveMessage]   = useState("");
@@ -448,6 +558,7 @@ export default function POSPage() {
     api.get("/api/banks").then((r) => setBanks(r.data.data || [])).catch(() => {});
     api.get("/api/treasuries").then((r) => setTreasuries(r.data.data || [])).catch(() => {});
     api.get("/api/units").then((r) => setUnits(r.data.data || [])).catch(() => {});
+    api.get("/api/employees").then((r) => setEmployees(r.data.data || [])).catch(() => {});
     api.get("/api/stock/levels").then((r) => {
       const grouped = {};
       (r.data.data || []).forEach(row => {
@@ -467,14 +578,30 @@ export default function POSPage() {
 
   useEffect(() => {
     if (!selectedItem) return;
+    setPriceType("retail");
     setStaging((s) => ({
       ...s,
       unitPrice: String(Number(selectedItem.sale_price || selectedItem.price || 0)),
-      warehouseId: s.warehouseId || String(warehouses[0]?.id || ""),
+      warehouseId: (() => {
+        if (stockLevels[selectedItem.id]) {
+          const first = warehouses.find((w) => (stockLevels[selectedItem.id][w.id] || 0) > 0);
+          if (first) return String(first.id);
+        }
+        return s.warehouseId || String(warehouses[0]?.id || "");
+      })(),
+      unitId: String(units?.[0]?.id || ""),
       quantity: "1",
       lineDiscount: "0",
     }));
-  }, [selectedItem, warehouses]);
+    setPendingBelowCostAdd(false);
+  }, [selectedItem, warehouses, stockLevels, units]);
+
+  useEffect(() => {
+    if (!selectedItem?.id) { setLastSalePrice(null); return; }
+    api.get(`/api/invoices/last-price/${selectedItem.id}`)
+      .then((r) => setLastSalePrice(r.data.data ?? null))
+      .catch(() => setLastSalePrice(null));
+  }, [selectedItem?.id]);
 
   useEffect(() => {
     const handler = (e) => { if (e.detail) handleSelectItem(e.detail); };
@@ -555,6 +682,40 @@ export default function POSPage() {
   const paidAmountNumber   = Number(amountPaid || 0);
   const creditRemaining    = Math.max(0, totals.total - Math.max(0, paidAmountNumber));
   const changeAmount       = Math.max(0, Number(amountReceived || 0) - totals.total);
+
+  const lineWarnings = useMemo(() => {
+    const result = {};
+    for (const l of lines) {
+      const item = items.find((it) => it.id === l.item_id);
+      const warnings = [];
+      const unitPrice = Number(l.unit_price || 0);
+      const quantity = Number(l.quantity || 0);
+      const lineDiscount = Number(l.line_discount || 0);
+      const stockQty = Number(stockLevels[l.item_id]?.[l.warehouse_id] ?? l.stock_quantity ?? 0);
+      const costPrice = Number(item?.purchase_price || 0);
+      const lineTotal = unitPrice * quantity;
+
+      if (unitPrice <= 0) warnings.push({ type: "error", code: "zero_price", msg: "سعر صفر" });
+      if (quantity > stockQty && stockQty > 0) warnings.push({ type: "error", code: "stock_exceeded", msg: `تجاوز المخزون (متاح: ${stockQty})` });
+      if (quantity > stockQty && stockQty === 0) warnings.push({ type: "error", code: "no_stock", msg: "لا يوجد مخزون" });
+      if (costPrice > 0 && unitPrice < costPrice && unitPrice > 0) warnings.push({ type: "warning", code: "below_cost", msg: `أقل من التكلفة (${Number(costPrice).toFixed(2)})` });
+      if (lineDiscount > lineTotal && lineTotal > 0) warnings.push({ type: "warning", code: "discount_overflow", msg: "الخصم يتجاوز الإجمالي" });
+      if (lineDiscount < 0) warnings.push({ type: "warning", code: "negative_discount", msg: "خصم سالب" });
+      if (quantity <= 0) warnings.push({ type: "error", code: "zero_qty", msg: "كمية صفر" });
+      result[l.item_id] = warnings;
+    }
+    return result;
+  }, [lines, items, stockLevels]);
+
+  const hasBlockingErrors = useMemo(
+    () => Object.values(lineWarnings).some((ws) => ws.some((w) => w.type === "error")),
+    [lineWarnings],
+  );
+
+  const blockingErrorCount = useMemo(
+    () => Object.values(lineWarnings).flat().filter((w) => w.type === "error").length,
+    [lineWarnings],
+  );
 
   const invoiceNumber = useMemo(() => {
     const stamp = new Date(invoiceTick);
@@ -651,6 +812,9 @@ export default function POSPage() {
     setSelectedItem(null);
     setItemLookupOpen(false);
     setStaging((s) => ({ ...s, quantity: "1", unitPrice: "", lineDiscount: "0" }));
+    setPendingBelowCostAdd(false);
+    setPriceType("retail");
+    setLastSalePrice(null);
     window.requestAnimationFrame(() => codeInputRef.current?.focus());
   }
 
@@ -674,6 +838,17 @@ export default function POSPage() {
     } else {
       window.requestAnimationFrame(() => { qtyInputRef.current?.focus(); qtyInputRef.current?.select(); });
     }
+  }
+
+  function openGallery(imageUrls, startIdx = 0) {
+    const imgs = Array.isArray(imageUrls)
+      ? imageUrls.filter(Boolean)
+      : [imageUrls].filter(Boolean);
+    if (!imgs.length) return;
+    setGalleryImages(imgs.map((u) => resolveImageUrl(u)));
+    setGalleryIdx(startIdx);
+    setGalleryZoom(1);
+    setGalleryOpen(true);
   }
 
   function handleCodeFieldKeyDown(e) {
@@ -734,13 +909,20 @@ export default function POSPage() {
     const quantity    = Math.max(1, Number(staging.quantity || 1));
     const unitPrice   = Math.max(0, Number(staging.unitPrice || 0));
     const lineDiscount = Math.max(0, Number(staging.lineDiscount || 0));
-    const stockValue  = Number(selectedItem.stock_quantity || selectedItem.stock || 0);
+    const stockValue  = Number(stockLevels[selectedItem.id]?.[warehouse.id] ?? selectedItem.stock_quantity ?? selectedItem.stock ?? 0);
     const purchasePrice = Number(selectedItem.purchase_price || 0);
+    const unit = units.find((u) => String(u.id) === String(staging.unitId));
 
     if (unitPrice <= 0)           { setSaveMessage("لا يمكن إضافة صنف بسعر صفر."); setTimeout(() => setSaveMessage(""), 3000); return; }
     if (quantity > stockValue)    { setSaveMessage(`المخزون غير كافٍ (المتاح: ${stockValue})`); setTimeout(() => setSaveMessage(""), 3000); return; }
-    if (unitPrice < purchasePrice) {
-      if (!window.confirm(`السعر أقل من الشراء (${formatMoney(purchasePrice)}). هل تريد المتابعة؟`)) return;
+    if (unitPrice < purchasePrice && unitPrice > 0) {
+      if (!pendingBelowCostAdd) {
+        setPendingBelowCostAdd(true);
+        setSaveMessage(`تحذير: السعر (${formatMoney(unitPrice)}) أقل من سعر الشراء (${formatMoney(purchasePrice)}). اضغط إضافة مرة أخرى للتأكيد.`);
+        setTimeout(() => { setSaveMessage(""); setPendingBelowCostAdd(false); }, 4000);
+        return;
+      }
+      setPendingBelowCostAdd(false);
     }
 
     addLine({
@@ -753,7 +935,7 @@ export default function POSPage() {
       warehouse_id: warehouse.id,
       warehouse_name: warehouse.name,
       stock_quantity: stockValue,
-      unit_name: selectedItem.unit_name || "قطعة",
+      unit_name: unit?.name || unit?.symbol || selectedItem.unit_name || "قطعة",
       primary_image_url: getItemImage(selectedItem) || null,
       quantity,
       line_discount: lineDiscount,
@@ -782,6 +964,11 @@ export default function POSPage() {
 
   async function saveInvoice(printAfter, opts = {}) {
     if (!lines.length || isSaving) return;
+    if (hasBlockingErrors) {
+      setSaveMessage("لا يمكن الحفظ قبل معالجة أخطاء السطور.");
+      setTimeout(() => setSaveMessage(""), 5000);
+      return;
+    }
     if (lines.some((l) => Number(l.unit_price || 0) <= 0)) {
       setSaveMessage("يوجد صنف بسعر غير صالح."); setTimeout(() => setSaveMessage(""), 5000); return;
     }
@@ -807,6 +994,8 @@ export default function POSPage() {
       });
       const payload = {
         customer_id: customer?.id || null,
+        seller_id: sellerId ? Number(sellerId) : null,
+        increase: Number(increase || 0),
         lines: lines.map((l) => ({
           item_id:      l.item_id,
           quantity:     Number(l.quantity || 0),
@@ -829,7 +1018,8 @@ export default function POSPage() {
       const receiptSnap = {
         invoice_no: savedInvoiceNo, date: new Date(), lines: [...lines],
         customer: customer ? { ...customer } : null, totals: { ...totals },
-        discount, promotionDiscount, appliedPromotions: [...(appliedPromotions || [])],
+        discount, increase, promotionDiscount, appliedPromotions: [...(appliedPromotions || [])],
+        seller: employees.find((emp) => String(emp.id) === String(sellerId)) || null,
         paymentType, amountReceived: Number(amountReceived || 0),
         cashier: user?.name || "الكاشير",
         storeName: storeSettings.company_name || "المتجر",
@@ -880,8 +1070,8 @@ export default function POSPage() {
 
   
   function handleGridItemClick(item) {
-    const warehouse = warehouses.length ? warehouses[0] : { id: "default", name: "المخزن الرئيسي" };
-    const stockValue = Number(item.stock_quantity || item.stock || 0);
+    const warehouse = warehouses.find((w) => (stockLevels[item.id]?.[w.id] || 0) > 0) || (warehouses.length ? warehouses[0] : { id: "default", name: "المخزن الرئيسي" });
+    const stockValue = Number(stockLevels[item.id]?.[warehouse.id] ?? item.stock_quantity ?? item.stock ?? 0);
     const salePrice = Number(item.sale_price || item.price || 0);
 
     if (salePrice <= 0) { setSaveMessage("لا يمكن إضافة صنف بسعر صفر."); setTimeout(() => setSaveMessage(""), 3000); return; }
@@ -927,9 +1117,6 @@ export default function POSPage() {
     }
   }
 
-  const [listImageModal, setListImageModal] = useState(false);
-  const [listImageUrl, setListImageUrl]     = useState("");
-
   if (viewMode === "list") {
     return (
       <div className="flex h-screen flex-col bg-slate-50 font-sans overflow-hidden" dir="rtl">
@@ -943,13 +1130,13 @@ export default function POSPage() {
         )}
 
         {/* Header like purchases/new */}
-        <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-300 bg-white px-6 z-40">
-          <div className="flex items-center gap-4">
+        <header className="flex h-14 shrink-0 items-center border-b border-slate-300 bg-white px-4 z-40 gap-4">
+          <div className="flex items-center gap-3 shrink-0">
             <div className="flex flex-col">
               <h1 className="text-[14px] font-black text-slate-800">فاتورة مبيعات جديدة</h1>
               <span className="text-[10px] font-bold text-slate-400">نقطة البيع - القائمة</span>
             </div>
-            <div className="flex shrink-0 bg-slate-100 rounded-md p-1 border border-slate-200 mr-4">
+            <div className="flex shrink-0 bg-slate-100 rounded-md p-1 border border-slate-200">
               <button 
                 onClick={() => setViewMode("grid")}
                 className={`p-1.5 rounded-sm transition-all ${viewMode === "grid" ? "bg-white shadow-sm text-emerald-600" : "text-slate-500 hover:text-slate-700"}`}
@@ -967,9 +1154,34 @@ export default function POSPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5 flex-1 justify-center min-w-0">
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Receipt className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+              <input
+                readOnly
+                value={invoiceNumber}
+                className="w-[155px] rounded-sm border border-slate-200 bg-slate-100 px-2 py-1 text-[12px] font-mono font-black text-slate-600 cursor-default text-center select-none"
+              />
+            </div>
+            <div className="flex items-center gap-1.5 rounded-sm border border-slate-200 bg-slate-50 px-2.5 py-1 shrink-0">
+              <User className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+              <span className="text-[12px] font-bold text-slate-600 max-w-[100px] truncate">{user?.name || "-"}</span>
+            </div>
+            <select
+              value={sellerId}
+              onChange={(e) => setSellerId(e.target.value)}
+              className="rounded-sm border border-slate-300 bg-white px-2 py-1 text-[12px] font-bold text-slate-700 outline-none focus:border-slate-800 min-w-[130px]"
+            >
+              <option value="">البائع (اختياري)</option>
+              {employees.filter((emp) => emp.is_active !== 0).map((emp) => (
+                <option key={emp.id} value={emp.id}>{emp.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-3 shrink-0">
             <button
-              onClick={() => { setLastSavedInvoice(null); setPrintPreview(true); }}
+              onClick={() => setPrintPreview(true)}
               disabled={!lines.length}
               className="flex h-9 items-center gap-2 rounded-sm border border-slate-300 bg-white px-4 text-[13px] font-black text-slate-700 hover:bg-slate-50 disabled:opacity-40 transition-all"
             >
@@ -977,10 +1189,16 @@ export default function POSPage() {
             </button>
             <button
               onClick={() => saveInvoice(false)}
-              disabled={isSaving || !lines.length}
-              className="flex h-9 items-center gap-2 rounded-sm bg-slate-800 px-6 text-[13px] font-black text-white hover:bg-slate-700 disabled:opacity-50 transition-all"
+              disabled={isSaving || !lines.length || hasBlockingErrors}
+              className={`flex h-9 items-center gap-2 rounded-sm px-6 text-[13px] font-black text-white transition-all disabled:opacity-50
+                ${hasBlockingErrors && lines.length ? "bg-rose-600" : "bg-slate-800 hover:bg-slate-700"}`}
             >
-              {isSaving ? "جاري الحفظ..." : "حفظ الفاتورة (F9)"}
+              {isSaving ? "جاري الحفظ..." : (
+                <>
+                  حفظ الفاتورة (F9)
+                  {hasBlockingErrors && <span className="ml-1.5 rounded-full bg-rose-400 text-white text-[9px] font-black px-1.5 py-0.5">{blockingErrorCount}</span>}
+                </>
+              )}
             </button>
           </div>
         </header>
@@ -1037,7 +1255,9 @@ export default function POSPage() {
 
             {/* Invoice Summary */}
             <div className="rounded-md border border-slate-300 bg-white p-4 shadow-sm">
-              <h3 className="mb-3 text-[11px] font-black text-slate-400 uppercase tracking-widest border-b pb-2 border-slate-100">ملخص الفاتورة</h3>
+              <h3 className="mb-3 text-[11px] font-black text-slate-400 uppercase tracking-widest border-b pb-2 border-slate-100">
+                ملخص الفاتورة
+              </h3>
               <div className="space-y-2.5">
                 <div className="flex items-center justify-between">
                   <span className="text-[12px] font-bold text-slate-500">إجمالي الأصناف</span>
@@ -1047,14 +1267,105 @@ export default function POSPage() {
                   <span className="text-[12px] font-bold text-slate-500">مجموع الكميات</span>
                   <span className="text-[12px] font-black text-slate-800">{lines.reduce((acc, l) => acc + Number(l.quantity), 0)}</span>
                 </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[12px] font-bold text-slate-500">الإجمالي الفرعي</span>
+                  <span className="text-[12px] font-black font-mono text-slate-800">{formatMoney(totals.subtotal)}</span>
+                </div>
                 <div className="h-px bg-slate-100" />
-                <div className="mt-3 rounded-sm bg-slate-900 p-4 text-center text-white">
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] font-bold text-rose-600">خصم الفاتورة</label>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      min="0"
+                      value={invoiceDiscountMode === "pct"
+                        ? (totals.subtotal > 0 ? parseFloat(((discount / totals.subtotal) * 100).toFixed(2)) : 0)
+                        : discount}
+                      onChange={(e) => {
+                        const v = Math.max(0, Number(e.target.value || 0));
+                        if (invoiceDiscountMode === "pct") {
+                          setDiscount(Math.min(parseFloat(((v / 100) * totals.subtotal).toFixed(4)), totals.subtotal));
+                        } else {
+                          setDiscount(Math.min(v, totals.subtotal));
+                        }
+                      }}
+                      className="flex-1 min-w-0 rounded-sm border border-rose-300 bg-rose-50 px-2 py-1.5 text-[12px] font-black text-rose-900 outline-none focus:border-rose-500 text-center"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setInvoiceDiscountMode((m) => m === "pct" ? "flat" : "pct")}
+                      title={invoiceDiscountMode === "pct" ? "تغيير إلى قيمة ثابتة" : "تغيير إلى نسبة مئوية"}
+                      className={`h-[34px] px-2.5 rounded-sm text-[11px] font-black border transition-colors shrink-0
+                        ${invoiceDiscountMode === "pct"
+                          ? "bg-rose-100 border-rose-300 text-rose-700"
+                          : "bg-slate-100 border-slate-300 text-slate-500 hover:bg-slate-200"}`}
+                    >
+                      {invoiceDiscountMode === "pct" ? "%" : "ج"}
+                    </button>
+                  </div>
+                  {discount > 0 && invoiceDiscountMode === "flat" && totals.subtotal > 0 && (
+                    <span className="text-[10px] font-mono text-rose-400">{((discount / totals.subtotal) * 100).toFixed(1)}% من الإجمالي</span>
+                  )}
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] font-bold text-blue-600">إضافة / رسوم</label>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      min="0"
+                      value={invoiceIncreaseMode === "pct"
+                        ? (totals.subtotal > 0 ? parseFloat(((increase / totals.subtotal) * 100).toFixed(2)) : 0)
+                        : increase}
+                      onChange={(e) => {
+                        const v = Math.max(0, Number(e.target.value || 0));
+                        if (invoiceIncreaseMode === "pct") {
+                          setIncrease(parseFloat(((v / 100) * totals.subtotal).toFixed(4)));
+                        } else {
+                          setIncrease(v);
+                        }
+                      }}
+                      className="flex-1 min-w-0 rounded-sm border border-blue-300 bg-blue-50 px-2 py-1.5 text-[12px] font-black text-blue-900 outline-none focus:border-blue-500 text-center"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setInvoiceIncreaseMode((m) => m === "pct" ? "flat" : "pct")}
+                      title={invoiceIncreaseMode === "pct" ? "تغيير إلى قيمة ثابتة" : "تغيير إلى نسبة مئوية"}
+                      className={`h-[34px] px-2.5 rounded-sm text-[11px] font-black border transition-colors shrink-0
+                        ${invoiceIncreaseMode === "pct"
+                          ? "bg-blue-100 border-blue-300 text-blue-700"
+                          : "bg-slate-100 border-slate-300 text-slate-500 hover:bg-slate-200"}`}
+                    >
+                      {invoiceIncreaseMode === "pct" ? "%" : "ج"}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="h-px bg-slate-200" />
+                <div className="rounded-sm bg-slate-900 p-4 text-center text-white">
                   <div className="text-[10px] font-bold opacity-60 uppercase tracking-widest">إجمالي المستحق</div>
-                  <div className="text-[26px] font-black tracking-tighter font-mono">
+                  <div className="text-[28px] font-black tracking-tighter font-mono leading-none mt-1">
                     {totals.total.toLocaleString("ar-EG", { minimumFractionDigits: 2 })}
                   </div>
-                  <div className="text-[10px] opacity-40">ج.م</div>
+                  <div className="text-[10px] opacity-40 mt-1">ج.م</div>
                 </div>
+
+                {hasBlockingErrors && (
+                  <div className="rounded-sm bg-rose-50 border border-rose-200 px-3 py-2">
+                    <div className="text-[11px] font-black text-rose-700 mb-1">تحذيرات تمنع الحفظ:</div>
+                    {Object.entries(lineWarnings).flatMap(([itemId, ws]) =>
+                      ws.filter((w) => w.type === "error").map((w, i) => {
+                        const l = lines.find((ln) => String(ln.item_id) === String(itemId));
+                        return (
+                          <div key={`${itemId}-${i}`} className="text-[10px] text-rose-600 font-bold">
+                            • {l?.item_name || itemId}: {w.msg}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1138,7 +1449,32 @@ export default function POSPage() {
           <div className="flex flex-1 flex-col gap-3 min-w-0 overflow-hidden">
             {/* Quick Entry Bar */}
             <section className="rounded-md border border-slate-300 bg-white p-3 shadow-sm shrink-0">
-              <div className="grid grid-cols-[3fr_80px_90px_80px_130px_100px_auto] gap-2 items-end">
+              <div className="grid grid-cols-[44px_3fr_80px_120px_80px_160px_100px_auto] gap-2 items-end">
+                <div className="flex items-end pb-0.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!selectedItem) return;
+                      const imgs = Array.isArray(selectedItem.image_urls) && selectedItem.image_urls.length
+                        ? selectedItem.image_urls
+                        : selectedItem.primary_image_url
+                          ? [selectedItem.primary_image_url]
+                          : [];
+                      openGallery(imgs);
+                    }}
+                    disabled={!selectedItem}
+                    className={`w-[42px] h-[37px] rounded-sm border flex items-center justify-center overflow-hidden transition-all
+                      ${selectedItem?.primary_image_url
+                        ? "border-slate-300 bg-slate-100 hover:border-indigo-400 cursor-pointer"
+                        : "border-dashed border-slate-300 bg-slate-50 cursor-default opacity-60"}`}
+                    title={selectedItem?.primary_image_url ? "عرض صورة الصنف" : "لا توجد صورة"}
+                  >
+                    {selectedItem?.primary_image_url
+                      ? <img src={resolveImageUrl(selectedItem.primary_image_url)} alt="" className="w-full h-full object-cover" />
+                      : <ImageIcon className="w-4 h-4 text-slate-300" />
+                    }
+                  </button>
+                </div>
                 {/* Item search */}
                 <div className="relative flex flex-col gap-1">
                   <label className="text-[11px] font-bold text-slate-600">الصنف</label>
@@ -1173,6 +1509,15 @@ export default function POSPage() {
                       />
                     )}
                   </div>
+                  {selectedItem && (
+                    <div className="flex items-center gap-1.5 bg-indigo-50 border border-indigo-200 rounded-sm px-2 py-0.5 mt-0.5">
+                      <span className="font-mono text-[10px] font-black text-indigo-700 shrink-0">
+                        {selectedItem.item_code || selectedItem.code || `#${selectedItem.id}`}
+                      </span>
+                      <div className="h-3 w-px bg-indigo-300 shrink-0" />
+                      <span className="text-[10px] text-indigo-600 font-bold truncate">{selectedItem.name}</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Qty */}
@@ -1192,8 +1537,27 @@ export default function POSPage() {
                 </div>
 
                 {/* Price */}
-                <div className="flex flex-col gap-1">
+                <div className="flex flex-col gap-0.5">
                   <label className="text-[11px] font-bold text-slate-600">السعر</label>
+                  <select
+                    value={priceType}
+                    onChange={(e) => {
+                      const t = e.target.value;
+                      setPriceType(t);
+                      if (!selectedItem) return;
+                      if (t === "wholesale" && Number(selectedItem.wholesale_price) > 0) {
+                        setStaging((s) => ({ ...s, unitPrice: String(Number(selectedItem.wholesale_price)) }));
+                      } else {
+                        setStaging((s) => ({ ...s, unitPrice: String(Number(selectedItem.sale_price || selectedItem.price || 0)) }));
+                      }
+                    }}
+                    className="w-full h-[22px] border border-slate-300 rounded-sm bg-slate-50 px-1 text-[10px] font-bold text-slate-700 outline-none focus:border-slate-800"
+                  >
+                    <option value="retail">سعر المستهلك</option>
+                    {selectedItem && Number(selectedItem.wholesale_price) > 0 && (
+                      <option value="wholesale">سعر الجملة</option>
+                    )}
+                  </select>
                   <input
                     ref={listPriceRef}
                     type="number"
@@ -1202,8 +1566,18 @@ export default function POSPage() {
                     onChange={(e) => setStaging(s => ({ ...s, unitPrice: e.target.value }))}
                     onFocus={e => e.target.select()}
                     onKeyDown={(e) => handleListFieldKeyDown(e, listDiscRef, listQtyRef)}
-                    className="w-full h-[37px] border border-slate-300 rounded-sm bg-slate-50 py-2 px-2 text-[12px] font-black text-slate-800 outline-none focus:border-slate-800 text-center"
+                    className={`w-full h-[30px] border rounded-sm bg-slate-50 py-1 px-2 text-[12px] font-black outline-none text-center transition-colors
+                      ${selectedItem && Number(staging.unitPrice) > 0 && Number(staging.unitPrice) < Number(selectedItem.purchase_price || 0)
+                        ? "border-rose-400 bg-rose-50 text-rose-700 focus:border-rose-600"
+                        : "border-slate-300 text-slate-800 focus:border-slate-800"}`}
                   />
+                  <div className="h-[20px] flex items-center justify-center rounded-sm bg-slate-100 border border-slate-200 px-1">
+                    <span className="text-[10px] font-mono text-slate-400">
+                      {lastSalePrice !== null
+                        ? `آخر بيع: ${Number(lastSalePrice).toFixed(2)}`
+                        : "لا يوجد سابق"}
+                    </span>
+                  </div>
                 </div>
 
                 {/* Discount */}
@@ -1223,20 +1597,62 @@ export default function POSPage() {
                 </div>
 
                 {/* Warehouse */}
-                <div className="flex flex-col gap-1 relative">
+                <div className="flex flex-col gap-1">
                   <label className="text-[11px] font-bold text-slate-600 truncate">الرصيد / المخزن</label>
-                  <select
+                  <div
                     ref={listWhRef}
-                    value={staging.warehouseId}
-                    onChange={(e) => setStaging(s => ({ ...s, warehouseId: e.target.value }))}
+                    tabIndex={0}
                     onKeyDown={(e) => handleListFieldKeyDown(e, listQtyRef, listItemInputRef)}
-                    className="w-full h-[37px] border border-slate-300 rounded-sm bg-slate-50 py-1 px-2 text-[11px] font-bold text-slate-800 outline-none focus:border-slate-800"
+                    className="max-h-[96px] overflow-y-auto border border-slate-300 rounded-sm bg-slate-50 flex flex-col divide-y divide-slate-100 custom-scrollbar outline-none focus:border-slate-600"
                   >
-                    {warehouses.map(w => {
-                      const qty = selectedItem && stockLevels[selectedItem.id] ? (stockLevels[selectedItem.id][w.id] || 0) : "";
-                      return <option key={w.id} value={w.id}>{w.name}{selectedItem && qty !== "" ? ` (${qty})` : ""}</option>;
-                    })}
-                  </select>
+                    {!selectedItem ? (
+                      <div className="px-2 py-3 text-[10px] text-slate-400 font-bold text-center">اختر صنفاً أولاً</div>
+                    ) : (
+                      (() => {
+                        const stocked = warehouses.filter((w) => (stockLevels[selectedItem.id]?.[w.id] || 0) > 0);
+                        if (stocked.length === 0) {
+                          return (
+                            <div className="px-2 py-2.5 text-[10px] text-rose-600 font-bold text-center flex items-center justify-center gap-1.5">
+                              <AlertTriangle className="w-3.5 h-3.5" />لا يوجد مخزون لهذا الصنف
+                            </div>
+                          );
+                        }
+                        return stocked.map((w) => {
+                          const qty = stockLevels[selectedItem.id][w.id] || 0;
+                          const isSelected = String(staging.warehouseId) === String(w.id);
+                          const isLow = qty > 0 && qty < 5;
+                          const isInsuff = Number(staging.quantity) > qty;
+                          return (
+                            <button
+                              key={w.id}
+                              type="button"
+                              onClick={() => setStaging((s) => ({ ...s, warehouseId: String(w.id) }))}
+                              className={`flex items-center gap-2 px-2 py-1.5 text-right transition-colors
+                                ${isSelected
+                                  ? "bg-emerald-50 text-emerald-800"
+                                  : isInsuff
+                                    ? "bg-rose-50/50 text-slate-700 hover:bg-rose-50"
+                                    : "hover:bg-slate-100 text-slate-700"}`}
+                            >
+                              <div className={`h-2.5 w-2.5 rounded-full border-2 shrink-0 transition-colors
+                                ${isSelected ? "border-emerald-500 bg-emerald-500" : "border-slate-300"}`}
+                              />
+                              <span className="flex-1 truncate text-[11px] font-bold">{w.name}</span>
+                              <span className={`font-mono text-[10px] font-black rounded-sm px-1 shrink-0
+                                ${isInsuff
+                                  ? "text-rose-700 bg-rose-100"
+                                  : isLow
+                                    ? "text-amber-700 bg-amber-100"
+                                    : "text-slate-400"}`}
+                              >
+                                {qty}
+                              </span>
+                            </button>
+                          );
+                        });
+                      })()
+                    )}
+                  </div>
                 </div>
 
                 {/* Unit */}
@@ -1264,6 +1680,18 @@ export default function POSPage() {
                 >
                   <Plus className="h-4 w-4" /> إضافة
                 </button>
+                {selectedItem && staging.warehouseId && Number(staging.quantity) > (stockLevels[selectedItem?.id]?.[staging.warehouseId] || 0) && (
+                  <div className="col-span-full flex items-center gap-1.5 rounded-sm bg-rose-50 border border-rose-200 px-3 py-1.5 text-[11px] font-bold text-rose-700">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                    الكمية ({staging.quantity}) تتجاوز مخزون هذا الفرع ({stockLevels[selectedItem.id]?.[staging.warehouseId] || 0})
+                  </div>
+                )}
+                {selectedItem && Number(staging.unitPrice) > 0 && Number(staging.unitPrice) < Number(selectedItem.purchase_price || 0) && (
+                  <div className="col-span-full flex items-center gap-1.5 rounded-sm bg-amber-50 border border-amber-200 px-3 py-1.5 text-[11px] font-bold text-amber-700">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                    السعر أقل من سعر الشراء ({Number(selectedItem.purchase_price).toFixed(2)}) - ستحتاج موافقة مشرف
+                  </div>
+                )}
               </div>
             </section>
 
@@ -1282,16 +1710,37 @@ export default function POSPage() {
                   render: (_, i) => i + 1
                 },
                 {
+                  id: "sku",
+                  header: "الكود",
+                  width: 85,
+                  sortable: false,
+                  headerClass: "text-center px-1",
+                  cellClass: "font-mono text-[11px] text-slate-500 text-center border-l border-slate-100 px-1",
+                  render: (l) => {
+                    const item = items.find((it) => it.id === l.item_id);
+                    return <span>{item?.item_code || item?.code || l.code || "-"}</span>;
+                  }
+                },
+                {
                   id: "name", header: "البيان", width: 240, sortable: true,
                   cellClass: "font-black text-slate-800 border-l border-slate-100 px-2", headerClass: "text-right px-2",
                   render: (l) => {
                     const item = items.find(it => it.id === l.item_id);
                     const imgUrl = item?.primary_image_url || item?.image_url || item?.image || l.primary_image_url;
                     const resolved = imgUrl ? resolveImageUrl(imgUrl) : null;
+                    const warnings = lineWarnings[l.item_id] || [];
+                    const hasError = warnings.some((w) => w.type === "error");
                     return (
-                      <div className="flex items-center gap-2 py-1">
+                      <div className="flex items-start gap-2 py-1 w-full">
                         {resolved ? (
-                          <button onClick={() => { setListImageUrl(resolved); setListImageModal(true); }} className="shrink-0 group relative rounded-md overflow-hidden border border-slate-200">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const imgs = item?.image_urls?.length ? item.image_urls : [resolved];
+                              openGallery(imgs);
+                            }}
+                            className="shrink-0 group relative rounded-md overflow-hidden border border-slate-200 hover:border-indigo-300"
+                          >
                             <img src={resolved} alt={l.item_name} className="w-8 h-8 object-cover" />
                             <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                               <Search className="w-3 h-3 text-white" />
@@ -1300,7 +1749,19 @@ export default function POSPage() {
                         ) : (
                           <div className="w-8 h-8 shrink-0 rounded-md bg-slate-100 flex items-center justify-center border border-slate-200"><ImageIcon className="w-4 h-4 text-slate-300"/></div>
                         )}
-                        <span className="truncate">{l.item_name}</span>
+                        <div className="flex flex-col gap-0.5 min-w-0">
+                          <span className={`truncate text-[12px] font-black ${hasError ? "text-rose-700" : "text-slate-800"}`}>
+                            {l.item_name}
+                          </span>
+                          {warnings.map((w, i) => (
+                            <span key={i} className={`text-[9px] font-black px-1.5 py-0.5 rounded-sm w-fit
+                              ${w.type === "error"
+                                ? "text-rose-600 bg-rose-50 border border-rose-200"
+                                : "text-amber-700 bg-amber-50 border border-amber-200"}`}>
+                              {w.msg}
+                            </span>
+                          ))}
+                        </div>
                       </div>
                     );
                   }
@@ -1324,13 +1785,48 @@ export default function POSPage() {
                   )
                 },
                 {
-                  id: "lineDiscount", header: "خصم", width: 80, sortable: false,
+                  id: "lineDiscount", header: "خصم", width: 110, sortable: false,
                   headerClass: "text-center", cellClass: "p-0 border-l border-slate-100",
-                  render: (l, i) => (
-                    <input type="number" min="0" step="any" value={l.line_discount || 0}
-                      onChange={(e) => updateLine(l.item_id, { line_discount: Number(e.target.value) || 0 })}
-                      className="w-full h-[40px] text-center text-[13px] font-mono font-black bg-transparent outline-none border-0 ring-0 focus:bg-amber-50/50 transition-colors" />
-                  )
+                  render: (l) => {
+                    const mode = discountModes[l.item_id] || "flat";
+                    const lineMax = Number(l.unit_price) * Number(l.quantity);
+                    const flatDisc = Number(l.line_discount || 0);
+                    const pctVal = lineMax > 0 ? (flatDisc / lineMax) * 100 : 0;
+                    const isOver = flatDisc > lineMax && lineMax > 0;
+                    return (
+                      <div className="flex items-center h-[40px] px-1 gap-0.5">
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={mode === "pct" ? parseFloat(pctVal.toFixed(2)) : flatDisc}
+                          onChange={(e) => {
+                            const v = Math.max(0, Number(e.target.value || 0));
+                            if (mode === "pct") {
+                              const flat = parseFloat(((v / 100) * lineMax).toFixed(4));
+                              updateLine(l.item_id, { line_discount: Math.min(flat, lineMax) });
+                            } else {
+                              updateLine(l.item_id, { line_discount: Math.min(v, lineMax) });
+                            }
+                          }}
+                          className={`w-full h-[28px] text-center text-[12px] font-mono font-black bg-transparent outline-none border rounded-sm transition-colors
+                            ${isOver
+                              ? "border-rose-400 bg-rose-50/50 text-rose-700 focus:border-rose-600"
+                              : "border-slate-200 focus:border-amber-400 focus:bg-amber-50/50"}`}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setDiscountModes((m) => ({ ...m, [l.item_id]: mode === "pct" ? "flat" : "pct" }))}
+                          className={`h-[28px] px-1.5 rounded-sm text-[10px] font-black border transition-colors shrink-0
+                            ${mode === "pct"
+                              ? "bg-amber-100 border-amber-300 text-amber-700"
+                              : "bg-slate-100 border-slate-300 text-slate-500 hover:bg-slate-200"}`}
+                        >
+                          {mode === "pct" ? "%" : "ج"}
+                        </button>
+                      </div>
+                    );
+                  }
                 },
                 {
                   id: "warehouseId", header: "المخزن", width: 120, sortable: false,
@@ -1342,6 +1838,15 @@ export default function POSPage() {
                       {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
                     </select>
                   )
+                },
+                {
+                  id: "unit",
+                  header: "الوحدة",
+                  width: 80,
+                  sortable: false,
+                  headerClass: "text-center",
+                  cellClass: "text-center text-[11px] font-bold text-slate-600 border-l border-slate-100 px-1",
+                  render: (l) => l.unit_name || "أساسية"
                 },
                 {
                   id: "total", header: "الإجمالي", width: 110, sortable: true,
@@ -1361,15 +1866,36 @@ export default function POSPage() {
           </div>
         </main>
 
-        {/* Image Preview Modal */}
-        <Modal open={listImageModal} onClose={() => setListImageModal(false)} title="معاينة صورة الصنف" size="md">
-          <div className="flex flex-col items-center justify-center p-4 bg-slate-50 rounded-lg">
-            {listImageUrl
-              ? <img src={listImageUrl} alt="Preview" className="max-w-full max-h-[60vh] object-contain rounded-md shadow-sm border border-slate-200 bg-white" />
-              : <div className="flex flex-col items-center py-12 text-slate-400"><ImageIcon className="w-16 h-16 mb-4 opacity-50" /><p className="font-bold">الصورة غير متوفرة</p></div>
-            }
-          </div>
-        </Modal>
+        <PrintPreviewModal
+          open={printPreview}
+          onClose={() => setPrintPreview(false)}
+          invoice={{
+            invoice_no: invoiceNumber,
+            created_at: new Date().toISOString(),
+            customer_name: customer?.name,
+            lines: lines.map((l) => ({
+              item_name: l.item_name,
+              quantity: l.quantity,
+              unit_price: l.unit_price,
+              discount_amount: l.line_discount || 0,
+              unit_name: l.unit_name || "",
+              code: l.code || "",
+            })),
+            payments: [{ method: paymentType, amount: totals.total }],
+          }}
+          settings={storeSettings}
+          operationLabel="فاتورة مبيعات نقدية"
+        />
+
+        <GalleryModal
+          open={galleryOpen}
+          onClose={() => { setGalleryOpen(false); setGalleryZoom(1); }}
+          images={galleryImages}
+          idx={galleryIdx}
+          setIdx={setGalleryIdx}
+          zoom={galleryZoom}
+          setZoom={setGalleryZoom}
+        />
 
         {/* Toast */}
         {saveMessage && (
@@ -1403,6 +1929,27 @@ export default function POSPage() {
         <div className="flex flex-col flex-[1.8] bg-slate-50 border-l border-slate-200 overflow-hidden min-w-0">
           {/* Header */}
           <div className="flex flex-col gap-3 shrink-0 bg-white border-b border-slate-200 p-4 shadow-sm z-10">
+            <div className="flex items-center gap-2 border border-slate-200 bg-white px-3 py-2 shrink-0 flex-wrap rounded-md">
+              <input
+                readOnly
+                value={invoiceNumber}
+                className="w-[140px] rounded-sm border border-slate-200 bg-slate-100 px-2 py-1 text-[11px] font-mono font-black text-slate-500 cursor-default text-center select-none"
+              />
+              <div className="flex items-center gap-1.5 rounded-sm border border-slate-200 bg-slate-50 px-2 py-1">
+                <User className="h-3 w-3 text-slate-400" />
+                <span className="text-[11px] font-bold text-slate-500 max-w-[90px] truncate">{user?.name || "-"}</span>
+              </div>
+              <select
+                value={sellerId}
+                onChange={(e) => setSellerId(e.target.value)}
+                className="rounded-sm border border-slate-300 bg-white px-2 py-1 text-[11px] font-bold text-slate-700 outline-none focus:border-slate-800"
+              >
+                <option value="">البائع (اختياري)</option>
+                {employees.filter((emp) => emp.is_active !== 0).map((emp) => (
+                  <option key={emp.id} value={emp.id}>{emp.name}</option>
+                ))}
+              </select>
+            </div>
             <div className="flex items-center gap-3">
               <div className="flex-1">
                 <SearchInput
@@ -1603,6 +2150,42 @@ export default function POSPage() {
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
+                      <div className="flex items-center gap-1 mt-1.5">
+                        <span className="text-[10px] font-bold text-slate-400 shrink-0">خصم:</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={
+                            discountModes[line.item_id] === "pct"
+                              ? parseFloat(((Number(line.line_discount || 0) / (Number(line.unit_price || 1) * Number(line.quantity || 1))) * 100).toFixed(2))
+                              : Number(line.line_discount || 0)
+                          }
+                          onChange={(e) => {
+                            const v = Math.max(0, Number(e.target.value || 0));
+                            const lineMax = Number(line.unit_price || 0) * Number(line.quantity || 0);
+                            if (discountModes[line.item_id] === "pct") {
+                              updateLine(line.item_id, { line_discount: Math.min(parseFloat(((v / 100) * lineMax).toFixed(4)), lineMax) });
+                            } else {
+                              updateLine(line.item_id, { line_discount: Math.min(v, lineMax) });
+                            }
+                          }}
+                          className="w-16 rounded-sm border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] font-black text-center outline-none focus:border-amber-400 focus:bg-amber-50/50"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setDiscountModes((m) => ({
+                            ...m,
+                            [line.item_id]: m[line.item_id] === "pct" ? "flat" : "pct"
+                          }))}
+                          className={`px-1.5 py-0.5 rounded-sm text-[10px] font-black border shrink-0 transition-colors
+                            ${discountModes[line.item_id] === "pct"
+                              ? "bg-amber-100 border-amber-300 text-amber-700"
+                              : "bg-slate-100 border-slate-300 text-slate-500 hover:bg-slate-200"}`}
+                        >
+                          {discountModes[line.item_id] === "pct" ? "%" : "ج"}
+                        </button>
+                      </div>
                       <div className="flex items-center justify-between mt-1">
                         <div className="flex items-center border border-slate-200 rounded-md overflow-hidden bg-slate-50">
                           <button onClick={() => updateLine(line.item_id, { quantity: Math.max(1, Number(line.quantity) - 1) })} className="w-7 h-7 flex items-center justify-center text-slate-600 hover:bg-slate-200 transition-colors"><Minus className="w-3 h-3" /></button>
@@ -1615,6 +2198,20 @@ export default function POSPage() {
                         </div>
                       </div>
                       {isExceedingStock && <div className="text-[10px] font-bold text-rose-600 bg-rose-100/50 px-1.5 py-0.5 rounded-sm self-start mt-0.5">تجاوز المخزون (متاح: {line.stock_quantity})</div>}
+                      {(() => {
+                        const item = items.find((it) => it.id === line.item_id);
+                        const price = Number(line.unit_price || line.sale_price || 0);
+                        const cost = Number(item?.purchase_price || 0);
+                        if (cost > 0 && price > 0 && price < cost) {
+                          return <div className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-100 px-1.5 py-0.5 rounded-sm self-start mt-0.5">سعر أقل من التكلفة ({cost.toFixed(2)})</div>;
+                        }
+                        return null;
+                      })()}
+                      {Number(line.line_discount || 0) > Number(line.unit_price || 0) * Number(line.quantity || 0) && Number(line.unit_price || 0) > 0 && (
+                        <div className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded-sm self-start mt-0.5">
+                          الخصم يتجاوز إجمالي السطر
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -1630,9 +2227,67 @@ export default function POSPage() {
                 <span className="font-bold text-slate-400">الفرعي</span>
                 <span className="font-mono font-black text-slate-200">{formatMoney(totals.subtotal)}</span>
               </div>
-              <div className="flex items-center justify-between text-[12px]">
-                <span className="font-bold text-slate-400">خصم إضافي</span>
-                <input type="number" min="0" max={totals.subtotal} value={discount} onChange={(e) => { const v = Number(e.target.value || 0); setDiscount(v > totals.subtotal ? totals.subtotal : v); }} className="w-20 rounded-sm border border-slate-700 bg-slate-800 px-2 py-0.5 text-right font-mono text-[12px] font-black text-white outline-none focus:border-slate-500" />
+              <div className="flex items-center justify-between text-[12px] gap-2">
+                <span className="font-bold text-slate-400 shrink-0">خصم إضافي</span>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min="0"
+                    value={invoiceDiscountMode === "pct"
+                      ? (totals.subtotal > 0 ? parseFloat(((discount / totals.subtotal) * 100).toFixed(2)) : 0)
+                      : discount}
+                    onChange={(e) => {
+                      const v = Math.max(0, Number(e.target.value || 0));
+                      if (invoiceDiscountMode === "pct") {
+                        setDiscount(Math.min(parseFloat(((v / 100) * totals.subtotal).toFixed(4)), totals.subtotal));
+                      } else {
+                        setDiscount(Math.min(v, totals.subtotal));
+                      }
+                    }}
+                    className="w-20 rounded-sm border border-slate-700 bg-slate-800 px-2 py-0.5 text-right font-mono text-[12px] font-black text-white outline-none focus:border-slate-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setInvoiceDiscountMode((m) => m === "pct" ? "flat" : "pct")}
+                    className={`px-1.5 py-0.5 rounded-sm text-[10px] font-black border transition-colors shrink-0
+                      ${invoiceDiscountMode === "pct"
+                        ? "bg-rose-800 border-rose-600 text-rose-200"
+                        : "border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600"}`}
+                  >
+                    {invoiceDiscountMode === "pct" ? "%" : "ج"}
+                  </button>
+                </div>
+              </div>
+              <div className="flex items-center justify-between text-[12px] gap-2">
+                <span className="font-bold text-slate-400 shrink-0">إضافة / رسوم</span>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min="0"
+                    value={invoiceIncreaseMode === "pct"
+                      ? (totals.subtotal > 0 ? parseFloat(((increase / totals.subtotal) * 100).toFixed(2)) : 0)
+                      : increase}
+                    onChange={(e) => {
+                      const v = Math.max(0, Number(e.target.value || 0));
+                      if (invoiceIncreaseMode === "pct") {
+                        setIncrease(parseFloat(((v / 100) * totals.subtotal).toFixed(4)));
+                      } else {
+                        setIncrease(v);
+                      }
+                    }}
+                    className="w-20 rounded-sm border border-blue-700 bg-blue-900/40 px-2 py-0.5 text-right font-mono text-[12px] font-black text-blue-200 outline-none focus:border-blue-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setInvoiceIncreaseMode((m) => m === "pct" ? "flat" : "pct")}
+                    className={`px-1.5 py-0.5 rounded-sm text-[10px] font-black border transition-colors shrink-0
+                      ${invoiceIncreaseMode === "pct"
+                        ? "bg-blue-800 border-blue-600 text-blue-200"
+                        : "border-blue-700 bg-blue-800/40 text-blue-300 hover:bg-blue-700/60"}`}
+                  >
+                    {invoiceIncreaseMode === "pct" ? "%" : "ج"}
+                  </button>
+                </div>
               </div>
               <div className="border-t border-slate-700 mt-1 pt-1.5 flex items-center justify-between">
                 <span className="text-[12px] font-black text-slate-300 uppercase tracking-widest">الإجمالي المطلوب</span>
@@ -1711,10 +2366,10 @@ export default function POSPage() {
 
               {/* Main Actions */}
               <div className="flex gap-2 mt-1">
-                <button type="button" onClick={() => saveInvoice(false)} disabled={!lines.length || isSaving} className={`flex flex-1 items-center justify-center gap-2 rounded-md border px-3 py-3 text-[13px] font-black transition-all ${!lines.length || isSaving ? "cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400" : "border-slate-300 bg-white text-slate-800 hover:border-slate-800 hover:bg-slate-50 shadow-sm"}`}>
+                <button type="button" onClick={() => saveInvoice(false)} disabled={!lines.length || isSaving || hasBlockingErrors} className={`flex flex-1 items-center justify-center gap-2 rounded-md border px-3 py-3 text-[13px] font-black transition-all ${!lines.length || isSaving || hasBlockingErrors ? "cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400" : "border-slate-300 bg-white text-slate-800 hover:border-slate-800 hover:bg-slate-50 shadow-sm"}`}>
                   {isSaving ? "جارٍ الحفظ..." : "حفظ فقط"}
                 </button>
-                <button type="button" onClick={() => saveInvoice(true)} disabled={!lines.length || isSaving} className={`flex flex-[2] items-center justify-center gap-2 rounded-md px-3 py-3 text-[14px] font-black text-white transition-all shadow-md ${!lines.length || isSaving ? "cursor-not-allowed bg-slate-300" : "bg-emerald-600 hover:bg-emerald-700 hover:shadow-lg"}`}>
+                <button type="button" onClick={() => saveInvoice(true)} disabled={!lines.length || isSaving || hasBlockingErrors} className={`flex flex-[2] items-center justify-center gap-2 rounded-md px-3 py-3 text-[14px] font-black text-white transition-all shadow-md ${!lines.length || isSaving || hasBlockingErrors ? "cursor-not-allowed bg-slate-300" : "bg-emerald-600 hover:bg-emerald-700 hover:shadow-lg"}`}>
                   <Printer className="h-5 w-5" /> {isSaving ? "جارٍ الحفظ..." : "دفع وطباعة"}
                 </button>
               </div>
@@ -1730,6 +2385,15 @@ export default function POSPage() {
         </div>
       )}
 
+      <GalleryModal
+        open={galleryOpen}
+        onClose={() => { setGalleryOpen(false); setGalleryZoom(1); }}
+        images={galleryImages}
+        idx={galleryIdx}
+        setIdx={setGalleryIdx}
+        zoom={galleryZoom}
+        setZoom={setGalleryZoom}
+      />
 
       {/* ── Today's Receipts Modal ── */}
       <Modal open={receiptsOpen} onClose={() => setReceiptsOpen(false)} title="فواتير اليوم">
@@ -2033,13 +2697,27 @@ export default function POSPage() {
           invoice_no: lastSavedInvoice.invoice_no,
           created_at: lastSavedInvoice.date instanceof Date ? lastSavedInvoice.date.toISOString() : new Date().toISOString(),
           customer_name: lastSavedInvoice.customer?.name,
-          lines: lastSavedInvoice.lines.map(l => ({ item_name: l.name, quantity: l.quantity, unit_price: l.unit_price, discount_amount: Number(l.lineDiscount || 0) })),
+          lines: lastSavedInvoice.lines.map((l) => ({
+            item_name: l.item_name || l.name,
+            quantity: l.quantity,
+            unit_price: l.unit_price,
+            discount_amount: Number(l.line_discount || l.lineDiscount || 0),
+            unit_name: l.unit_name || "",
+            code: l.code || "",
+          })),
           payments: [{ method: lastSavedInvoice.paymentType, amount: lastSavedInvoice.totals?.total }],
         } : {
           invoice_no: invoiceNumber,
           created_at: new Date().toISOString(),
           customer_name: customer?.name,
-          lines: lines.map(l => ({ item_name: l.name, quantity: l.quantity, unit_price: l.unit_price, discount_amount: Number(l.lineDiscount || 0) })),
+          lines: lines.map((l) => ({
+            item_name: l.item_name || l.name,
+            quantity: l.quantity,
+            unit_price: l.unit_price,
+            discount_amount: Number(l.line_discount || l.lineDiscount || 0),
+            unit_name: l.unit_name || "",
+            code: l.code || "",
+          })),
           payments: [{ method: paymentType, amount: totals.total }],
         }}
         settings={storeSettings}
