@@ -43,6 +43,9 @@ export default function PurchaseReturnFormPage() {
   const [message, setMessage] = useState({ text: "", type: "" });
   const [warehouses, setWarehouses] = useState([]);
   const [selectedWarehouse, setSelectedWarehouse] = useState("");
+  const [treasuries, setTreasuries] = useState([]);
+  const [selectedTreasury, setSelectedTreasury] = useState("");
+  const [settlementType, setSettlementType] = useState("account");
   const [items, setItems] = useState([]);
   
   const [printPreview, setPrintPreview] = useState(false);
@@ -58,6 +61,11 @@ export default function PurchaseReturnFormPage() {
       setWarehouses(wh);
       if (wh.length) setSelectedWarehouse(String(wh[0].id));
     }).catch(() => {});
+    api.get("/api/treasuries").then(r => {
+      const rows = r.data.data || [];
+      setTreasuries(rows);
+      if (rows.length) setSelectedTreasury(String(rows[0].id));
+    }).catch(() => {});
     api.get("/api/items").then(r => setItems(r.data.data || [])).catch(() => {});
   }, []);
 
@@ -69,6 +77,7 @@ export default function PurchaseReturnFormPage() {
       const response = await api.get(`/api/purchases/${purchaseId}`);
       setPurchase(response.data.data);
       setReturnLines({});
+      setSettlementType("account");
     } catch (e) {
       setMessage({ text: "رقم الفاتورة غير صحيح أو غير موجود", type: "error" });
       setPurchase(null);
@@ -99,11 +108,17 @@ export default function PurchaseReturnFormPage() {
       setMessage({ text: "يرجى تحديد الكميات المراد إرجاعها", type: "error" });
       return;
     }
+    if (settlementType === "cash" && !selectedTreasury) {
+      setMessage({ text: "اختر الخزنة التي سيدخل فيها النقد المسترد", type: "error" });
+      return;
+    }
 
     setIsSaving(true);
     try {
       await api.post(`/api/purchases/${purchaseId}/return`, {
         warehouse_id: Number(selectedWarehouse),
+        settlement_type: settlementType,
+        treasury_id: settlementType === "cash" ? Number(selectedTreasury) : null,
         lines: payloadLines
       });
       setMessage({ text: "تم تسجيل المرتجع بنجاح", type: "success" });
@@ -306,6 +321,43 @@ export default function PurchaseReturnFormPage() {
                             {warehouses.map(w => <option key={w.id} value={w.id} className="py-1 px-2 border-b border-slate-100 last:border-0 rounded-sm cursor-pointer hover:bg-slate-200">{w.name}</option>)}
                           </select>
                        </div>
+                       <div className="flex flex-col gap-2">
+                          <label className="text-[11px] font-bold text-slate-600">كيف سيتم تسوية المرتجع؟</label>
+                          <div className="grid grid-cols-1 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setSettlementType("account")}
+                              className={`rounded-sm border p-3 text-right transition-all ${settlementType === "account" ? "border-slate-900 bg-slate-900 text-white shadow-sm" : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-white"}`}
+                            >
+                              <div className="text-[12px] font-black">خصم من حساب المورد</div>
+                              <div className={`mt-1 text-[10px] font-bold leading-relaxed ${settlementType === "account" ? "text-slate-200" : "text-slate-500"}`}>
+                                يقل دين المورد ولا يدخل نقد إلى الخزنة.
+                              </div>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSettlementType("cash")}
+                              className={`rounded-sm border p-3 text-right transition-all ${settlementType === "cash" ? "border-emerald-700 bg-emerald-700 text-white shadow-sm" : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-white"}`}
+                            >
+                              <div className="text-[12px] font-black">استرداد نقدي من المورد</div>
+                              <div className={`mt-1 text-[10px] font-bold leading-relaxed ${settlementType === "cash" ? "text-emerald-50" : "text-slate-500"}`}>
+                                يدخل مبلغ المرتجع كاش في الخزنة.
+                              </div>
+                            </button>
+                          </div>
+                       </div>
+                       {settlementType === "cash" && (
+                         <div className="flex flex-col gap-1">
+                            <label className="text-[11px] font-bold text-slate-600">الخزنة التي سيدخل فيها النقد</label>
+                            <select
+                              value={selectedTreasury}
+                              onChange={(e) => setSelectedTreasury(e.target.value)}
+                              className="w-full rounded-sm border border-slate-300 bg-white px-3 py-2 text-[12px] font-bold text-slate-800 outline-none focus:border-emerald-600"
+                            >
+                              {treasuries.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                            </select>
+                         </div>
+                       )}
                     </div>
                  </div>
 
@@ -314,7 +366,9 @@ export default function PurchaseReturnFormPage() {
                        <div className="flex gap-3">
                           <Info className="h-5 w-5 text-amber-600 shrink-0" />
                           <p className="text-[11px] font-bold text-amber-900 leading-relaxed">
-                            تنبيه: سيتم خصم إجمالي المرتجع من مديونية المورد تلقائياً وتحديث أرصدة الأصناف في المخزن المحدد.
+                            {settlementType === "cash"
+                              ? "تنبيه: سيتم إدخال قيمة المرتجع في الخزنة المحددة وتحديث أرصدة الأصناف، ولن يتم خصمها من حساب المورد."
+                              : "تنبيه: سيتم خصم إجمالي المرتجع من مديونية المورد وتحديث أرصدة الأصناف، ولن يدخل أي نقد إلى الخزنة."}
                           </p>
                        </div>
                     </div>

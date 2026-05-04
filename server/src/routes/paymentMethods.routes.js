@@ -93,8 +93,8 @@ router.get("/transactions", (req, res) => {
           'AJAL-' || ap.debt_id AS doc_no,
           'ajal_payment' AS doc_type,
           ap.amount,
-          'in' AS direction,
-          c.name AS party,
+          CASE WHEN COALESCE(d.party_type, 'customer') = 'supplier' THEN 'out' ELSE 'in' END AS direction,
+          COALESCE(c.name, s.name) AS party,
           ap.notes AS description,
           COALESCE(ap.payment_date, ap.created_at) AS created_at,
           pm.name AS method_name,
@@ -102,6 +102,7 @@ router.get("/transactions", (req, res) => {
         FROM ajal_payments ap
         LEFT JOIN ajal_debts d ON d.id = ap.debt_id
         LEFT JOIN customers c ON c.id = d.customer_id
+        LEFT JOIN suppliers s ON s.id = d.supplier_id
         LEFT JOIN payment_methods pm ON pm.id = ap.payment_method_id
 
         UNION ALL

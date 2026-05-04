@@ -103,7 +103,9 @@ router.get("/today/transactions", (req, res) => {
         sql: `
           SELECT i.id, i.invoice_no AS doc_no, i.total AS amount, i.payment_type,
                  i.created_at, c.name AS party, i.status, NULL AS description,
-                 'pos_invoice' AS doc_type, 'in' AS cash_direction, i.total AS cash_effect
+                 'pos_invoice' AS doc_type,
+                 CASE WHEN i.payment_type = 'cash' THEN 'in' ELSE 'account' END AS cash_direction,
+                 CASE WHEN i.payment_type = 'cash' THEN i.total ELSE 0 END AS cash_effect
           FROM invoices i
           LEFT JOIN customers c ON c.id = i.customer_id
           WHERE date(i.created_at) = ? AND i.status != 'cancelled'
@@ -115,7 +117,9 @@ router.get("/today/transactions", (req, res) => {
         sql: `
           SELECT e.id, e.doc_no, e.amount, e.payment_method,
                  e.created_at, ec.name AS party, NULL AS status, COALESCE(e.description, e.notes) AS description,
-                 'expense' AS doc_type, 'out' AS cash_direction, -e.amount AS cash_effect
+                 'expense' AS doc_type,
+                 CASE WHEN COALESCE(e.payment_method, 'cash') = 'cash' THEN 'out' ELSE 'account' END AS cash_direction,
+                 CASE WHEN COALESCE(e.payment_method, 'cash') = 'cash' THEN -e.amount ELSE 0 END AS cash_effect
           FROM expenses e
           LEFT JOIN expense_categories ec ON ec.id = e.category_id
           WHERE date(e.created_at) = ?
@@ -127,7 +131,9 @@ router.get("/today/transactions", (req, res) => {
         sql: `
           SELECT r.id, r.doc_no, r.amount, r.payment_method,
                  r.created_at, rc.name AS party, NULL AS status, COALESCE(r.description, r.notes) AS description,
-                 'revenue' AS doc_type, 'in' AS cash_direction, r.amount AS cash_effect
+                 'revenue' AS doc_type,
+                 CASE WHEN COALESCE(r.payment_method, 'cash') = 'cash' THEN 'in' ELSE 'account' END AS cash_direction,
+                 CASE WHEN COALESCE(r.payment_method, 'cash') = 'cash' THEN r.amount ELSE 0 END AS cash_effect
           FROM revenues r
           LEFT JOIN revenue_categories rc ON rc.id = r.category_id
           WHERE date(r.created_at) = ?
@@ -139,7 +145,7 @@ router.get("/today/transactions", (req, res) => {
         sql: `
           SELECT p.id, p.doc_no, p.total AS amount, 'cash' AS payment_method,
                  p.created_at, s.name AS party, p.status, NULL AS description,
-                 'purchase' AS doc_type, 'out' AS cash_direction, -p.total AS cash_effect
+                 'purchase' AS doc_type, 'account' AS cash_direction, 0 AS cash_effect
           FROM purchases p
           LEFT JOIN suppliers s ON s.id = p.supplier_id
           WHERE date(p.created_at) = ? AND COALESCE(p.status, '') != 'voided'
@@ -151,7 +157,9 @@ router.get("/today/transactions", (req, res) => {
         sql: `
           SELECT py.id, COALESCE(py.reference_number, '#' || py.id) AS doc_no, py.amount, py.method AS payment_method,
                  py.created_at, c.name AS party, NULL AS status, py.notes AS description,
-                 'customer_payment' AS doc_type, 'in' AS cash_direction, py.amount AS cash_effect
+                 'customer_payment' AS doc_type,
+                 CASE WHEN py.method = 'cash' THEN 'in' ELSE 'account' END AS cash_direction,
+                 CASE WHEN py.method = 'cash' THEN py.amount ELSE 0 END AS cash_effect
           FROM payments py
           LEFT JOIN customers c ON c.id = py.party_id
           WHERE date(py.created_at) = ? AND py.party_type = 'customer'
@@ -163,7 +171,9 @@ router.get("/today/transactions", (req, res) => {
         sql: `
           SELECT py.id, COALESCE(py.reference_number, '#' || py.id) AS doc_no, py.amount, py.method AS payment_method,
                  py.created_at, s.name AS party, NULL AS status, py.notes AS description,
-                 'supplier_payment' AS doc_type, 'out' AS cash_direction, -py.amount AS cash_effect
+                 'supplier_payment' AS doc_type,
+                 CASE WHEN py.method = 'cash' THEN 'out' ELSE 'account' END AS cash_direction,
+                 CASE WHEN py.method = 'cash' THEN -py.amount ELSE 0 END AS cash_effect
           FROM payments py
           LEFT JOIN suppliers s ON s.id = py.party_id
           WHERE date(py.created_at) = ? AND py.party_type = 'supplier'
@@ -175,7 +185,9 @@ router.get("/today/transactions", (req, res) => {
         sql: `
           SELECT sr.id, sr.doc_no, sr.total AS amount, sr.refund_method AS payment_method,
                  sr.created_at, c.name AS party, NULL AS status, sr.reason AS description,
-                 'sales_return' AS doc_type, 'out' AS cash_direction, -sr.total AS cash_effect
+                 'sales_return' AS doc_type,
+                 CASE WHEN COALESCE(sr.refund_method, 'cash_back') = 'cash_back' THEN 'out' ELSE 'account' END AS cash_direction,
+                 CASE WHEN COALESCE(sr.refund_method, 'cash_back') = 'cash_back' THEN -sr.total ELSE 0 END AS cash_effect
           FROM sales_returns sr
           LEFT JOIN customers c ON c.id = sr.customer_id
           WHERE date(sr.created_at) = ?
@@ -185,9 +197,11 @@ router.get("/today/transactions", (req, res) => {
       },
       purchase_returns: {
         sql: `
-          SELECT pr.id, pr.doc_no, pr.total AS amount, 'cash' AS payment_method,
+          SELECT pr.id, pr.doc_no, pr.total AS amount, COALESCE(pr.settlement_type, 'account') AS payment_method,
                  pr.created_at, s.name AS party, NULL AS status, NULL AS description,
-                 'purchase_return' AS doc_type, 'in' AS cash_direction, pr.total AS cash_effect
+                 'purchase_return' AS doc_type,
+                 CASE WHEN COALESCE(pr.settlement_type, 'account') = 'cash' THEN 'in' ELSE 'account' END AS cash_direction,
+                 CASE WHEN COALESCE(pr.settlement_type, 'account') = 'cash' THEN pr.total ELSE 0 END AS cash_effect
           FROM purchase_returns pr
           LEFT JOIN suppliers s ON s.id = pr.supplier_id
           WHERE date(pr.created_at) = ?
@@ -198,14 +212,59 @@ router.get("/today/transactions", (req, res) => {
       ajal_payments: {
         sql: `
           SELECT ap.id, 'AJAL-' || ap.debt_id AS doc_no, ap.amount, pm.name AS payment_method,
+                 COALESCE(ap.created_at, ap.payment_date) AS created_at, COALESCE(c.name, s.name) AS party, NULL AS status, ap.notes AS description,
+                 'ajal_payment' AS doc_type,
+                 CASE
+                   WHEN COALESCE(pm.type, pm.category, pm.name, 'cash') != 'cash' THEN 'account'
+                   WHEN COALESCE(d.party_type, 'customer') = 'supplier' THEN 'out'
+                   ELSE 'in'
+                 END AS cash_direction,
+                 CASE
+                   WHEN COALESCE(pm.type, pm.category, pm.name, 'cash') != 'cash' THEN 0
+                   WHEN COALESCE(d.party_type, 'customer') = 'supplier' THEN -ap.amount
+                   ELSE ap.amount
+                 END AS cash_effect
+          FROM ajal_payments ap
+          LEFT JOIN ajal_debts d ON d.id = ap.debt_id
+          LEFT JOIN customers c ON c.id = d.customer_id
+          LEFT JOIN suppliers s ON s.id = d.supplier_id
+          LEFT JOIN payment_methods pm ON pm.id = ap.payment_method_id
+          WHERE date(COALESCE(ap.payment_date, ap.created_at)) = ?
+            AND (? = '' OR c.name LIKE ? OR s.name LIKE ? OR ap.notes LIKE ? OR CAST(ap.amount AS TEXT) LIKE ?)
+        `,
+        params: [targetDate, search, like, like, like, like],
+      },
+      customer_ajal_payments: {
+        sql: `
+          SELECT ap.id, 'AJAL-' || ap.debt_id AS doc_no, ap.amount, pm.name AS payment_method,
                  COALESCE(ap.created_at, ap.payment_date) AS created_at, c.name AS party, NULL AS status, ap.notes AS description,
-                 'ajal_payment' AS doc_type, 'in' AS cash_direction, ap.amount AS cash_effect
+                 'ajal_payment' AS doc_type,
+                 CASE WHEN COALESCE(pm.type, pm.category, pm.name, 'cash') = 'cash' THEN 'in' ELSE 'account' END AS cash_direction,
+                 CASE WHEN COALESCE(pm.type, pm.category, pm.name, 'cash') = 'cash' THEN ap.amount ELSE 0 END AS cash_effect
           FROM ajal_payments ap
           LEFT JOIN ajal_debts d ON d.id = ap.debt_id
           LEFT JOIN customers c ON c.id = d.customer_id
           LEFT JOIN payment_methods pm ON pm.id = ap.payment_method_id
           WHERE date(COALESCE(ap.payment_date, ap.created_at)) = ?
+            AND COALESCE(d.party_type, 'customer') = 'customer'
             AND (? = '' OR c.name LIKE ? OR ap.notes LIKE ? OR CAST(ap.amount AS TEXT) LIKE ?)
+        `,
+        params: [targetDate, search, like, like, like],
+      },
+      supplier_ajal_payments: {
+        sql: `
+          SELECT ap.id, 'AJAL-' || ap.debt_id AS doc_no, ap.amount, pm.name AS payment_method,
+                 COALESCE(ap.created_at, ap.payment_date) AS created_at, s.name AS party, NULL AS status, ap.notes AS description,
+                 'ajal_payment' AS doc_type,
+                 CASE WHEN COALESCE(pm.type, pm.category, pm.name, 'cash') = 'cash' THEN 'out' ELSE 'account' END AS cash_direction,
+                 CASE WHEN COALESCE(pm.type, pm.category, pm.name, 'cash') = 'cash' THEN -ap.amount ELSE 0 END AS cash_effect
+          FROM ajal_payments ap
+          LEFT JOIN ajal_debts d ON d.id = ap.debt_id
+          LEFT JOIN suppliers s ON s.id = d.supplier_id
+          LEFT JOIN payment_methods pm ON pm.id = ap.payment_method_id
+          WHERE date(COALESCE(ap.payment_date, ap.created_at)) = ?
+            AND COALESCE(d.party_type, 'customer') = 'supplier'
+            AND (? = '' OR s.name LIKE ? OR ap.notes LIKE ? OR CAST(ap.amount AS TEXT) LIKE ?)
         `,
         params: [targetDate, search, like, like, like],
       },
@@ -223,9 +282,14 @@ router.get("/today/transactions", (req, res) => {
       },
     };
 
-    const selectedTypes = type === "all"
-      ? Object.keys(unionParts)
-      : [type].filter((key) => unionParts[key]);
+    const aliases = {
+      customer_cash_collections: ["customer_payments", "customer_ajal_payments"],
+      supplier_cash_payments: ["supplier_payments", "supplier_ajal_payments"],
+    };
+    const requestedTypes = type === "all"
+      ? Object.keys(unionParts).filter((key) => !["customer_ajal_payments", "supplier_ajal_payments"].includes(key))
+      : (aliases[type] || [type]);
+    const selectedTypes = requestedTypes.filter((key) => unionParts[key]);
 
     if (!selectedTypes.length) return res.json({ success: true, data: [] });
 

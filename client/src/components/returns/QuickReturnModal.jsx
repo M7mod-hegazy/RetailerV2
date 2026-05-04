@@ -27,6 +27,10 @@ const REFUND_METHODS = [
   { value: "cash_back", label: "نقدي" },
   { value: "credit_note", label: "رصيد للعميل" },
 ];
+const PURCHASE_SETTLEMENTS = [
+  { value: "account", label: "خصم من حساب المورد" },
+  { value: "cash", label: "استرداد نقدي من المورد" },
+];
 
 function fmt(v) {
   return Number(v || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2 });
@@ -138,6 +142,8 @@ export default function QuickReturnModal({ mode = "sales", open, onClose, onSucc
   const [showFilters, setShowFilters] = useState(false);
   const [sortBy, setSortBy] = useState("date_desc"); // date_desc | date_asc | total_desc | total_asc
   const [parties, setParties] = useState([]);
+  const [treasuries, setTreasuries] = useState([]);
+  const [selectedTreasury, setSelectedTreasury] = useState("");
 
   // Results
   const [searchResults, setSearchResults] = useState([]);
@@ -153,6 +159,7 @@ export default function QuickReturnModal({ mode = "sales", open, onClose, onSucc
   // Step 3
   const [reason, setReason] = useState("");
   const [refundMethod, setRefundMethod] = useState("cash_back");
+  const [purchaseSettlement, setPurchaseSettlement] = useState("account");
   const [submitting, setSubmitting] = useState(false);
 
   const debouncedSearch = useDebounce(searchTerm, 350);
@@ -164,6 +171,13 @@ export default function QuickReturnModal({ mode = "sales", open, onClose, onSucc
     if (!open) return;
     const url = isSales ? "/api/customers" : "/api/suppliers";
     api.get(url).then(r => setParties(r.data.data || [])).catch(() => {});
+    if (!isSales) {
+      api.get("/api/treasuries").then(r => {
+        const rows = r.data.data || [];
+        setTreasuries(rows);
+        if (rows.length) setSelectedTreasury(String(rows[0].id));
+      }).catch(() => {});
+    }
   }, [open, isSales]);
 
   // Reset on open
@@ -182,6 +196,7 @@ export default function QuickReturnModal({ mode = "sales", open, onClose, onSucc
       setSelected({});
       setReason("");
       setRefundMethod("cash_back");
+      setPurchaseSettlement("account");
       setPreviewDoc(null);
       if (initialDocId) loadDoc(initialDocId);
     }
@@ -286,7 +301,12 @@ export default function QuickReturnModal({ mode = "sales", open, onClose, onSucc
       const docId = selectedDoc.id;
       const body = isSales
         ? { reason, refund_method: refundMethod, lines: selectedLines.map(({ quantity, line }) => ({ invoice_line_id: line.id, quantity })) }
-        : { reason, lines: selectedLines.map(({ quantity, line }) => ({ purchase_line_id: line.id, quantity })) };
+        : {
+            reason,
+            settlement_type: purchaseSettlement,
+            treasury_id: purchaseSettlement === "cash" ? Number(selectedTreasury || 1) : null,
+            lines: selectedLines.map(({ quantity, line }) => ({ purchase_line_id: line.id, quantity })),
+          };
       const url = isSales ? `/api/invoices/${docId}/return` : `/api/purchases/${docId}/return`;
       await api.post(url, body);
       toast.success("تم إنشاء المرتجع بنجاح");
@@ -713,6 +733,41 @@ export default function QuickReturnModal({ mode = "sales", open, onClose, onSucc
                         </button>
                       ))}
                     </div>
+                  </div>
+                )}
+                {!isSales && (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest block mb-1.5">كيف سيتم تسوية المرتجع؟</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {PURCHASE_SETTLEMENTS.map(m => (
+                          <button
+                            key={m.value}
+                            type="button"
+                            onClick={() => setPurchaseSettlement(m.value)}
+                            className={`rounded-lg border px-3 py-2.5 text-[12px] font-black transition-all ${
+                              purchaseSettlement === m.value
+                                ? "border-slate-700 bg-slate-800 text-white"
+                                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                            }`}
+                          >
+                            {m.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {purchaseSettlement === "cash" && (
+                      <div>
+                        <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest block mb-1.5">الخزنة</label>
+                        <select
+                          value={selectedTreasury}
+                          onChange={(e) => setSelectedTreasury(e.target.value)}
+                          className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-[13px] font-bold text-slate-700 focus:border-emerald-500 focus:outline-none"
+                        >
+                          {treasuries.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                        </select>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

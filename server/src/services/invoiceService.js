@@ -198,9 +198,20 @@ function createInvoice(payload) {
     }
 
     if ((paymentType === "credit" || remainingAmount > 0) && payload.customer_id) {
+      const debtAmount = remainingAmount > 0 ? remainingAmount : total;
       db.prepare("UPDATE customers SET opening_balance = opening_balance + ? WHERE id = ?").run(
-        remainingAmount > 0 ? remainingAmount : total,
+        debtAmount,
         payload.customer_id,
+      );
+      db.prepare(`
+        INSERT INTO ajal_debts (invoice_id, customer_id, party_type, source_type, original_amount, paid_amount, due_date, status, notes)
+        VALUES (?, ?, 'customer', 'invoice', ?, 0, ?, 'open', ?)
+      `).run(
+        inv.lastInsertRowid,
+        payload.customer_id,
+        debtAmount,
+        payload.due_date || null,
+        payload.notes || null,
       );
     } else if (paymentType === "bank_transfer") {
       if (payload.bank_id && amountReceived > 0) {

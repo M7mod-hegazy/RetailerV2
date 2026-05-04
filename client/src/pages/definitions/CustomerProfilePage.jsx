@@ -151,7 +151,7 @@ export default function CustomerProfilePage() {
                     <td className="px-4 py-3 font-black font-mono text-rose-700">{fmt(d.remaining)}</td>
                     <td className="px-4 py-3 text-slate-500">{fmtDate(d.due_date)}</td>
                     <td className="px-4 py-3">
-                      <Link to="/operations/ajal-tracker" className={`rounded-full px-2 py-0.5 text-[10px] font-black ${STATUS_CLS[d.status] || "bg-slate-100 text-slate-600"}`}>
+                      <Link to="/accounts/customers" className={`rounded-full px-2 py-0.5 text-[10px] font-black ${STATUS_CLS[d.status] || "bg-slate-100 text-slate-600"}`}>
                         {STATUS_AR[d.status] || d.status}
                       </Link>
                     </td>

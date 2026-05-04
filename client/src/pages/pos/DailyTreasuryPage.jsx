@@ -12,8 +12,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import toast from "react-hot-toast";
 import SmartTooltip from "../../components/ui/SmartTooltip";
 import PrintPreviewModal from "../../components/print/PrintPreviewModal";
-import ExpenseFormModal from "../expenses/ExpenseFormModal";
-import RevenueFormModal from "../expenses/RevenueFormModal";
 
 const fmt = (n) =>
   Number(n || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -27,13 +25,13 @@ const DOC_TYPE_LABEL = {
   pos_invoice: "فاتورة POS",
   expense: "مصروف",
   revenue: "إيراد",
-  purchase: "مشتريات",
-  supplier_payment: "مدفوعات موردين",
-  sales_return: "مرتجعات مبيعات",
-  purchase_return: "مرتجعات مشتريات",
-  ajal_payment: "تحصيل آجل",
-  customer_payment: "دفعة عميل",
-  withdrawal: "مسحوبات",
+  purchase: "مشتريات آجلة",
+  supplier_payment: "دفع نقدي لمورد",
+  sales_return: "مرتجع مبيعات",
+  purchase_return: "مرتجع مشتريات",
+  ajal_payment: "حركة آجل",
+  customer_payment: "تحصيل نقدي من عميل",
+  withdrawal: "مسحوب من الخزنة",
 };
 
 const DOC_TYPE_COLOR = {
@@ -52,14 +50,14 @@ const DOC_TYPE_COLOR = {
 const TABS = [
   { id: "all", label: "كل الحركات" },
   { id: "pos", label: "فواتير POS" },
-  { id: "expenses", label: "المصروفات" },
-  { id: "revenues", label: "الإيرادات" },
-  { id: "purchases", label: "المشتريات" },
+  { id: "expenses", label: "مصروفات نقدية" },
+  { id: "revenues", label: "إيرادات نقدية" },
+  { id: "purchases", label: "مشتريات آجلة" },
   { id: "supplier_payments", label: "مدفوعات موردين" },
   { id: "sales_returns", label: "مرتجعات المبيعات" },
   { id: "purchase_returns", label: "مرتجعات المشتريات" },
-  { id: "customer_payments", label: "مدفوعات العملاء" },
-  { id: "ajal_payments", label: "تحصيلات الآجل" },
+  { id: "customer_payments", label: "تحصيلات العملاء" },
+  { id: "ajal_payments", label: "حركات الآجل" },
   { id: "withdrawals", label: "المسحوبات" },
 ];
 
@@ -93,8 +91,9 @@ export default function DailyTreasuryPage() {
   const [quickModal, setQuickModal] = useState(null);
   const [quickAmount, setQuickAmount] = useState("");
   const [quickNote, setQuickNote] = useState("");
-  const [expenseOpen, setExpenseOpen] = useState(false);
-  const [revenueOpen, setRevenueOpen] = useState(false);
+  const [quickCategoryId, setQuickCategoryId] = useState("");
+  const [expenseCategories, setExpenseCategories] = useState([]);
+  const [revenueCategories, setRevenueCategories] = useState([]);
 
   // Alerts
   const [yesterdayAlert, setYesterdayAlert] = useState(null);
@@ -199,6 +198,10 @@ export default function DailyTreasuryPage() {
   useEffect(() => { loadTransactions(); }, [loadTransactions]);
   useEffect(() => { loadYesterdayAlert(); }, []);
   useEffect(() => { if (historyOpen) loadPastSessions(); }, [historyOpen, historySearch, historyStatus]);
+  useEffect(() => {
+    api.get("/api/expenses/categories").then(r => setExpenseCategories(r.data.data || [])).catch(()=>{});
+    api.get("/api/revenues/categories").then(r => setRevenueCategories(r.data.data || [])).catch(()=>{});
+  }, []);
 
   const moneyTotal = DENOMS.reduce((s, d) => s + Number(counts[d] || 0) * d, 0);
   const sess = summary?.session;
@@ -245,19 +248,23 @@ export default function DailyTreasuryPage() {
       if (quickModal === "expense") {
         await api.post("/api/expenses", {
           amount: Number(quickAmount),
-          notes: quickNote,
+          description: quickNote,
+          category_id: quickCategoryId ? Number(quickCategoryId) : null,
           payment_method: "cash",
         });
       } else {
         await api.post("/api/revenues", {
           amount: Number(quickAmount),
-          notes: quickNote,
+          description: quickNote,
+          category_id: quickCategoryId ? Number(quickCategoryId) : null,
+          payment_method: "cash",
         });
       }
       toast.success(quickModal === "expense" ? "تم تسجيل المصروف بنجاح" : "تم تسجيل الإيراد بنجاح");
       setQuickModal(null);
       setQuickAmount("");
       setQuickNote("");
+      setQuickCategoryId("");
       loadSummary();
       loadTransactions();
     } catch (e) {
@@ -287,6 +294,23 @@ export default function DailyTreasuryPage() {
   const draftDiscrepancy = actualCash !== "" ? Number(actualCash || 0) - Number(expected || 0) : null;
   const cashIn = Number(summary?.cash_in || 0);
   const cashOut = Number(summary?.cash_out || 0);
+  const cashInRows = [
+    { label: "نقد من مبيعات POS", value: summary?.pos_cash_sales, tab: "pos" },
+    { label: "نقد تم تحصيله من العملاء", value: summary?.customer_cash_collections ?? (Number(summary?.customer_payments || 0) + Number(summary?.ajal_payments || 0)), tab: "customer_cash_collections" },
+    { label: "إيرادات نقدية", value: summary?.revenues_cash, tab: "revenues" },
+    { label: "نقد مسترد من مرتجعات الشراء", value: summary?.purchase_returns_cash, tab: "purchase_returns" },
+  ];
+  const cashOutRows = [
+    { label: "نقد مدفوع للموردين", value: summary?.supplier_cash_payments ?? (Number(summary?.supplier_payments || 0) + Number(summary?.supplier_ajal_payments || 0)), tab: "supplier_cash_payments" },
+    { label: "مصروفات نقدية", value: summary?.expenses_cash, tab: "expenses" },
+    { label: "نقد مدفوع لمرتجعات المبيعات", value: summary?.sales_returns_cash, tab: "sales_returns" },
+    { label: "مسحوبات من الخزنة", value: summary?.withdrawals, tab: "withdrawals" },
+  ];
+  const nonCashRows = [
+    { label: "مشتريات آجلة زادت دين الموردين", value: summary?.purchases_payable_total, tab: "purchases" },
+    { label: "مرتجعات شراء خصمت من دين الموردين", value: summary?.purchase_returns_payable_total, tab: "purchase_returns" },
+    { label: "مدفوعات/تحصيلات بنك أو كارت", value: summary?.non_cash_movements_total ?? summary?.pos_bank_sales, tab: "all" },
+  ];
   const discrepancySuggestions = (() => {
     const diff = draftDiscrepancy ?? discrepancy;
     if (diff == null || Math.abs(diff) < 0.01) {
@@ -571,7 +595,7 @@ export default function DailyTreasuryPage() {
                   <motion.button
                     whileHover={{ y: -2 }}
                     whileTap={{ scale: 0.98 }}
-                    onClick={() => setExpenseOpen(true)}
+                    onClick={() => setQuickModal("expense")}
                     className="flex items-center justify-center gap-3 rounded-3xl bg-rose-600 py-4 text-[14px] font-black text-white hover:bg-rose-700 transition-colors shadow-lg shadow-rose-600/20 border border-rose-500"
                   >
                     <div className="bg-white/20 p-1.5 rounded-xl"><TrendingDown className="h-4 w-4" /></div>
@@ -580,7 +604,7 @@ export default function DailyTreasuryPage() {
                   <motion.button
                     whileHover={{ y: -2 }}
                     whileTap={{ scale: 0.98 }}
-                    onClick={() => setRevenueOpen(true)}
+                    onClick={() => setQuickModal("revenue")}
                     className="flex items-center justify-center gap-3 rounded-3xl bg-emerald-600 py-4 text-[14px] font-black text-white hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-600/20 border border-emerald-500"
                   >
                     <div className="bg-white/20 p-1.5 rounded-xl"><TrendingUp className="h-4 w-4" /></div>
@@ -821,46 +845,87 @@ export default function DailyTreasuryPage() {
                       </div>
                       <h3 className="text-[15px] font-black text-zinc-900 tracking-tight">معادلة الخزينة</h3>
                     </div>
-                    <div className="p-8 space-y-2">
-                      {[
-                        { label: "الرصيد الافتتاحي", value: summary?.opening_balance, tab: null, locked: true },
-                        { label: "+ مبيعات POS (نقدي)", value: summary?.pos_cash_sales, tab: "pos" },
-                        { label: "- مشتريات", value: summary?.purchases_cash, tab: "purchases", negative: true },
-                        { label: "- مدفوعات موردين", value: summary?.supplier_payments, tab: "supplier_payments", negative: true },
-                        { label: "- مرتجعات مبيعات", value: summary?.sales_returns_cash, tab: "sales_returns", negative: true },
-                        { label: "- مصروفات", value: summary?.expenses_cash, tab: "expenses", negative: true },
-                        { label: "+ إيرادات", value: summary?.revenues_cash, tab: "revenues" },
-                        { label: "+ مرتجعات مشتريات", value: summary?.purchase_returns_cash, tab: "purchase_returns" },
-                        { label: "+ مدفوعات عملاء (نقدي)", value: summary?.customer_payments, tab: "customer_payments" },
-                        { label: "+ تحصيلات آجل", value: summary?.ajal_payments, tab: "ajal_payments" },
-                        { label: "- مسحوبات", value: summary?.withdrawals, tab: "withdrawals", negative: true },
-                      ].map(({ label, value, tab, locked, negative }) => (
-                        <div
-                          key={label}
-                          onClick={() => { if (tab) { setActiveTab(tab); setGlobalAmountSearch(""); } }}
-                          className={`flex items-center justify-between py-2.5 px-3 rounded-2xl transition-colors ${tab ? "cursor-pointer hover:bg-slate-50" : ""}`}
-                        >
-                          <div className="flex items-center gap-2.5">
-                            {locked ? <Lock className="h-3.5 w-3.5 text-slate-300" /> : <div className="h-1.5 w-1.5 rounded-full bg-slate-200" />}
-                            <span className="text-[13px] text-slate-600 font-bold">{label}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className={`font-black text-[13px] font-mono ${negative && value > 0 ? "text-rose-600" : "text-zinc-800"}`}>
-                              {fmt(value)}
-                            </span>
-                            {locked && !isClosed && (
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); setOpeningDraft(String(summary?.opening_balance || 0)); setOpeningEditOpen(true); }}
-                                className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"
-                                title="تعديل الرصيد الافتتاحي"
-                              >
-                                <Edit3 className="h-3.5 w-3.5" />
-                              </button>
-                            )}
-                          </div>
+                    <div className="p-8 space-y-5">
+                      <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
+                        <div className="flex items-center gap-2.5">
+                          <Lock className="h-3.5 w-3.5 text-slate-300" />
+                          <span className="text-[13px] text-slate-700 font-black">الرصيد الافتتاحي</span>
                         </div>
-                      ))}
+                        <div className="flex items-center gap-2">
+                          <span className="font-black text-[13px] font-mono text-zinc-900">{fmt(summary?.opening_balance)}</span>
+                          {!isClosed && (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); setOpeningDraft(String(summary?.opening_balance || 0)); setOpeningEditOpen(true); }}
+                              className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"
+                              title="تعديل الرصيد الافتتاحي"
+                            >
+                              <Edit3 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between px-1">
+                          <span className="text-[11px] font-black text-emerald-700">الداخل النقدي</span>
+                          <span className="text-[11px] font-black font-mono text-emerald-700">+ {fmt(cashIn)}</span>
+                        </div>
+                        {cashInRows.map(({ label, value, tab }) => (
+                          <button
+                            type="button"
+                            key={label}
+                            onClick={() => { if (tab) { setActiveTab(tab); setGlobalAmountSearch(""); } }}
+                            className="flex w-full items-center justify-between rounded-2xl px-3 py-2.5 text-right transition-colors hover:bg-emerald-50/60"
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <div className="h-1.5 w-1.5 rounded-full bg-emerald-300" />
+                              <span className="text-[13px] text-slate-600 font-bold">+ {label}</span>
+                            </div>
+                            <span className="font-black text-[13px] font-mono text-emerald-700">{fmt(value)}</span>
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between px-1">
+                          <span className="text-[11px] font-black text-rose-700">الخارج النقدي</span>
+                          <span className="text-[11px] font-black font-mono text-rose-700">- {fmt(cashOut)}</span>
+                        </div>
+                        {cashOutRows.map(({ label, value, tab }) => (
+                          <button
+                            type="button"
+                            key={label}
+                            onClick={() => { if (tab) { setActiveTab(tab); setGlobalAmountSearch(""); } }}
+                            className="flex w-full items-center justify-between rounded-2xl px-3 py-2.5 text-right transition-colors hover:bg-rose-50/60"
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <div className="h-1.5 w-1.5 rounded-full bg-rose-300" />
+                              <span className="text-[13px] text-slate-600 font-bold">- {label}</span>
+                            </div>
+                            <span className="font-black text-[13px] font-mono text-rose-700">{fmt(value)}</span>
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
+                        <div className="mb-2 text-[11px] font-black text-slate-600">حركات حسابية لا تغيّر الخزنة</div>
+                        {nonCashRows.map(({ label, value, tab }) => (
+                          <button
+                            type="button"
+                            key={label}
+                            onClick={() => { if (tab) { setActiveTab(tab); setGlobalAmountSearch(""); } }}
+                            className="flex w-full items-center justify-between rounded-xl px-2 py-2 text-right transition-colors hover:bg-white"
+                          >
+                            <div className="flex items-center gap-2">
+                              <Lock className="h-3.5 w-3.5 text-slate-300" />
+                              <span className="text-[12px] font-bold text-slate-500">{label}</span>
+                            </div>
+                            <span className="font-black text-[12px] font-mono text-slate-600">{fmt(value)}</span>
+                          </button>
+                        ))}
+                      </div>
+
                       <div className="grid grid-cols-2 gap-2 border-t border-slate-100 pt-3 mt-3">
                         <div className="rounded-2xl bg-emerald-50 border border-emerald-100 p-3">
                           <div className="text-[10px] font-black text-emerald-600">إجمالي الداخل النقدي</div>
@@ -1155,6 +1220,19 @@ export default function DailyTreasuryPage() {
                     className="w-full h-12 rounded-2xl bg-white border border-slate-200 px-4 text-[14px] font-bold text-zinc-800 outline-none focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 transition-all"
                   />
                 </div>
+                <div className="flex flex-col gap-2">
+                  <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">الفئة</label>
+                  <select
+                    value={quickCategoryId}
+                    onChange={(e) => setQuickCategoryId(e.target.value)}
+                    className="w-full h-12 rounded-2xl bg-white border border-slate-200 px-4 text-[13px] font-bold text-zinc-800 outline-none focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 transition-all appearance-none"
+                  >
+                    <option value="">غير مصنف</option>
+                    {(quickModal === "expense" ? expenseCategories : revenueCategories).map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
                 <div className="pt-4">
                   <motion.button
                     whileHover={{ y: -2 }}
@@ -1321,16 +1399,7 @@ export default function DailyTreasuryPage() {
         )}
       </AnimatePresence>
 
-      <ExpenseFormModal
-        open={expenseOpen}
-        onClose={() => setExpenseOpen(false)}
-        onSuccess={refreshAfterFinanceModal}
-      />
-      <RevenueFormModal
-        open={revenueOpen}
-        onClose={() => setRevenueOpen(false)}
-        onSuccess={refreshAfterFinanceModal}
-      />
+
 
       <AnimatePresence>
         {openingEditOpen && (

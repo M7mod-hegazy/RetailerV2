@@ -25,11 +25,15 @@ export default function StatementModal({ party, partyType, onClose }) {
       const q = `?${partyType === 'customer' ? 'customer_id' : 'supplier_id'}=${party.id}&date_from=${from}&date_to=${to}&limit=500`;
       const docsReq = api.get(partyType === 'customer' ? `/api/invoices${q}` : `/api/purchases${q}`);
       const paysReq = api.get(`/api/payments?party_type=${partyType}&party_id=${party.id}&from=${from}&to=${to}&limit=500`);
+      const debtsReq = api.get(`/api/ajal-debts/${partyType}/${party.id}`).catch(() => ({ data: { data: [] } }));
       
-      const [docsR, paysR] = await Promise.all([docsReq, paysReq]);
+      const [docsR, paysR, debtsR] = await Promise.all([docsReq, paysReq, debtsReq]);
       
       const docs = docsR.data.data || [];
       const pays = paysR.data.data || [];
+      const debtDetails = await Promise.all((debtsR.data.data || []).map((debt) =>
+        api.get(`/api/ajal-debts/${debt.id}`).then((r) => r.data.data).catch(() => null)
+      ));
       
       const items = [];
       let totalD = 0;
@@ -52,6 +56,20 @@ export default function StatementModal({ party, partyType, onClose }) {
           doc_no: p.doc_no || `PAY-${p.id}`,
           debit: partyType === 'supplier' ? p.amount : 0,
           credit: partyType === 'customer' ? p.amount : 0,
+        });
+      });
+
+      debtDetails.filter(Boolean).forEach((debt) => {
+        (debt.payments || []).forEach((p) => {
+          const dateValue = p.payment_date || p.created_at;
+          if (dateValue && (dateValue.slice(0, 10) < from || dateValue.slice(0, 10) > to)) return;
+          items.push({
+            date: new Date(dateValue),
+            type: partyType === 'customer' ? "تحصيل دين آجل" : "سداد دين آجل",
+            doc_no: `AJAL-${debt.id}`,
+            debit: partyType === 'supplier' ? p.amount : 0,
+            credit: partyType === 'customer' ? p.amount : 0,
+          });
         });
       });
 

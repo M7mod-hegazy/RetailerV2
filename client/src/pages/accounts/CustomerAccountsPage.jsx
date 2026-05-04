@@ -3,6 +3,7 @@ import { Users, Search, Plus, FileText, Settings, X, Phone, AlertTriangle, Slide
 import api from "../../services/api";
 import toast from "react-hot-toast";
 import StatementModal from "../../components/accounts/StatementModal";
+import PartyDebtPanel from "../../components/accounts/PartyDebtPanel";
 
 const fmt = (n) => Number(n || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2 });
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString("ar-EG") : "—";
@@ -368,7 +369,9 @@ export default function CustomerAccountsPage() {
 
             {/* Tab Content */}
             <div className="flex-1 overflow-auto p-6 bg-slate-50">
-              {tabLoading ? (
+              {activeTab === "debts" ? (
+                <PartyDebtPanel party={selected} partyType="customer" accent="blue" onChanged={refreshSelected} />
+              ) : tabLoading ? (
                 <div className="flex items-center justify-center h-32 text-slate-400 font-black animate-pulse">جاري التحميل...</div>
               ) : tabData.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-32 text-slate-300 gap-2">

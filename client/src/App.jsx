@@ -63,7 +63,6 @@ const PromotionsPage = lazy(() => import("./pages/definitions/PromotionsPage"));
 const DailyTreasuryPage = lazy(() => import("./pages/pos/DailyTreasuryPage"));
 const PaymentMethodsPage = lazy(() => import("./pages/operations/PaymentMethodsPage"));
 const PaymentTransactionsPage = lazy(() => import("./pages/operations/PaymentTransactionsPage"));
-const AjalTrackerPage = lazy(() => import("./pages/operations/AjalTrackerPage"));
 const CustomerProfilePage = lazy(() => import("./pages/definitions/CustomerProfilePage"));
 const SupplierProfilePage = lazy(() => import("./pages/definitions/SupplierProfilePage"));
 const BankOperationsPage = lazy(() => import("./pages/operations/BankOperationsPage"));
@@ -159,11 +158,11 @@ export default function App() {
                     <Route path="payments/new" element={<PaymentFormPage />} />
                     <Route path="accounts/customers" element={<CustomerAccountsPage />} />
                     <Route path="accounts/suppliers" element={<SupplierAccountsPage />} />
-                    <Route path="operations/ajal-tracker" element={<AjalTrackerPage />} />
+                    <Route path="operations/ajal-tracker" element={<Navigate to="/accounts/customers" replace />} />
                     <Route path="operations/cheques" element={<ChequesPage />} />
                     <Route path="operations/payment-transactions" element={<Navigate to="/operations/payment-methods" replace />} />
                     <Route path="operations/treasury-transfer" element={<Navigate to="/expenses" replace />} />
-                    <Route path="operations/installments" element={<Navigate to="/operations/ajal-tracker" replace />} />
+                    <Route path="operations/installments" element={<Navigate to="/accounts/customers" replace />} />
                     <Route path="operations/bank-operations" element={<BankOperationsPage />} />
                     <Route path="operations/bulk-price-update" element={<BulkPriceUpdatePage />} />
                     <Route path="operations/employee-adjustments" element={<EmployeeAdjustmentsPage />} />

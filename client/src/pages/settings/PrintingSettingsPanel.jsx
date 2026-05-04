@@ -7,6 +7,11 @@ import {
 import { BlockRenderer, CustomTextBlocksSection, getCustomBlocks, saveCustomBlocks } from "./CustomTextBlocks";
 import api from "../../services/api";
 import toast from "react-hot-toast";
+import BankStatementTemplate from "../../components/print/templates/BankStatementTemplate";
+import AjalStatementTemplate from "../../components/print/templates/AjalStatementTemplate";
+import AjalScheduleTemplate from "../../components/print/templates/AjalScheduleTemplate";
+import ChequeRegisterTemplate from "../../components/print/templates/ChequeRegisterTemplate";
+import PaymentMethodsReportTemplate from "../../components/print/templates/PaymentMethodsReportTemplate";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -41,21 +46,48 @@ const DEFAULTS = {
 };
 
 const DOC_TYPES = [
-  { key: "global", label: "الإعدادات العامة", icon: "⚙" },
-  { key: "pos_receipt", label: "إيصال نقطة البيع", icon: "REC" },
-  { key: "sales_invoice", label: "فاتورة مبيعات", icon: "INV" },
-  { key: "purchase_order", label: "أمر شراء", icon: "PO" },
-  { key: "sales_return", label: "مرتجع مبيعات", icon: "RET" },
-  { key: "quotation", label: "عرض سعر", icon: "Q" },
-  { key: "branch_transfer", label: "تحويل فرع", icon: "TR" },
-  { key: "bank_statement", label: "كشف بنكي", icon: "BNK" },
-  { key: "ajal_statement", label: "كشف آجل", icon: "AJL" },
-  { key: "ajal_schedule", label: "جدول أقساط", icon: "SCH" },
-  { key: "cheque_register", label: "سجل شيكات", icon: "CHK" },
-  { key: "payment_receipt", label: "إيصال دفع", icon: "PAY" },
-  { key: "daily_treasury", label: "تقرير الخزينة", icon: "DT" },
-  { key: "payment_methods_report", label: "تقرير وسائل الدفع", icon: "PM" },
+  { key: "global",                label: "الإعدادات العامة",      icon: "⚙"   },
+  { key: "pos_receipt",           label: "إيصال نقطة البيع",      icon: "REC" },
+  { key: "sales_invoice",         label: "فاتورة مبيعات",         icon: "INV" },
+  { key: "purchase_order",        label: "أمر شراء",              icon: "PO"  },
+  { key: "sales_return",          label: "مرتجع مبيعات",         icon: "RET" },
+  { key: "quotation",             label: "عرض سعر",               icon: "Q"   },
+  { key: "branch_transfer",       label: "تحويل فرع",             icon: "TR"  },
+  { key: "bank_statement",        label: "كشف بنكي",              icon: "BNK" },
+  { key: "ajal_statement",        label: "كشف آجل",               icon: "AJL" },
+  { key: "ajal_schedule",         label: "جدول أقساط",            icon: "SCH" },
+  { key: "cheque_register",       label: "سجل شيكات",             icon: "CHK" },
+  { key: "payment_receipt",       label: "إيصال دفع",             icon: "PAY" },
+  { key: "daily_treasury",        label: "تقرير الخزينة",         icon: "DT"  },
+  { key: "payment_methods_report",label: "تقرير وسائل الدفع",    icon: "PM"  },
 ];
+
+// Valid paper sizes per doc type + system default (user can override)
+export const DOC_PAPER_CONFIG = {
+  pos_receipt:            { sizes: ["58mm","80mm","A5"],          defaultSize: "80mm" },
+  sales_invoice:          { sizes: ["58mm","80mm","A5","A4"],     defaultSize: "A4"   },
+  purchase_order:         { sizes: ["80mm","A5","A4"],            defaultSize: "A4"   },
+  sales_return:           { sizes: ["58mm","80mm","A5","A4"],     defaultSize: "80mm" },
+  quotation:              { sizes: ["80mm","A5","A4"],            defaultSize: "A4"   },
+  branch_transfer:        { sizes: ["80mm","A5","A4"],            defaultSize: "A4"   },
+  bank_statement:         { sizes: ["A5","A4"],                   defaultSize: "A4"   },
+  ajal_statement:         { sizes: ["A5","A4"],                   defaultSize: "A4"   },
+  ajal_schedule:          { sizes: ["80mm","A5","A4"],            defaultSize: "A4"   },
+  cheque_register:        { sizes: ["A5","A4"],                   defaultSize: "A4"   },
+  payment_receipt:        { sizes: ["58mm","80mm","A5"],          defaultSize: "80mm" },
+  daily_treasury:         { sizes: ["A5","A4"],                   defaultSize: "A4"   },
+  payment_methods_report: { sizes: ["A5","A4"],                   defaultSize: "A4"   },
+};
+
+// Resolve the effective paper size for a docType given saved per-doc settings
+export function resolveDocPaperSize(docType, docTypeSettings = {}) {
+  const cfg = DOC_PAPER_CONFIG[docType];
+  if (!cfg) return "A4";
+  if (docTypeSettings.paper_size && docTypeSettings.paper_size !== "inherit") {
+    return docTypeSettings.paper_size;
+  }
+  return cfg.defaultSize;
+}
 
 // Fields that have a direct, VISIBLE representation in the preview
 const VISUAL_FIELDS = new Set([
@@ -402,28 +434,587 @@ function DocTypeNav({ activeDocType, onSelect }) {
   );
 }
 
+// ─── Distinct mock previews — all delegate to ThermalPreview / PagePreview so
+//     every toggle (show_item_code, show_logo, عناصر الظهور) and custom text
+//     blocks are automatically respected. Doc-specific metadata is injected via
+//     the "before_meta" / "after_header" custom-block positions using a shim.
+// ────────────────────────────────────────────────────────────────────────────────
+
+// Inject an extra fixed block at a given position so distinct docs can show
+// their own metadata row inside the existing BlockRenderer flow.
+function withMetaBlock(customBlocks, position, content) {
+  return [
+    ...customBlocks,
+    { id: "__meta__", position, type: "text", text: content, paperSizes: ["58mm","80mm","A4","A5"] },
+  ];
+}
+
+// ── Thermal-based docs (POS, Sales Invoice thermal, Sales Return thermal, Payment Receipt) ──
+
+function PosReceiptPreview({ s }) {
+  const blocks = getCustomBlocks(s);
+  return <ThermalPreview settings={{ ...s, receipt_width: s._previewSize || "80mm" }} hovered={null} onElementClick={() => {}} customBlocks={blocks} />;
+}
+
+function SalesInvoicePreview({ s }) {
+  const blocks = getCustomBlocks(s);
+  const isRoll = ["58mm","80mm"].includes(s._previewSize || "A4");
+  if (isRoll) return <ThermalPreview settings={{ ...s, receipt_width: s._previewSize }} hovered={null} onElementClick={() => {}} customBlocks={blocks} />;
+  return <PagePreview settings={s} size={s._previewSize === "A5" ? "A5" : "A4"} hovered={null} onElementClick={() => {}} customBlocks={blocks} />;
+}
+
+function SalesReturnPreview({ s }) {
+  const blocks = getCustomBlocks(s);
+  const isRoll = ["58mm","80mm"].includes(s._previewSize || "80mm");
+  const retAccent = s.accent_color || "#dc2626"; // red accent if user hasn't overridden
+  const withMeta = withMetaBlock(blocks, "after_header",
+    `↩ مرتجع مبيعات — RET-2025-007 | فاتورة: INV-2025-042 | سبب: عيب مصنعي`);
+  if (isRoll) return <ThermalPreview settings={{ ...s, receipt_width: s._previewSize, accent_color: retAccent }} hovered={null} onElementClick={() => {}} customBlocks={withMeta} />;
+  return <PagePreview settings={{ ...s, accent_color: retAccent }} size={s._previewSize === "A5" ? "A5" : "A4"} hovered={null} onElementClick={() => {}} customBlocks={withMeta} />;
+}
+
+function PaymentReceiptPreview({ s }) {
+  const blocks = getCustomBlocks(s);
+  const currency = get(s, "currency_symbol");
+  const withMeta = withMetaBlock(blocks, "after_header",
+    `💳 PAY-2025-088 | المبلغ: ${currency} 500.00 | نقدي | مرجع: INV-2025-042 | الرصيد: ${currency} 0.00`);
+  return <ThermalPreview settings={{ ...s, receipt_width: s._previewSize || "80mm" }} hovered={null} onElementClick={() => {}} customBlocks={withMeta} />;
+}
+
+// ── DocA4Base — shared A4/A5 shell that handles header/footer/blocks and injects
+//    a distinct meta strip + items table for each doc type ──────────────────────
+
+function DocA4Base({ s, title, docNo, metaStrip, itemsTable, totalsBlock, extraFooter }) {
+  const accent = get(s, "accent_color");
+  const font   = get(s, "print_font");
+  const currency = get(s, "currency_symbol");
+  const taxRate  = parseFloat(get(s, "tax_rate") || 0);
+  const isA5 = (s._previewSize || "A4") === "A5";
+  const w    = isA5 ? "148mm" : "210mm";
+  const customBlocks = getCustomBlocks(s);
+  const dashed = `1px dashed ${accent}44`;
+
+  return (
+    <div dir="rtl" style={{ fontFamily: font, fontSize: `${get(s,"body_font_size")}px`, width: w, padding: `${get(s,"margin_top")}mm ${get(s,"margin_side")}mm`, color: "#1e293b", background: "#fff", boxShadow: "0 8px 40px rgba(0,0,0,0.15)" }}>
+
+      {/* ── Company header ── */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", borderBottom:`3px solid ${accent}`, paddingBottom:"10px", marginBottom:"12px" }}>
+        <div>
+          {get(s,"show_logo") !== false && s.logo_url && <img src={s.logo_url} alt="" style={{ maxHeight:`${get(s,"logo_max_height")}px`, marginBottom:"4px" }} />}
+          <div style={{ fontSize:`${get(s,"header_font_size")}px`, fontWeight:900, color:accent }}>{s.company_name || "إلهيجازي للتجزئة"}</div>
+          {get(s,"show_branch")  !== false && <div style={{ fontSize:"10px", color:"#64748b" }}>{s.branch_name || "الفرع الرئيسي"}</div>}
+          {get(s,"show_address") !== false && <div style={{ fontSize:"9px",  color:"#94a3b8" }}>{s.address || "الرياض، المملكة"}</div>}
+          {get(s,"show_phone")   !== false && <div style={{ fontSize:"9px",  color:"#94a3b8" }}>هاتف: {s.phone || "0501234567"}</div>}
+          {get(s,"show_tax_id")  !== false && <div style={{ fontSize:"9px",  color:"#94a3b8" }}>الرقم الضريبي: {s.tax_id || "310122393500003"}</div>}
+        </div>
+        <div style={{ textAlign:"left" }}>
+          <div style={{ fontSize:"18px", fontWeight:900, color:accent }}>{title}</div>
+          <div style={{ fontSize:"10px", color:"#64748b", fontFamily:"monospace" }}>{docNo}</div>
+          {get(s,"show_invoice_date") !== false && <div style={{ fontSize:"10px", color:"#94a3b8" }}>{new Date().toLocaleDateString("ar-SA")}</div>}
+        </div>
+      </div>
+
+      {get(s,"receipt_header") && <div style={{ textAlign:"center", fontSize:"10px", marginBottom:"8px", fontStyle:"italic", color:"#64748b" }}>{get(s,"receipt_header")}</div>}
+      <BlockRenderer blocks={customBlocks} position="after_header" paperSize={w} accentColor={accent} hovered={null} onElementClick={() => {}} />
+
+      {/* ── Doc-specific meta strip (customer, supplier, etc.) ── */}
+      {metaStrip}
+      <BlockRenderer blocks={customBlocks} position="before_meta" paperSize={w} accentColor={accent} hovered={null} onElementClick={() => {}} />
+      {get(s,"show_customer_name") !== false && <BlockRenderer blocks={[]} position="after_meta" paperSize={w} accentColor={accent} hovered={null} onElementClick={() => {}} />}
+      <BlockRenderer blocks={customBlocks} position="after_meta" paperSize={w} accentColor={accent} hovered={null} onElementClick={() => {}} />
+
+      {/* ── Items table ── */}
+      <BlockRenderer blocks={customBlocks} position="before_items" paperSize={w} accentColor={accent} hovered={null} onElementClick={() => {}} />
+      {itemsTable}
+      <BlockRenderer blocks={customBlocks} position="after_items" paperSize={w} accentColor={accent} hovered={null} onElementClick={() => {}} />
+
+      {/* ── Totals ── */}
+      <BlockRenderer blocks={customBlocks} position="before_totals" paperSize={w} accentColor={accent} hovered={null} onElementClick={() => {}} />
+      {totalsBlock}
+      <BlockRenderer blocks={customBlocks} position="after_totals" paperSize={w} accentColor={accent} hovered={null} onElementClick={() => {}} />
+
+      {extraFooter}
+
+      {/* ── Footer ── */}
+      {get(s,"show_footer") !== false && (
+        <>
+          <div style={{ borderTop: dashed, marginTop:"12px" }} />
+          <BlockRenderer blocks={customBlocks} position="before_footer" paperSize={w} accentColor={accent} hovered={null} onElementClick={() => {}} />
+          <div style={{ textAlign:"center", fontSize:`${get(s,"footer_font_size")}px`, color:"#94a3b8", fontStyle:"italic", paddingTop:"6px" }}>
+            {get(s,"receipt_footer") || "شكراً لتعاملكم معنا"}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Shared items table for A4/A5 docs — SKU always first when show_item_code is on
+function A4ItemsTable({ s, items, extraHeaders = [], extraCells = () => [] }) {
+  const accent    = get(s, "accent_color");
+  const currency  = get(s, "currency_symbol");
+  const showCode  = get(s, "show_item_code") !== false;
+  return (
+    <table style={{ width:"100%", borderCollapse:"collapse", fontSize:`${get(s,"item_font_size")}px`, marginBottom:"10px" }}>
+      <thead>
+        <tr style={{ background: accent, color: "#fff" }}>
+          {showCode && <th style={{ padding:"5px 8px", textAlign:"right", fontWeight:900, fontSize:"9px", opacity:0.85 }}>كود</th>}
+          <th style={{ padding:"5px 8px", textAlign:"right", fontWeight:900 }}>المنتج</th>
+          {extraHeaders.map(h => <th key={h} style={{ padding:"5px 8px", textAlign:"center", fontWeight:900 }}>{h}</th>)}
+          <th style={{ padding:"5px 8px", textAlign:"center", fontWeight:900 }}>كمية</th>
+          <th style={{ padding:"5px 8px", textAlign:"center", fontWeight:900 }}>سعر</th>
+          <th style={{ padding:"5px 8px", textAlign:"left",   fontWeight:900 }}>إجمالي</th>
+        </tr>
+      </thead>
+      <tbody>
+        {items.map(({ code, name, qty, price }, i) => (
+          <tr key={i} style={{ background: i%2===0?"#f8fafc":"#fff", borderBottom:"1px solid #e2e8f0" }}>
+            {showCode && <td style={{ padding:"5px 8px", fontFamily:"monospace", fontSize:"9px", color:"#94a3b8" }}>{code}</td>}
+            <td style={{ padding:"5px 8px", fontWeight:600 }}>{name}</td>
+            {extraCells(items[i]).map((v,j) => <td key={j} style={{ padding:"5px 8px", textAlign:"center", color:"#64748b" }}>{v}</td>)}
+            <td style={{ padding:"5px 8px", textAlign:"center" }}>{qty}</td>
+            <td style={{ padding:"5px 8px", textAlign:"center" }}>{price.toFixed(2)}</td>
+            <td style={{ padding:"5px 8px", fontWeight:700, textAlign:"left" }}>{(qty*price).toFixed(2)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+const MOCK_ITEMS = [
+  { code:"SKU-001", name:"قميص قطني L",    qty:2, price:120 },
+  { code:"SKU-002", name:"بنطلون جينز",    qty:1, price:150 },
+  { code:"SKU-003", name:"حزام جلد",       qty:3, price:80  },
+];
+
+// Shared A4 totals block
+function A4Totals({ s }) {
+  const accent    = get(s, "accent_color");
+  const currency  = get(s, "currency_symbol");
+  const taxRate   = parseFloat(get(s, "tax_rate") || 0);
+  const sub = MOCK_ITEMS.reduce((t,i)=>t+i.qty*i.price,0);
+  const tax = get(s,"show_tax") !== false ? sub*(taxRate/100) : 0;
+  const total = sub + tax;
+  return (
+    <div style={{ display:"flex", justifyContent:"flex-end" }}>
+      <div style={{ width:"42%", fontSize:`${get(s,"item_font_size")}px` }}>
+        {get(s,"show_subtotal")      !== false && <div style={{ display:"flex", justifyContent:"space-between", padding:"2px 0" }}><span style={{color:"#64748b"}}>الإجمالي الفرعي</span><span>{currency} {sub.toFixed(2)}</span></div>}
+        {get(s,"show_discount_line") !== false && <div style={{ display:"flex", justifyContent:"space-between", padding:"2px 0" }}><span style={{color:"#64748b"}}>الخصم</span><span style={{color:"#dc2626"}}>- 0.00</span></div>}
+        {get(s,"show_tax")           !== false && <div style={{ display:"flex", justifyContent:"space-between", padding:"2px 0" }}><span style={{color:"#64748b"}}>الضريبة ({taxRate}%)</span><span>{currency} {tax.toFixed(2)}</span></div>}
+        <div style={{ display:"flex", justifyContent:"space-between", padding:"6px 8px", background:accent, color:"#fff", borderRadius:"4px", marginTop:"4px", fontWeight:900 }}>
+          <span>المستحق</span><span>{currency} {total.toFixed(2)}</span>
+        </div>
+        {get(s,"show_payment_details") !== false && (
+          <div style={{ marginTop:"6px", fontSize:"10px", color:"#64748b" }}>
+            <div style={{ display:"flex", justifyContent:"space-between" }}><span>نقداً:</span><span>{currency} {(total+50).toFixed(2)}</span></div>
+            <div style={{ display:"flex", justifyContent:"space-between", color:"#16a34a", fontWeight:700 }}><span>الباقي للعميل:</span><span>{currency} 50.00</span></div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── PO, Q, TR, DT — truly distinct A4 layouts using DocA4Base ─────────────────
+
+function PurchaseOrderPreview({ s }) {
+  const accent = get(s, "accent_color");
+  const currency = get(s, "currency_symbol");
+  const showCode = get(s, "show_item_code") !== false;
+  const isRoll = (s._previewSize || "A4") === "80mm";
+  if (isRoll) {
+    const blocks = getCustomBlocks(s);
+    const withMeta = withMetaBlock(blocks, "after_header", `📦 PO-2025-018 | المورد: مؤسسة النور | توصيل: 2025-06-15`);
+    return <ThermalPreview settings={{ ...s, receipt_width: "80mm" }} hovered={null} onElementClick={() => {}} customBlocks={withMeta} />;
+  }
+  const poItems = [
+    { code:"RM-001", name:"أقمشة قطنية",   qty:50,  price:30  },
+    { code:"RM-002", name:"خيوط صناعية",   qty:200, price:2   },
+    { code:"RM-003", name:"أزرار بلاستيك", qty:500, price:0.5 },
+  ];
+  return (
+    <DocA4Base s={s} title="أمر شراء" docNo="PO-2025-018"
+      metaStrip={
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px", marginBottom:"12px", background:"#f8fafc", borderRadius:"6px", padding:"10px", fontSize:"11px" }}>
+          <div><span style={{color:"#64748b"}}>المورد: </span><strong>مؤسسة النور للتوريدات</strong></div>
+          <div><span style={{color:"#64748b"}}>تاريخ التوصيل: </span><strong style={{color:"#16a34a"}}>2025-06-15</strong></div>
+          <div><span style={{color:"#64748b"}}>المستودع: </span><strong>المستودع الرئيسي</strong></div>
+          <div><span style={{color:"#64748b"}}>الحالة: </span><strong style={{color:"#d97706"}}>معلق الموافقة</strong></div>
+        </div>
+      }
+      itemsTable={
+        <table style={{ width:"100%", borderCollapse:"collapse", fontSize:`${get(s,"item_font_size")}px`, marginBottom:"10px" }}>
+          <thead><tr style={{ background:accent, color:"#fff" }}>
+            {showCode && <th style={{ padding:"5px 8px", textAlign:"right", fontWeight:900, fontSize:"9px", opacity:0.85 }}>كود</th>}
+            <th style={{ padding:"5px 8px", textAlign:"right", fontWeight:900 }}>الصنف</th>
+            <th style={{ padding:"5px 8px", textAlign:"center", fontWeight:900 }}>الكمية</th>
+            <th style={{ padding:"5px 8px", textAlign:"center", fontWeight:900 }}>سعر الوحدة</th>
+            <th style={{ padding:"5px 8px", textAlign:"left",   fontWeight:900 }}>الإجمالي</th>
+          </tr></thead>
+          <tbody>{poItems.map(({code,name,qty,price},i)=>(
+            <tr key={i} style={{ background:i%2===0?"#f8fafc":"#fff", borderBottom:"1px solid #e2e8f0" }}>
+              {showCode && <td style={{ padding:"5px 8px", fontFamily:"monospace", fontSize:"9px", color:"#94a3b8" }}>{code}</td>}
+              <td style={{ padding:"5px 8px", fontWeight:600 }}>{name}</td>
+              <td style={{ padding:"5px 8px", textAlign:"center" }}>{qty}</td>
+              <td style={{ padding:"5px 8px", textAlign:"center" }}>{price.toFixed(2)}</td>
+              <td style={{ padding:"5px 8px", fontWeight:700, textAlign:"left" }}>{(qty*price).toFixed(2)}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      }
+      totalsBlock={
+        <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:"16px" }}>
+          <div style={{ width:"38%", fontSize:`${get(s,"item_font_size")}px` }}>
+            <div style={{ display:"flex", justifyContent:"space-between", padding:"6px 8px", background:accent, color:"#fff", borderRadius:"4px", fontWeight:900 }}>
+              <span>إجمالي الأمر</span><span>{currency} 2,150.00</span>
+            </div>
+          </div>
+        </div>
+      }
+      extraFooter={
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"40px", marginTop:"24px" }}>
+          <div style={{ borderTop:"2px solid #e2e8f0", paddingTop:"6px", textAlign:"center", fontSize:"10px", color:"#64748b" }}>توقيع المورد</div>
+          <div style={{ borderTop:"2px solid #e2e8f0", paddingTop:"6px", textAlign:"center", fontSize:"10px", color:"#64748b" }}>توقيع المدير المفوض</div>
+        </div>
+      }
+    />
+  );
+}
+
+function QuotationPreview({ s }) {
+  const accent = get(s, "accent_color");
+  const currency = get(s, "currency_symbol");
+  const isRoll = (s._previewSize || "A4") === "80mm";
+  if (isRoll) {
+    const blocks = getCustomBlocks(s);
+    const withMeta = withMetaBlock(blocks, "after_header", `💬 Q-2025-011 | شركة الأمل | صالح حتى: 2025-06-30`);
+    return <ThermalPreview settings={{ ...s, receipt_width: "80mm" }} hovered={null} onElementClick={() => {}} customBlocks={withMeta} />;
+  }
+  return (
+    <DocA4Base s={s} title="عرض سعر" docNo="Q-2025-011"
+      metaStrip={
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px", marginBottom:"12px", background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:"6px", padding:"10px", fontSize:"11px" }}>
+          <div><span style={{color:"#64748b"}}>مقدم إلى: </span><strong>شركة الأمل التجارية</strong></div>
+          <div><span style={{color:"#64748b"}}>صالح حتى: </span><strong style={{color:"#16a34a"}}>2025-06-30</strong></div>
+          {get(s,"show_customer_name") !== false && <div><span style={{color:"#64748b"}}>جهة الاتصال: </span><strong>محمد الأمل</strong></div>}
+          <div><span style={{color:"#64748b"}}>شروط الدفع: </span><strong>30 يوم</strong></div>
+        </div>
+      }
+      itemsTable={<A4ItemsTable s={s} items={MOCK_ITEMS} extraHeaders={["الوحدة"]} extraCells={()=>["قطعة"]} />}
+      totalsBlock={<A4Totals s={s} />}
+      extraFooter={
+        <div style={{ marginTop:"12px", background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:"6px", padding:"10px", fontSize:"11px", color:"#15803d" }}>
+          <strong>الشروط والأحكام:</strong> هذا العرض قابل للتفاوض. يُرجى التواصل قبل انتهاء الصلاحية.
+        </div>
+      }
+    />
+  );
+}
+
+function BranchTransferPreview({ s }) {
+  const accent = get(s, "accent_color");
+  const showCode = get(s, "show_item_code") !== false;
+  const isRoll = (s._previewSize || "A4") === "80mm";
+  if (isRoll) {
+    const blocks = getCustomBlocks(s);
+    const withMeta = withMetaBlock(blocks, "after_header", `🔄 TR-2025-003 | من: الرئيسي → فرع الشمالية`);
+    return <ThermalPreview settings={{ ...s, receipt_width: "80mm" }} hovered={null} onElementClick={() => {}} customBlocks={withMeta} />;
+  }
+  const trItems = [
+    { code:"SKU-001", name:"قميص قطني L",  qty:10, price:0 },
+    { code:"SKU-002", name:"بنطلون جينز",  qty:5,  price:0 },
+    { code:"SKU-004", name:"حذاء رياضي",   qty:8,  price:0 },
+  ];
+  return (
+    <DocA4Base s={s} title="أمر تحويل فرع" docNo="TR-2025-003"
+      metaStrip={
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px", marginBottom:"14px" }}>
+          {[["من المستودع","المستودع الرئيسي","#dbeafe","#1d4ed8"],["إلى المستودع","فرع الشمالية","#dcfce7","#15803d"]].map(([lbl,val,bg,col])=>(
+            <div key={lbl} style={{ background:bg, borderRadius:"8px", padding:"12px", fontSize:"11px" }}>
+              <div style={{ color:"#64748b", marginBottom:"4px" }}>{lbl}</div>
+              <div style={{ fontWeight:900, fontSize:"14px", color:col }}>{val}</div>
+            </div>
+          ))}
+        </div>
+      }
+      itemsTable={
+        <table style={{ width:"100%", borderCollapse:"collapse", fontSize:`${get(s,"item_font_size")}px`, marginBottom:"10px" }}>
+          <thead><tr style={{ background:accent, color:"#fff" }}>
+            {showCode && <th style={{ padding:"5px 8px", textAlign:"right", fontWeight:900, fontSize:"9px", opacity:0.85 }}>كود</th>}
+            <th style={{ padding:"5px 8px", textAlign:"right", fontWeight:900 }}>الصنف</th>
+            <th style={{ padding:"5px 8px", textAlign:"center", fontWeight:900 }}>الكمية المحولة</th>
+            <th style={{ padding:"5px 8px", textAlign:"center", fontWeight:900 }}>الوحدة</th>
+            <th style={{ padding:"5px 8px", textAlign:"right",  fontWeight:900 }}>ملاحظات</th>
+          </tr></thead>
+          <tbody>{trItems.map(({code,name,qty},i)=>(
+            <tr key={i} style={{ background:i%2===0?"#f8fafc":"#fff", borderBottom:"1px solid #e2e8f0" }}>
+              {showCode && <td style={{ padding:"5px 8px", fontFamily:"monospace", fontSize:"9px", color:"#94a3b8" }}>{code}</td>}
+              <td style={{ padding:"5px 8px", fontWeight:600 }}>{name}</td>
+              <td style={{ padding:"5px 8px", textAlign:"center", fontWeight:700, color:accent }}>{qty}</td>
+              <td style={{ padding:"5px 8px", textAlign:"center", color:"#64748b" }}>قطعة</td>
+              <td style={{ padding:"5px 8px", fontSize:"10px", color:"#94a3b8" }}>—</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      }
+      totalsBlock={null}
+      extraFooter={
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"40px", marginTop:"24px" }}>
+          <div style={{ borderTop:"2px solid #e2e8f0", paddingTop:"6px", textAlign:"center", fontSize:"10px", color:"#64748b" }}>توقيع المرسل</div>
+          <div style={{ borderTop:"2px solid #e2e8f0", paddingTop:"6px", textAlign:"center", fontSize:"10px", color:"#64748b" }}>توقيع المستلم</div>
+        </div>
+      }
+    />
+  );
+}
+
+function DailyTreasuryPreview({ s }) {
+  const accent   = get(s, "accent_color");
+  const currency = get(s, "currency_symbol");
+  const font     = get(s, "print_font");
+  const isA5 = (s._previewSize || "A4") === "A5";
+  const w    = isA5 ? "148mm" : "210mm";
+  const customBlocks = getCustomBlocks(s);
+  return (
+    <div dir="rtl" style={{ fontFamily:font, fontSize:`${get(s,"body_font_size")}px`, width:w, padding:`${get(s,"margin_top")}mm ${get(s,"margin_side")}mm`, color:"#1e293b", background:"#fff", boxShadow:"0 8px 40px rgba(0,0,0,0.15)" }}>
+      {/* Header */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", borderBottom:`3px solid ${accent}`, paddingBottom:"10px", marginBottom:"14px" }}>
+        <div>
+          {get(s,"show_logo") !== false && s.logo_url && <img src={s.logo_url} alt="" style={{ maxHeight:`${get(s,"logo_max_height")}px`, marginBottom:"4px" }} />}
+          <div style={{ fontSize:`${get(s,"header_font_size")}px`, fontWeight:900, color:accent }}>{s.company_name || "إلهيجازي للتجزئة"}</div>
+          {get(s,"show_branch")  !== false && <div style={{ fontSize:"10px", color:"#64748b" }}>{s.branch_name || "الفرع الرئيسي"}</div>}
+          {get(s,"show_address") !== false && <div style={{ fontSize:"9px", color:"#94a3b8" }}>{s.address || "الرياض، المملكة"}</div>}
+          {get(s,"show_phone")   !== false && <div style={{ fontSize:"9px", color:"#94a3b8" }}>هاتف: {s.phone || "0501234567"}</div>}
+        </div>
+        <div style={{ textAlign:"left" }}>
+          <div style={{ fontSize:"18px", fontWeight:900, color:accent }}>تقرير الخزينة اليومي</div>
+          {get(s,"show_invoice_date") !== false && <div style={{ fontSize:"10px", color:"#94a3b8" }}>{new Date().toLocaleDateString("ar-SA")}</div>}
+          {get(s,"show_cashier_name") !== false && <div style={{ fontSize:"10px", color:"#94a3b8" }}>الكاشير: أحمد صالح</div>}
+        </div>
+      </div>
+      {get(s,"receipt_header") && <div style={{ textAlign:"center", fontSize:"10px", marginBottom:"8px", fontStyle:"italic", color:"#64748b" }}>{get(s,"receipt_header")}</div>}
+      <BlockRenderer blocks={customBlocks} position="after_header" paperSize={w} accentColor={accent} hovered={null} onElementClick={() => {}} />
+      {/* Summary cards */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"10px", marginBottom:"14px" }}>
+        {[["رصيد الافتتاح","5,200.00","#1d4ed8"],["إجمالي الداخل","12,450.00","#16a34a"],["إجمالي الخارج","3,800.00","#dc2626"]].map(([lbl,val,col])=>(
+          <div key={lbl} style={{ border:"1px solid #e2e8f0", borderRadius:"8px", padding:"10px", textAlign:"center" }}>
+            <div style={{ fontSize:"10px", color:"#64748b", marginBottom:"4px" }}>{lbl}</div>
+            <div style={{ fontSize:"15px", fontWeight:900, color:col }}>{currency} {val}</div>
+          </div>
+        ))}
+      </div>
+      <BlockRenderer blocks={customBlocks} position="before_items" paperSize={w} accentColor={accent} hovered={null} onElementClick={() => {}} />
+      {/* Transactions table — no item code column (treasury has no SKU) */}
+      <table style={{ width:"100%", borderCollapse:"collapse", fontSize:`${get(s,"item_font_size")}px` }}>
+        <thead><tr style={{ background:accent, color:"#fff" }}>
+          {["المستند","النوع","المبلغ","وسيلة الدفع"].map(h=><th key={h} style={{ padding:"5px 8px", textAlign:"right", fontWeight:900 }}>{h}</th>)}
+        </tr></thead>
+        <tbody>
+          {[["INV-042","مبيعات","1,500","نقدي"],["INV-043","مبيعات","2,000","شبكة"],["EXP-011","مصروف","-800","نقدي"],["RET-007","مرتجع","-120","نقدي"]].map(([d,t,a,m],i)=>(
+            <tr key={i} style={{ background:i%2===0?"#f8fafc":"#fff", borderBottom:"1px solid #e2e8f0" }}>
+              <td style={{ padding:"5px 8px", fontFamily:"monospace" }}>{d}</td>
+              <td style={{ padding:"5px 8px" }}>{t}</td>
+              <td style={{ padding:"5px 8px", fontWeight:700, color:a.startsWith("-")?"#dc2626":"#16a34a" }}>{currency} {a}</td>
+              <td style={{ padding:"5px 8px", color:"#64748b" }}>{m}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <BlockRenderer blocks={customBlocks} position="after_items" paperSize={w} accentColor={accent} hovered={null} onElementClick={() => {}} />
+      <div style={{ marginTop:"10px", display:"flex", justifyContent:"flex-end" }}>
+        <div style={{ background:accent, color:"#fff", borderRadius:"6px", padding:"8px 20px", fontWeight:900, fontSize:"13px" }}>
+          رصيد الختام: {currency} 13,850.00
+        </div>
+      </div>
+      {get(s,"show_footer") !== false && (
+        <>
+          <div style={{ borderTop:`1px dashed ${accent}44`, marginTop:"12px" }} />
+          <BlockRenderer blocks={customBlocks} position="before_footer" paperSize={w} accentColor={accent} hovered={null} onElementClick={() => {}} />
+          <div style={{ textAlign:"center", fontSize:`${get(s,"footer_font_size")}px`, color:"#94a3b8", fontStyle:"italic", paddingTop:"6px" }}>
+            {get(s,"receipt_footer") || "شكراً لتعاملكم معنا"}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Intentionally removed MockThermalDoc, MockA4Doc (replaced by DocA4Base above) ──
+
+function MockThermalDoc({ s, title, lines = [], footer }) {
+  // kept as no-op fallback — real components use ThermalPreview/DocA4Base directly
+  return null;
+}
+
+function MockA4Doc({ s, title, subtitle, children }) {
+  // kept as no-op fallback
+  return null;
+}
+
+// ─── End distinct mock previews ─────────────────────────────────────────────────
+// (SalesReturnPreview is defined above in the "Thermal-based docs" section)
+
+const MOCK_DATA = {
+  bank_statement: {
+    bank: { name: "البنك الأهلي", balance: 50000 },
+    transactions: [
+      { id: 1, type: "deposit",    amount: 10000, reference: "DEP-001", notes: "إيداع نقدي",    created_at: new Date().toISOString(), reconciled: true },
+      { id: 2, type: "withdrawal", amount: 5000,  reference: "WTH-001", notes: "سحب رواتب",    created_at: new Date().toISOString(), reconciled: false },
+      { id: 3, type: "deposit",    amount: 8500,  reference: "DEP-002", notes: "تحصيل شيك",    created_at: new Date().toISOString(), reconciled: true },
+    ],
+    from: "2026-05-01", to: "2026-05-31",
+  },
+  ajal_statement: {
+    debt: {
+      customer_name: "محمد أحمد", customer_phone: "01012345678",
+      original_amount: 5000, paid_amount: 2000, remaining: 3000,
+      invoice_no: "INV-2025-042", due_date: new Date().toISOString(),
+      payments: [
+        { id: 1, payment_date: new Date().toISOString(), method_name: "نقدي", amount: 1000 },
+        { id: 2, payment_date: new Date().toISOString(), method_name: "شبكة", amount: 1000 },
+      ],
+    },
+  },
+  ajal_schedule: {
+    debt: {
+      customer_name: "محمد أحمد", original_amount: 5000, remaining: 3000,
+      schedule: [
+        { id: 1, installment_no: 1, due_date: new Date().toISOString(), amount: 1000, status: "paid" },
+        { id: 2, installment_no: 2, due_date: new Date(Date.now() + 30*86400000).toISOString(), amount: 1000, status: "pending" },
+        { id: 3, installment_no: 3, due_date: new Date(Date.now() + 60*86400000).toISOString(), amount: 1000, status: "pending" },
+      ],
+    },
+  },
+  cheque_register: {
+    rows: [
+      { id: 1, cheque_no: "CHQ-001", bank_name: "البنك الأهلي", drawer_name: "محمد سالم", due_date: new Date().toISOString(), amount: 5000, status: "pending" },
+      { id: 2, cheque_no: "CHQ-002", bank_name: "بنك مصر",      drawer_name: "أحمد علي",  due_date: new Date().toISOString(), amount: 3500, status: "cleared" },
+      { id: 3, cheque_no: "CHQ-003", bank_name: "البنك العربي", drawer_name: "سارة حسن",  due_date: new Date().toISOString(), amount: 2000, status: "bounced" },
+    ],
+  },
+  payment_methods_report: {
+    rows: [
+      { id: 1, doc_no: "INV-001", doc_type: "مبيعات",   amount: 1500, direction: "in",  party: "محمد أحمد", method_name: "نقدي",   created_at: new Date().toISOString() },
+      { id: 2, doc_no: "INV-002", doc_type: "مبيعات",   amount: 2000, direction: "in",  party: "سالم علي",  method_name: "شبكة",   created_at: new Date().toISOString() },
+      { id: 3, doc_no: "EXP-001", doc_type: "مصروفات",  amount: 500,  direction: "out", party: "مورد",      method_name: "نقدي",   created_at: new Date().toISOString() },
+    ],
+    totalIn: 3500, totalOut: 500,
+    filters: { from: "2026-05-01", to: "2026-05-31" },
+  },
+};
+
+function DocPreviewContent({ docType, merged, previewSize }) {
+  const mock = MOCK_DATA[docType] || {};
+  const s = { ...merged, _previewSize: previewSize };
+  switch (docType) {
+    case "pos_receipt":      return <PosReceiptPreview s={s} />;
+    case "sales_invoice":    return <SalesInvoicePreview s={s} />;
+    case "purchase_order":   return <PurchaseOrderPreview s={s} />;
+    case "sales_return":     return <SalesReturnPreview s={s} />;
+    case "quotation":        return <QuotationPreview s={s} />;
+    case "branch_transfer":  return <BranchTransferPreview s={s} />;
+    case "payment_receipt":  return <PaymentReceiptPreview s={s} />;
+    case "daily_treasury":   return <DailyTreasuryPreview s={s} />;
+    case "bank_statement":   return <BankStatementTemplate bank={mock.bank} transactions={mock.transactions} from={mock.from} to={mock.to} settings={s} />;
+    case "ajal_statement":   return <AjalStatementTemplate debt={mock.debt} settings={s} />;
+    case "ajal_schedule":    return <AjalScheduleTemplate debt={mock.debt} settings={s} />;
+    case "cheque_register":  return <ChequeRegisterTemplate rows={mock.rows} settings={s} />;
+    case "payment_methods_report": return <PaymentMethodsReportTemplate rows={mock.rows} filters={mock.filters} totalIn={mock.totalIn} totalOut={mock.totalOut} settings={s} />;
+    default: return <PagePreview settings={{ ...s, receipt_width: previewSize || "A4" }} size={previewSize === "A5" ? "A5" : "A4"} hovered={null} onElementClick={() => {}} customBlocks={[]} />;
+  }
+}
+
 function PerDocSettingsPanel({ docType, globalSettings, docSettings, onChange, onSave }) {
   const settings = docSettings[docType] || {};
   const set = (key, val) => onChange({ ...docSettings, [docType]: { ...(docSettings[docType] || {}), [key]: val } });
   const merged = { ...(globalSettings || {}), ...settings };
   const label = DOC_TYPES.find((d) => d.key === docType)?.label || docType;
 
+  const cfg = DOC_PAPER_CONFIG[docType] || { sizes: ["58mm","80mm","A5","A4"], defaultSize: "A4" };
+  const savedDefault = settings.paper_size && settings.paper_size !== "inherit" ? settings.paper_size : null;
+  const effectiveDefault = savedDefault || cfg.defaultSize;
+
+  // Which size tab is being previewed right now
+  const [previewSize, setPreviewSize] = useState(effectiveDefault);
+
+  useEffect(() => {
+    setPreviewSize(savedDefault || cfg.defaultSize);
+  }, [docType]);
+
+  const [viewZoom, setViewZoom] = useState(0.55);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const isDragging = useRef(false);
+  const lastPos = useRef({ x: 0, y: 0 });
+  const viewportRef = useRef(null);
+
+  useEffect(() => {
+    setViewZoom(0.55);
+    setPan({ x: 0, y: 0 });
+  }, [docType, previewSize]);
+
+  const handleWheel = (e) => {
+    e.preventDefault();
+    setViewZoom((prev) => Math.min(2, Math.max(0.2, prev + (e.deltaY > 0 ? -0.07 : 0.07))));
+  };
+  const handleMouseDown = (e) => {
+    if (e.button !== 0) return;
+    isDragging.current = true;
+    lastPos.current = { x: e.clientX, y: e.clientY };
+    if (viewportRef.current) viewportRef.current.style.cursor = "grabbing";
+  };
+  const handleMouseMove = (e) => {
+    if (!isDragging.current) return;
+    const dx = e.clientX - lastPos.current.x;
+    const dy = e.clientY - lastPos.current.y;
+    lastPos.current = { x: e.clientX, y: e.clientY };
+    setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
+  };
+  const handleMouseUp = () => {
+    isDragging.current = false;
+    if (viewportRef.current) viewportRef.current.style.cursor = "grab";
+  };
+  const resetView = () => { setViewZoom(0.55); setPan({ x: 0, y: 0 }); };
+
   return (
     <div className="flex flex-1 min-w-0 gap-4 overflow-hidden pr-4">
-      <div className="w-[420px] shrink-0 overflow-y-auto space-y-4 rounded-sm border border-slate-200 bg-white p-4">
+      {/* Controls */}
+      <div className="w-[380px] shrink-0 overflow-y-auto space-y-4 rounded-sm border border-slate-200 bg-white p-4">
         <div>
           <div className="text-[13px] font-black text-slate-900">تجاوزات خاصة بـ "{label}"</div>
-          <div className="text-[10px] font-bold text-slate-400">اترك الحقل فارغاً لاستخدام الإعداد العام.</div>
+          <div className="text-[10px] font-bold text-slate-400">الإعدادات غير المحددة ترث من ⚙ الإعدادات العامة تلقائياً.</div>
         </div>
+
+        {/* Paper size selector — valid sizes only for this doc type */}
         <div>
-          <label className="mb-2 block text-[11px] font-black text-slate-600">حجم الورق</label>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-[11px] font-black text-slate-600">حجم الورق المقبول</label>
+            <span className="text-[9px] font-bold text-slate-400">الافتراضي: <span className="text-violet-600">{effectiveDefault}</span></span>
+          </div>
           <div className="flex flex-wrap gap-2">
-            {["inherit", "58mm", "80mm", "A5", "A4"].map((size) => (
-              <button key={size} type="button" onClick={() => set("paper_size", size)}
-                className={`rounded-xl border px-3 py-1.5 text-[11px] font-black ${(settings.paper_size || "inherit") === size ? "border-violet-600 bg-violet-600 text-white" : "border-slate-200 text-slate-600"}`}>
-                {size === "inherit" ? "افتراضي" : size}
-              </button>
-            ))}
+            {cfg.sizes.map((size) => {
+              const isDefault = effectiveDefault === size;
+              const isPreviewing = previewSize === size;
+              return (
+                <button key={size} type="button"
+                  onClick={() => { setPreviewSize(size); set("paper_size", size); }}
+                  className={`relative rounded-xl border px-3 py-2 text-[11px] font-black transition-all ${
+                    isDefault
+                      ? "border-violet-600 bg-violet-600 text-white shadow-md"
+                      : isPreviewing
+                      ? "border-slate-700 bg-slate-700 text-white"
+                      : "border-slate-200 text-slate-600 hover:border-slate-400"
+                  }`}>
+                  {size}
+                  {isDefault && (
+                    <span className="absolute -top-1.5 -right-1.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-emerald-400 text-[7px] font-black text-white">✓</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-2 text-[9px] font-bold text-slate-400">
+            اضغط على حجم لمعاينته ← وحفظه كافتراضي لهذا المستند
           </div>
         </div>
         {[["receipt_header", "رأس المستند"], ["receipt_footer", "تذييل المستند"], ["watermark_text", "نص الطابع المائي"]].map(([key, labelText]) => (
@@ -444,9 +1035,58 @@ function PerDocSettingsPanel({ docType, globalSettings, docSettings, onChange, o
           حفظ إعدادات هذا المستند
         </button>
       </div>
-      <div className="flex-1 overflow-auto rounded-sm border border-slate-200 bg-[#e8ecf0] p-8">
-        <div className="mx-auto max-w-[210mm] bg-white shadow-xl">
-          <PagePreview settings={{ ...merged, receipt_width: merged.paper_size === "inherit" ? get(globalSettings, "receipt_width") : merged.paper_size || get(globalSettings, "receipt_width") }} size={merged.paper_size === "A5" ? "A5" : "A4"} hovered={null} onElementClick={() => {}} customBlocks={[]} />
+
+      {/* Preview with pan & zoom */}
+      <div className="flex flex-1 min-w-0 flex-col rounded-sm border border-slate-200 overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between bg-slate-900 text-white px-4 py-2.5">
+          <div className="flex items-center gap-2">
+            <Eye className="h-4 w-4 text-slate-400" />
+            <span className="text-[11px] font-black uppercase tracking-widest">معاينة حية — {label}</span>
+          </div>
+          <div className="text-[9px] font-bold text-slate-400">عجلة الفأرة للتكبير • اسحب للتنقل</div>
+        </div>
+
+        {/* Viewport */}
+        <div
+          ref={viewportRef}
+          className="relative flex-1 overflow-hidden bg-[#e8ecf0]"
+          style={{ cursor: "grab", minHeight: 0 }}
+          onWheel={handleWheel}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+        >
+          <div
+            style={{
+              position: "absolute",
+              top: "50%",
+              left: "50%",
+              transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px)) scale(${viewZoom})`,
+              transformOrigin: "center center",
+              transition: isDragging.current ? "none" : "transform 0.05s",
+              userSelect: "none",
+              pointerEvents: isDragging.current ? "none" : "auto",
+              background: "white",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.12)",
+              width: previewSize === "58mm" ? "58mm" : previewSize === "80mm" ? "80mm" : previewSize === "A5" ? "148mm" : "210mm",
+            }}
+          >
+            <DocPreviewContent docType={docType} merged={merged} previewSize={previewSize} />
+          </div>
+
+          {/* Zoom controls */}
+          <div className="absolute bottom-3 left-3 flex items-center gap-0 rounded-sm bg-white/90 border border-slate-200 shadow-md backdrop-blur-sm overflow-hidden z-10">
+            <button type="button" onClick={() => setViewZoom((v) => Math.min(2, v + 0.1))}
+              className="px-2.5 py-1.5 text-[14px] font-black text-slate-700 hover:bg-slate-100 border-l border-slate-200">+</button>
+            <button type="button" onClick={resetView}
+              className="px-2.5 py-1.5 text-[10px] font-black text-slate-600 hover:bg-slate-100 min-w-[46px] text-center">
+              {Math.round(viewZoom * 100)}%
+            </button>
+            <button type="button" onClick={() => setViewZoom((v) => Math.max(0.2, v - 0.1))}
+              className="px-2.5 py-1.5 text-[14px] font-black text-slate-700 hover:bg-slate-100 border-r border-slate-200">−</button>
+          </div>
         </div>
       </div>
     </div>

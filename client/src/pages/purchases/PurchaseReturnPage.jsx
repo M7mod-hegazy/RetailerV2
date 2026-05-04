@@ -218,6 +218,18 @@ export default function PurchaseReturnPage() {
               ) : <span className="text-slate-300 text-[11px]">—</span>
             },
             {
+              id: "settlement_type", header: "التسوية", width: 150, sortable: true, headerClass: "text-center", cellClass: "text-center border-l border-slate-100",
+              render: (r) => (
+                <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold border ${
+                  r.settlement_type === "cash"
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+                    : "bg-slate-100 text-slate-600 border-slate-200"
+                }`}>
+                  {r.settlement_type === "cash" ? "استرداد نقدي" : "خصم من حساب المورد"}
+                </span>
+              )
+            },
+            {
               id: "date", header: "التاريخ", width: 140, sortable: true, headerClass: "text-center", cellClass: "text-center text-[12px] font-medium text-slate-500 border-l border-slate-100",
               render: (r) => (
                 <div className="flex items-center justify-center gap-1.5">

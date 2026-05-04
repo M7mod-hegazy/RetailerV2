@@ -6,6 +6,11 @@ const { assertCanWriteForDate, normalizeDate } = require("../services/dailySessi
 
 const router = express.Router();
 
+function ensurePurchaseReturnSettlementSchema(db) {
+  try { db.exec("ALTER TABLE purchase_returns ADD COLUMN settlement_type TEXT NOT NULL DEFAULT 'account'"); } catch (_) {}
+  try { db.exec("ALTER TABLE purchase_returns ADD COLUMN treasury_id INTEGER REFERENCES treasuries(id)"); } catch (_) {}
+}
+
 function getPurchaseWithLines(db, purchaseId) {
   const purchase = db.prepare(`
     SELECT p.*, s.name AS supplier_name
@@ -52,6 +57,7 @@ router.get("/", (req, res) => {
 
 router.get("/returns", (req, res) => {
   const db = getDb();
+  ensurePurchaseReturnSettlementSchema(db);
   const { search = "", supplier_id, date_from, date_to } = req.query;
   const conditions = ["1=1"];
   const params = [];
@@ -75,6 +81,7 @@ router.get("/returns", (req, res) => {
 router.get("/returns/:id", (req, res, next) => {
     try {
       const db = getDb();
+      ensurePurchaseReturnSettlementSchema(db);
       const pr = db.prepare("SELECT * FROM purchase_returns WHERE id = ?").get(req.params.id);
       if (!pr) throw new Error("Return not found");
       const lines = db.prepare(`
@@ -143,6 +150,16 @@ router.post("/", (req, res, next) => {
           total,
           payload.supplier_id,
         );
+        db.prepare(`
+          INSERT INTO ajal_debts (invoice_id, supplier_id, party_type, source_type, original_amount, paid_amount, due_date, status, notes)
+          VALUES (?, ?, 'supplier', 'purchase', ?, 0, ?, 'open', ?)
+        `).run(
+          result.lastInsertRowid,
+          payload.supplier_id,
+          total,
+          payload.due_date || null,
+          payload.notes || null,
+        );
       }
 
       // Update selling prices for lines where a new selling_price was provided
@@ -175,6 +192,7 @@ router.post("/", (req, res, next) => {
 
 router.post("/:id/return", (req, res, next) => {
   const db = getDb();
+  ensurePurchaseReturnSettlementSchema(db);
 
   try {
     const purchaseReturn = db.transaction(() => {
@@ -188,6 +206,7 @@ router.post("/:id/return", (req, res, next) => {
       const payload = req.body || {};
       const createdDate = normalizeDate(payload.created_at);
       assertCanWriteForDate(db, createdDate);
+      const settlementType = payload.settlement_type === "cash" ? "cash" : "account";
       let total = 0;
       const preparedLines = [];
 
@@ -226,9 +245,25 @@ router.post("/:id/return", (req, res, next) => {
       }
 
       const returnDocNo = generateDocNumber('purchase_return');
+      const treasuryId =
+        settlementType === "cash"
+          ? payload.treasury_id ||
+            db.prepare("SELECT default_treasury_id FROM settings WHERE id = 1").get()?.default_treasury_id ||
+            1
+          : null;
+
+      if (settlementType === "cash") {
+        const treasury = db.prepare("SELECT id FROM treasuries WHERE id = ?").get(treasuryId);
+        if (!treasury) {
+          const error = new Error("Treasury not found");
+          error.status = 400;
+          throw error;
+        }
+      }
+
       const purchaseReturnResult = db
-        .prepare("INSERT INTO purchase_returns (doc_no, purchase_id, supplier_id, total, created_at) VALUES (?, ?, ?, ?, ?)")
-        .run(returnDocNo, purchase.id, purchase.supplier_id || null, total, `${createdDate} ${new Date().toTimeString().slice(0, 8)}`);
+        .prepare("INSERT INTO purchase_returns (doc_no, purchase_id, supplier_id, total, settlement_type, treasury_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .run(returnDocNo, purchase.id, purchase.supplier_id || null, total, settlementType, treasuryId, `${createdDate} ${new Date().toTimeString().slice(0, 8)}`);
 
       for (const line of preparedLines) {
         db.prepare(
@@ -254,7 +289,9 @@ router.post("/:id/return", (req, res, next) => {
         });
       }
 
-      if (purchase.supplier_id) {
+      if (settlementType === "cash") {
+        db.prepare("UPDATE treasuries SET balance = balance + ? WHERE id = ?").run(total, treasuryId);
+      } else if (purchase.supplier_id) {
         db.prepare("UPDATE suppliers SET opening_balance = MAX(0, opening_balance - ?) WHERE id = ?").run(
           total,
           purchase.supplier_id,

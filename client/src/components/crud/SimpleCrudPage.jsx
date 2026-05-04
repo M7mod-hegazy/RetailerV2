@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Database,
   Search,
+  X,
 } from "lucide-react";
 import api from "../../services/api";
 import toast from "react-hot-toast";
@@ -290,31 +291,42 @@ export default function SimpleCrudPage({
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.4, duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-            className="lg:col-span-4 sticky top-10 flex flex-col bg-white/95 backdrop-blur-3xl rounded-3xl shadow-[0_20px_40px_-15px_rgba(0,0,0,0.05)] border border-slate-100 overflow-hidden"
+            className={`lg:col-span-4 sticky top-10 flex flex-col backdrop-blur-3xl rounded-3xl shadow-[0_20px_40px_-15px_rgba(0,0,0,0.05)] border overflow-hidden transition-all duration-300 ${
+              editingRow 
+                ? 'bg-amber-50/95 border-amber-300 shadow-amber-500/10 ring-4 ring-amber-500/10' 
+                : 'bg-white/95 border-slate-100'
+            }`}
           >
-            <div className="p-8 pb-6 flex items-center justify-between border-b border-slate-50/50">
+            <div className={`p-8 pb-6 flex items-center justify-between border-b ${editingRow ? 'border-amber-200/50' : 'border-slate-50/50'}`}>
               <div>
-                <h2 className="text-xl font-black text-zinc-900 tracking-tight">
-                  {editingRow ? 'تحديث السجل' : 'إضافة جديد'}
-                </h2>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
-                  {editingRow ? `ID: ${editingRow.id}` : 'CREATE_RECORD'}
+                <div className="flex items-center gap-2">
+                  <h2 className={`text-xl font-black tracking-tight ${editingRow ? 'text-amber-900' : 'text-zinc-900'}`}>
+                    {editingRow ? 'وضع التعديل' : 'إضافة جديد'}
+                  </h2>
+                  {editingRow && (
+                    <span className="px-2 py-0.5 rounded-full bg-amber-200 text-amber-800 text-[9px] font-black tracking-widest uppercase animate-pulse">
+                      نشط الآن
+                    </span>
+                  )}
+                </div>
+                <p className={`text-[10px] font-bold uppercase tracking-widest mt-1 ${editingRow ? 'text-amber-700/70' : 'text-slate-400'}`}>
+                  {editingRow ? `تحديث السجل ID: ${editingRow.id}` : 'إنشاء سجل جديد'}
                 </p>
               </div>
               {editingRow && (
-                <SmartTooltip content="إلغاء وإضافة سجل جديد">
+                <SmartTooltip content="إلغاء التعديل والعودة للإضافة">
                   <motion.button 
                     whileTap={{ scale: 0.9 }}
                     onClick={startCreate}
-                    className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-50 text-zinc-900 hover:bg-slate-100 transition-colors"
+                    className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-amber-900 hover:bg-amber-200 hover:text-amber-950 transition-colors shadow-sm"
                   >
-                    <Plus className="h-4 w-4" />
+                    <X className="h-5 w-5" />
                   </motion.button>
                 </SmartTooltip>
               )}
             </div>
 
-            <form onSubmit={handleSubmit} className="p-8 pt-6 flex flex-col gap-6 bg-slate-50/30">
+            <form onSubmit={handleSubmit} className={`p-8 pt-6 flex flex-col gap-6 ${editingRow ? 'bg-amber-100/20' : 'bg-slate-50/30'}`}>
               <div className="space-y-5">
                 {fields.map((field, idx) => (
                   <motion.div 
@@ -324,9 +336,9 @@ export default function SimpleCrudPage({
                     transition={{ delay: 0.5 + (idx * 0.1) }}
                     className="flex flex-col gap-2 relative group"
                   >
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 flex items-center justify-between">
+                    <label className={`text-[10px] font-black uppercase tracking-widest flex items-center justify-between ${editingRow ? 'text-amber-900/70' : 'text-slate-500'}`}>
                       {field.label}
-                      {field.required && <span className="text-[9px] text-zinc-400 font-bold">مطلوب</span>}
+                      {field.required && <span className={`text-[9px] font-bold ${editingRow ? 'text-amber-600' : 'text-zinc-400'}`}>مطلوب</span>}
                     </label>
                     <div className="relative">
                       <input
@@ -334,7 +346,11 @@ export default function SimpleCrudPage({
                         required={field.required}
                         value={form[field.name]}
                         onChange={(e) => setForm(prev => ({ ...prev, [field.name]: e.target.value }))}
-                        className="w-full h-12 bg-white rounded-xl px-4 text-sm font-bold text-zinc-900 outline-none transition-all placeholder:text-slate-300 border border-slate-200 focus:border-zinc-400 shadow-sm"
+                        className={`w-full h-12 bg-white rounded-xl px-4 text-sm font-bold outline-none transition-all shadow-sm border ${
+                          editingRow 
+                            ? 'text-amber-950 border-amber-200 focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 placeholder:text-amber-300' 
+                            : 'text-zinc-900 border-slate-200 focus:border-zinc-400 placeholder:text-slate-300'
+                        }`}
                         placeholder={`إدخال ${field.label}...`}
                       />
                     </div>
@@ -353,12 +369,16 @@ export default function SimpleCrudPage({
                   whileTap={{ scale: 0.98 }}
                   type="submit"
                   disabled={isSubmitting}
-                  className="w-full h-12 flex items-center justify-center gap-2 rounded-xl bg-zinc-950 text-[13px] font-black text-white transition-all hover:bg-zinc-800 shadow-xl shadow-zinc-950/20 disabled:opacity-50"
+                  className={`w-full h-12 flex items-center justify-center gap-2 rounded-xl text-[13px] font-black text-white transition-all shadow-xl disabled:opacity-50 ${
+                    editingRow 
+                      ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/20' 
+                      : 'bg-zinc-950 hover:bg-zinc-800 shadow-zinc-950/20'
+                  }`}
                 >
                   {isSubmitting ? 'جاري المعالجة...' : (
                     <>
-                      <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                      {editingRow ? 'حفظ التحديثات' : 'تأكيد الإضافة'}
+                      {editingRow ? <Edit3 className="h-4 w-4 text-amber-200" /> : <CheckCircle2 className="h-4 w-4 text-emerald-400" />}
+                      {editingRow ? 'حفظ التعديلات' : 'تأكيد الإضافة'}
                     </>
                   )}
                 </motion.button>

@@ -25,6 +25,13 @@ function ensureDailySessionSchema(db) {
   try { db.exec("ALTER TABLE daily_sessions ADD COLUMN opening_adjusted_at TEXT"); } catch (_) {}
   try { db.exec("ALTER TABLE daily_sessions ADD COLUMN opening_adjusted_by INTEGER REFERENCES users(id)"); } catch (_) {}
   try { db.exec("ALTER TABLE daily_sessions ADD COLUMN opening_adjust_reason TEXT"); } catch (_) {}
+  try { db.exec("ALTER TABLE purchase_returns ADD COLUMN settlement_type TEXT NOT NULL DEFAULT 'account'"); } catch (_) {}
+  try { db.exec("ALTER TABLE purchase_returns ADD COLUMN treasury_id INTEGER REFERENCES treasuries(id)"); } catch (_) {}
+}
+
+function ensurePurchaseReturnSettlementSchema(db) {
+  try { db.exec("ALTER TABLE purchase_returns ADD COLUMN settlement_type TEXT NOT NULL DEFAULT 'account'"); } catch (_) {}
+  try { db.exec("ALTER TABLE purchase_returns ADD COLUMN treasury_id INTEGER REFERENCES treasuries(id)"); } catch (_) {}
 }
 
 function latestClosedBalanceBefore(db, dateText) {
@@ -101,6 +108,7 @@ function countScalar(db, sql, params = []) {
 function cashBreakdown(db, dateText, session) {
   const date = normalizeDate(dateText);
   const sessionId = session?.id || null;
+  ensurePurchaseReturnSettlementSchema(db);
 
   const posCashSales = scalar(db, `
     SELECT COALESCE(SUM(total), 0) AS total
@@ -128,7 +136,7 @@ function cashBreakdown(db, dateText, session) {
     WHERE date(created_at) = ? AND status != 'cancelled'
   `, [date]);
 
-  const purchasesCash = scalar(db, `
+  const purchasesTotal = scalar(db, `
     SELECT COALESCE(SUM(total), 0) AS total
     FROM purchases
     WHERE date(created_at) = ? AND COALESCE(status, '') != 'voided'
@@ -136,7 +144,12 @@ function cashBreakdown(db, dateText, session) {
   const purchaseReturnsCash = scalar(db, `
     SELECT COALESCE(SUM(total), 0) AS total
     FROM purchase_returns
-    WHERE date(created_at) = ?
+    WHERE date(created_at) = ? AND COALESCE(settlement_type, 'account') = 'cash'
+  `, [date]);
+  const purchaseReturnsAccount = scalar(db, `
+    SELECT COALESCE(SUM(total), 0) AS total
+    FROM purchase_returns
+    WHERE date(created_at) = ? AND COALESCE(settlement_type, 'account') != 'cash'
   `, [date]);
   const salesReturnsCash = scalar(db, `
     SELECT COALESCE(SUM(total), 0) AS total
@@ -185,13 +198,36 @@ function cashBreakdown(db, dateText, session) {
     FROM payments
     WHERE date(created_at) = ? AND party_type = 'supplier' AND method = 'cash'
   `, [date]);
+  const nonCashPayments = scalar(db, `
+    SELECT COALESCE(SUM(amount), 0) AS total
+    FROM payments
+    WHERE date(created_at) = ? AND COALESCE(method, 'cash') != 'cash'
+  `, [date]);
 
-  const ajalPayments = scalar(db, `
+  const customerAjalPayments = scalar(db, `
+    SELECT COALESCE(SUM(ap.amount), 0) AS total
+    FROM ajal_payments ap
+    LEFT JOIN payment_methods pm ON pm.id = ap.payment_method_id
+    LEFT JOIN ajal_debts d ON d.id = ap.debt_id
+    WHERE date(COALESCE(ap.payment_date, ap.created_at)) = ?
+      AND COALESCE(d.party_type, 'customer') = 'customer'
+      AND COALESCE(pm.type, pm.category, pm.name, 'cash') = 'cash'
+  `, [date]);
+  const supplierAjalPayments = scalar(db, `
+    SELECT COALESCE(SUM(ap.amount), 0) AS total
+    FROM ajal_payments ap
+    LEFT JOIN payment_methods pm ON pm.id = ap.payment_method_id
+    LEFT JOIN ajal_debts d ON d.id = ap.debt_id
+    WHERE date(COALESCE(ap.payment_date, ap.created_at)) = ?
+      AND COALESCE(d.party_type, 'customer') = 'supplier'
+      AND COALESCE(pm.type, pm.category, pm.name, 'cash') = 'cash'
+  `, [date]);
+  const nonCashAjalPayments = scalar(db, `
     SELECT COALESCE(SUM(ap.amount), 0) AS total
     FROM ajal_payments ap
     LEFT JOIN payment_methods pm ON pm.id = ap.payment_method_id
     WHERE date(COALESCE(ap.payment_date, ap.created_at)) = ?
-      AND COALESCE(pm.type, pm.category, pm.name, 'cash') = 'cash'
+      AND COALESCE(pm.type, pm.category, pm.name, 'cash') != 'cash'
   `, [date]);
 
   const withdrawals = sessionId
@@ -202,8 +238,10 @@ function cashBreakdown(db, dateText, session) {
       `, [sessionId])
     : 0;
 
-  const cashIn = posCashSales + customerPayments + ajalPayments + revenuesCash + purchaseReturnsCash;
-  const cashOut = purchasesCash + expensesCash + supplierPayments + salesReturnsCash + withdrawals;
+  const customerCashCollections = customerPayments + customerAjalPayments;
+  const supplierCashPayments = supplierPayments + supplierAjalPayments;
+  const cashIn = posCashSales + customerCashCollections + revenuesCash + purchaseReturnsCash;
+  const cashOut = expensesCash + supplierCashPayments + salesReturnsCash + withdrawals;
 
   return {
     pos_cash_sales: posCashSales,
@@ -211,8 +249,10 @@ function cashBreakdown(db, dateText, session) {
     pos_bank_sales: posBankSales,
     pos_all_sales: posAllSales,
     pos_all_sales_count: posAllSalesCount,
-    purchases_cash: purchasesCash,
+    purchases_cash: 0,
+    purchases_payable_total: purchasesTotal,
     purchase_returns_cash: purchaseReturnsCash,
+    purchase_returns_payable_total: purchaseReturnsAccount,
     expenses_cash: expensesCash,
     expenses_count: expensesCount,
     revenues_cash: revenuesCash,
@@ -221,7 +261,11 @@ function cashBreakdown(db, dateText, session) {
     customer_payments_count: customerPaymentsCount,
     supplier_payments: supplierPayments,
     supplier_payments_count: supplierPaymentsCount,
-    ajal_payments: ajalPayments,
+    non_cash_movements_total: posBankSales + nonCashPayments + nonCashAjalPayments,
+    ajal_payments: customerAjalPayments,
+    supplier_ajal_payments: supplierAjalPayments,
+    customer_cash_collections: customerCashCollections,
+    supplier_cash_payments: supplierCashPayments,
     sales_returns_cash: salesReturnsCash,
     withdrawals,
     cash_in: cashIn,

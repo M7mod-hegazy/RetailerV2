@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Target, PieChart, Database, Box, Users, Building,
   Warehouse, KeySquare, ShoppingCart, ReceiptText, CircleDollarSign,
-  Wallet, TrendingDown, TrendingUp, Receipt, CalendarRange, ArrowRightLeft,
+  Wallet, TrendingDown, TrendingUp, Receipt, ArrowRightLeft,
   Bell, Settings, LogOut, Radar, ChevronDown, Search, PackageSearch,
   FileSpreadsheet, Boxes, ClipboardList, Landmark, Tags, Percent, ShieldCheck,
   Activity, UsersRound, Scale, Menu, ChevronLeft, Truck, BookOpen, CreditCard
@@ -41,7 +41,6 @@ const NAV_MODULES = [
       { path: "/accounts/suppliers", label: "حسابات الموردين", icon: Building },
       { path: "/revenues", label: "تسجيل الإيرادات", icon: TrendingUp },
       { path: "/expenses", label: "تسجيل المصروفات", icon: TrendingDown },
-      { path: "/operations/ajal-tracker", label: "متابعة الديون (أجل)", icon: CalendarRange },
       { path: "/operations/payment-methods", label: "وسائل الدفع", icon: CreditCard },
       { path: "/operations/bank-operations", label: "البنوك والفيزا", icon: Landmark },
       { path: "/operations/cheques", label: "إدارة الشيكات", icon: Receipt },

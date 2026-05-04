@@ -5,6 +5,47 @@ const { assertCanWriteForDate, normalizeDate } = require("../services/dailySessi
 
 const router = express.Router();
 
+function ensureAjalSchema(db) {
+  try { db.exec("ALTER TABLE ajal_debts ADD COLUMN party_type TEXT NOT NULL DEFAULT 'customer'"); } catch (_) {}
+  try { db.exec("ALTER TABLE ajal_debts ADD COLUMN supplier_id INTEGER REFERENCES suppliers(id)"); } catch (_) {}
+  try { db.exec("ALTER TABLE ajal_debts ADD COLUMN source_type TEXT NOT NULL DEFAULT 'invoice'"); } catch (_) {}
+}
+
+router.use((_req, _res, next) => {
+  try {
+    ensureAjalSchema(getDb());
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+function normalizePartyType(value) {
+  return value === "supplier" ? "supplier" : "customer";
+}
+
+function partyWhere(alias, partyType, idColumn = null) {
+  const cond = [`COALESCE(${alias}.party_type, 'customer') = ?`];
+  if (idColumn) cond.push(`${alias}.${idColumn} = ?`);
+  return cond.join(" AND ");
+}
+
+function partyIdColumn(partyType) {
+  return partyType === "supplier" ? "supplier_id" : "customer_id";
+}
+
+function partySelect() {
+  return `
+    COALESCE(d.party_type, 'customer') AS party_type,
+    COALESCE(c.name, s.name) AS party_name,
+    COALESCE(c.phone, s.phone) AS party_phone,
+    c.name AS customer_name,
+    c.phone AS customer_phone,
+    s.name AS supplier_name,
+    s.phone AS supplier_phone
+  `;
+}
+
 // Helper to recalc debt status
 function recalcDebt(db, debtId) {
   const d = db.prepare("SELECT * FROM ajal_debts WHERE id = ?").get(debtId);
@@ -21,12 +62,15 @@ function recalcDebt(db, debtId) {
 router.get("/summary", (req, res) => {
   try {
     const db = getDb();
+    const partyType = normalizePartyType(req.query.party_type);
+    const idCol = partyIdColumn(partyType);
     const today = new Date().toISOString().slice(0, 10);
-    const open = db.prepare(`SELECT COALESCE(SUM(original_amount - paid_amount),0) AS total, COUNT(*) AS count FROM ajal_debts WHERE status != 'paid'`).get();
-    const overdue = db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(original_amount - paid_amount),0) AS amount FROM ajal_debts WHERE status = 'overdue' OR (due_date < ? AND status != 'paid')`).get(today);
-    const dueToday = db.prepare(`SELECT COUNT(*) AS count FROM ajal_debts WHERE due_date = ? AND status != 'paid'`).get(today);
-    const customers = db.prepare(`SELECT COUNT(DISTINCT customer_id) AS count FROM ajal_debts WHERE status != 'paid'`).get();
-    res.json({ success: true, data: { total_owed: open.total, open_count: open.count, overdue_count: overdue.count, overdue_amount: overdue.amount, due_today: dueToday.count, debtors: customers.count } });
+    const base = "FROM ajal_debts WHERE COALESCE(party_type, 'customer') = ?";
+    const open = db.prepare(`SELECT COALESCE(SUM(original_amount - paid_amount),0) AS total, COUNT(*) AS count ${base} AND status != 'paid'`).get(partyType);
+    const overdue = db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(original_amount - paid_amount),0) AS amount ${base} AND (status = 'overdue' OR (due_date < ? AND status != 'paid'))`).get(partyType, today);
+    const dueToday = db.prepare(`SELECT COUNT(*) AS count ${base} AND due_date = ? AND status != 'paid'`).get(partyType, today);
+    const parties = db.prepare(`SELECT COUNT(DISTINCT ${idCol}) AS count ${base} AND status != 'paid'`).get(partyType);
+    res.json({ success: true, data: { total_owed: open.total, open_count: open.count, overdue_count: overdue.count, overdue_amount: overdue.amount, due_today: dueToday.count, debtors: parties.count } });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -35,21 +79,27 @@ router.get("/", (req, res) => {
   try {
     const db = getDb();
     const today = new Date().toISOString().slice(0, 10);
-    const { status, customer_id, search = "", overdue } = req.query;
-    const conds = ["1=1"];
-    const params = [];
+    const partyType = normalizePartyType(req.query.party_type);
+    const idCol = partyIdColumn(partyType);
+    const { status, customer_id, supplier_id, search = "", overdue } = req.query;
+    const partyId = partyType === "supplier" ? supplier_id : customer_id;
+    const conds = [partyWhere("d", partyType)];
+    const params = [partyType];
 
     if (status && status !== "all") { conds.push("d.status = ?"); params.push(status); }
     if (overdue === "1") { conds.push("(d.due_date < ? AND d.status != 'paid')"); params.push(today); }
-    if (customer_id) { conds.push("d.customer_id = ?"); params.push(customer_id); }
-    if (search) { conds.push("(c.name LIKE ? OR i.invoice_no LIKE ?)"); params.push(`%${search}%`, `%${search}%`); }
+    if (partyId) { conds.push(`d.${idCol} = ?`); params.push(partyId); }
+    if (search) { conds.push("(c.name LIKE ? OR s.name LIKE ? OR i.invoice_no LIKE ? OR p.doc_no LIKE ?)"); params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`); }
 
     const rows = db.prepare(`
-      SELECT d.*, c.name AS customer_name, c.phone AS customer_phone,
-             i.invoice_no, (d.original_amount - d.paid_amount) AS remaining
+      SELECT d.*, ${partySelect()},
+             COALESCE(i.invoice_no, p.doc_no) AS invoice_no,
+             (d.original_amount - d.paid_amount) AS remaining
       FROM ajal_debts d
       LEFT JOIN customers c ON c.id = d.customer_id
+      LEFT JOIN suppliers s ON s.id = d.supplier_id
       LEFT JOIN invoices i ON i.id = d.invoice_id
+      LEFT JOIN purchases p ON p.id = d.invoice_id
       WHERE ${conds.join(" AND ")}
       ORDER BY d.created_at DESC
       LIMIT 200
@@ -72,15 +122,36 @@ router.get("/customer/:customerId", (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
+// GET /api/ajal-debts/supplier/:supplierId
+router.get("/supplier/:supplierId", (req, res) => {
+  try {
+    const db = getDb();
+    const rows = db.prepare(`
+      SELECT d.*, s.name AS supplier_name, s.phone AS supplier_phone, p.doc_no AS invoice_no,
+             (d.original_amount - d.paid_amount) AS remaining
+      FROM ajal_debts d
+      LEFT JOIN suppliers s ON s.id = d.supplier_id
+      LEFT JOIN purchases p ON p.id = d.invoice_id
+      WHERE COALESCE(d.party_type, 'customer') = 'supplier' AND d.supplier_id = ?
+      ORDER BY d.created_at DESC
+    `).all(req.params.supplierId);
+    res.json({ success: true, data: rows });
+  } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+});
+
 // GET /api/ajal-debts/:id
 router.get("/:id", (req, res) => {
   try {
     const db = getDb();
     const debt = db.prepare(`
-      SELECT d.*, c.name AS customer_name, c.phone AS customer_phone, i.invoice_no, (d.original_amount - d.paid_amount) AS remaining
+      SELECT d.*, ${partySelect()},
+             COALESCE(i.invoice_no, p.doc_no) AS invoice_no,
+             (d.original_amount - d.paid_amount) AS remaining
       FROM ajal_debts d
       LEFT JOIN customers c ON c.id = d.customer_id
+      LEFT JOIN suppliers s ON s.id = d.supplier_id
       LEFT JOIN invoices i ON i.id = d.invoice_id
+      LEFT JOIN purchases p ON p.id = d.invoice_id
       WHERE d.id = ?
     `).get(req.params.id);
     if (!debt) return res.status(404).json({ success: false, message: "الدين غير موجود" });
@@ -119,16 +190,21 @@ router.post("/:id/pay", (req, res) => {
         db.prepare(`INSERT INTO ajal_payments (debt_id, amount, payment_method_id, payment_date, notes, created_by) VALUES (?, ?, ?, ?, ?, ?)`)
           .run(debt.id, line.amount, line.method_id || 1, createdDate, notes || null, req.user?.id || 1);
 
-        const pm = db.prepare("SELECT excludes_from_treasury FROM payment_methods WHERE id = ?").get(line.method_id || 1);
-        if (!pm || !pm.excludes_from_treasury) {
-          db.prepare("UPDATE treasuries SET balance = balance + ? WHERE id = 1").run(line.amount);
+        const pm = db.prepare("SELECT type, category, name, excludes_from_treasury FROM payment_methods WHERE id = ?").get(line.method_id || 1);
+        const methodKind = pm ? (pm.type || pm.category || pm.name || "cash") : "cash";
+        if ((!pm || !pm.excludes_from_treasury) && methodKind === "cash") {
+          const sign = normalizePartyType(debt.party_type) === "supplier" ? -1 : 1;
+          db.prepare("UPDATE treasuries SET balance = balance + ? WHERE id = 1").run(sign * line.amount);
         }
       }
       db.prepare("UPDATE ajal_debts SET paid_amount = paid_amount + ? WHERE id = ?").run(totalAmount, debt.id);
       recalcDebt(db, debt.id);
 
-      // Update customer balance
-      db.prepare("UPDATE customers SET opening_balance = opening_balance - ? WHERE id = ?").run(totalAmount, debt.customer_id);
+      if (normalizePartyType(debt.party_type) === "supplier") {
+        db.prepare("UPDATE suppliers SET opening_balance = opening_balance - ? WHERE id = ?").run(totalAmount, debt.supplier_id);
+      } else {
+        db.prepare("UPDATE customers SET opening_balance = opening_balance - ? WHERE id = ?").run(totalAmount, debt.customer_id);
+      }
     })();
 
     res.json({ success: true, data: db.prepare("SELECT * FROM ajal_debts WHERE id = ?").get(req.params.id) });
