@@ -7,6 +7,7 @@ const InvoiceA4 = React.forwardRef(function InvoiceA4({ invoice, settings = {} }
   if (!invoice) return null;
 
   const lines = invoice.lines || [];
+  const payments = invoice.payments || [];
   const currency = settings.currency_symbol || "ر.س";
   const taxRate = settings.tax_rate || 0;
   const taxType = settings.tax_type || "none";
@@ -14,6 +15,9 @@ const InvoiceA4 = React.forwardRef(function InvoiceA4({ invoice, settings = {} }
   const totalDiscount = lines.reduce((s, l) => s + (l.discount_amount || 0), 0);
   const taxAmount = taxType === "none" ? 0 : (subtotal - totalDiscount) * (taxRate / 100);
   const grandTotal = subtotal - totalDiscount + taxAmount;
+  const paid = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  const change = paid - grandTotal;
+  const remaining = grandTotal - paid;
 
   return (
     <div
@@ -107,6 +111,24 @@ const InvoiceA4 = React.forwardRef(function InvoiceA4({ invoice, settings = {} }
           </tbody>
         </table>
       </div>
+
+      {payments.length > 0 && (
+        <div style={{ marginBottom: "24px", display: "flex", justifyContent: "flex-end" }}>
+          <table style={{ fontSize: "13px", minWidth: "280px", borderCollapse: "collapse" }}>
+            <tbody>
+              <tr><td colSpan={2} style={{ padding: "6px 12px", fontWeight: "bold", borderBottom: "1px solid #e2e8f0" }}>وسائل الدفع</td></tr>
+              {payments.map((p, i) => (
+                <tr key={i}>
+                  <td style={{ padding: "4px 12px" }}>{p.method_name || p.method || "دفع"}</td>
+                  <td style={{ padding: "4px 12px", textAlign: "left", fontWeight: 600 }}>{Number(p.amount || 0).toFixed(2)} {currency}</td>
+                </tr>
+              ))}
+              {change > 0.01 && <tr><td style={{ padding: "4px 12px", fontWeight: "bold", color: "#16a34a" }}>الباقي للعميل</td><td style={{ padding: "4px 12px", textAlign: "left", fontWeight: "bold", color: "#16a34a" }}>{change.toFixed(2)} {currency}</td></tr>}
+              {remaining > 0.01 && <tr><td style={{ padding: "4px 12px", fontWeight: "bold", color: "#dc2626" }}>المتبقي</td><td style={{ padding: "4px 12px", textAlign: "left", fontWeight: "bold", color: "#dc2626" }}>{remaining.toFixed(2)} {currency}</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Footer */}
       <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: "12px", textAlign: "center", fontSize: "11px", color: "#666" }}>

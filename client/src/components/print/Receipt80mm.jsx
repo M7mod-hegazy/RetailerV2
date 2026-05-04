@@ -20,6 +20,7 @@ const Receipt80mm = React.forwardRef(function Receipt80mm({ invoice, settings = 
 
   const paid = payments.reduce((s, p) => s + (p.amount || 0), 0);
   const change = paid - grandTotal;
+  const remaining = grandTotal - paid;
 
   return (
     <div
@@ -136,9 +137,10 @@ const Receipt80mm = React.forwardRef(function Receipt80mm({ invoice, settings = 
 
       {/* Payments */}
       <div style={{ fontSize: "11px" }}>
+        <div style={{ fontWeight: "bold", marginBottom: "2px" }}>وسائل الدفع:</div>
         {payments.map((p, i) => (
           <div key={i} style={{ display: "flex", justifyContent: "space-between" }}>
-            <span>{p.method === "cash" ? "نقداً" : p.method === "bank" ? "بنك/شبكة" : p.method}:</span>
+            <span>{p.method_name || p.method || "دفع"}:</span>
             <span>{currency} {Number(p.amount).toFixed(2)}</span>
           </div>
         ))}
@@ -146,6 +148,12 @@ const Receipt80mm = React.forwardRef(function Receipt80mm({ invoice, settings = 
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <span>الباقي (مرتجع):</span>
             <span>{currency} {change.toFixed(2)}</span>
+          </div>
+        )}
+        {remaining > 0.01 && (
+          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold" }}>
+            <span>المتبقي:</span>
+            <span>{currency} {remaining.toFixed(2)}</span>
           </div>
         )}
       </div>
