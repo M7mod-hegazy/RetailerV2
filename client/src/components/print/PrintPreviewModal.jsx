@@ -1,9 +1,10 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Modal from "../ui/Modal";
 import InvoiceA4 from "./InvoiceA4";
 import Receipt80mm from "./Receipt80mm";
 import Receipt58mm from "./Receipt58mm";
 import { Printer } from "lucide-react";
+import api from "../../services/api";
 
 const TEMPLATES = [
   { id: "A4",   label: "A4 ورقة كبيرة",   sub: "للمكاتب والفواتير الرسمية" },
@@ -28,19 +29,42 @@ export default function PrintPreviewModal({
   open,
   onClose,
   invoice = {},
-  settings = {},
+  settings: globalSettings = {},
   operationLabel = "",
+  renderContent,
+  docType,
   onConfirmPrint,
   confirmLabel = "تأكيد وطباعة",
 }) {
   const [template, setTemplate] = useState("A4");
   const [viewZoom, setViewZoom] = useState(0.55);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [docSettings, setDocSettings] = useState({});
   const isDragging = useRef(false);
   const lastPos = useRef({ x: 0, y: 0 });
   const viewportRef = useRef(null);
 
-  const combinedSettings = { ...settings, receipt_footer: operationLabel };
+  useEffect(() => {
+    if (!docType || !open) {
+      setDocSettings({});
+      return;
+    }
+    let cancelled = false;
+    api.get(`/api/print-settings-per-doc/${docType}`)
+      .then((r) => {
+        if (!cancelled) setDocSettings(r.data.data || {});
+      })
+      .catch(() => {
+        if (!cancelled) setDocSettings({});
+      });
+    return () => { cancelled = true; };
+  }, [docType, open]);
+
+  const combinedSettings = {
+    ...(globalSettings || {}),
+    ...docSettings,
+    ...(operationLabel ? { receipt_footer: operationLabel } : {}),
+  };
 
   const switchTemplate = (t) => {
     setTemplate(t);
@@ -79,16 +103,28 @@ export default function PrintPreviewModal({
   };
 
   const renderDoc = () => {
+    if (renderContent) return renderContent(combinedSettings);
     if (template === "58mm") return <Receipt58mm invoice={invoice} settings={combinedSettings} />;
     if (template === "80mm") return <Receipt80mm invoice={invoice} settings={combinedSettings} />;
     return <InvoiceA4 invoice={invoice} settings={combinedSettings} />;
+  };
+
+  const handlePrint = () => {
+    if (onConfirmPrint) {
+      onConfirmPrint(template);
+      onClose();
+      return;
+    }
+    window.print();
   };
 
   return (
     <>
       {/* Hidden layer rendered only when window.print() is called */}
       <div className="hidden print:flex w-full justify-center">
-        {template === "A5" ? (
+        {renderContent ? (
+          <div className="w-full">{renderDoc()}</div>
+        ) : template === "A5" ? (
           <div className="scale-[0.7] origin-top max-w-[148mm]">
             <InvoiceA4 invoice={invoice} settings={combinedSettings} />
           </div>
@@ -129,14 +165,14 @@ export default function PrintPreviewModal({
             <div className="mt-auto pt-4 border-t border-slate-100 flex flex-col gap-2">
               {onConfirmPrint ? (
                 <button
-                  onClick={() => { onConfirmPrint(template); onClose(); }}
+                  onClick={handlePrint}
                   className="w-full flex justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white p-3.5 rounded-[12px] text-[13px] font-bold transition-all shadow-[0_4px_12px_rgba(79,70,229,0.25)] active:scale-95"
                 >
                   <Printer className="h-4 w-4" /> {confirmLabel}
                 </button>
               ) : (
                 <button
-                  onClick={() => window.print()}
+                  onClick={handlePrint}
                   className="w-full flex justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white p-3.5 rounded-[12px] text-[13px] font-bold transition-all shadow-[0_4px_12px_rgba(79,70,229,0.25)] active:scale-95"
                 >
                   <Printer className="h-4 w-4" /> طباعة
@@ -180,6 +216,8 @@ export default function PrintPreviewModal({
                 style={
                   template === "A5"
                     ? { width: "148mm" }
+                    : renderContent
+                    ? { width: "210mm" }
                     : template === "A4"
                     ? { width: "210mm" }
                     : { width: template }
