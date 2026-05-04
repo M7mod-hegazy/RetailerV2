@@ -1,10 +1,12 @@
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import {
   Ruler, Hash, AlignLeft, Baseline, ListChecks, Eye, Receipt,
   FileBarChart2, ToggleLeft, ToggleRight, Info, Zap, MousePointerClick,
   RefreshCw, FileText
 } from "lucide-react";
 import { BlockRenderer, CustomTextBlocksSection, getCustomBlocks, saveCustomBlocks } from "./CustomTextBlocks";
+import api from "../../services/api";
+import toast from "react-hot-toast";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -37,6 +39,23 @@ const DEFAULTS = {
   show_branch: true, show_invoice_date: true, show_barcode_line: false,
   tax_rate: 15, currency_symbol: "ر.س", show_item_code: true,
 };
+
+const DOC_TYPES = [
+  { key: "global", label: "الإعدادات العامة", icon: "⚙" },
+  { key: "pos_receipt", label: "إيصال نقطة البيع", icon: "REC" },
+  { key: "sales_invoice", label: "فاتورة مبيعات", icon: "INV" },
+  { key: "purchase_order", label: "أمر شراء", icon: "PO" },
+  { key: "sales_return", label: "مرتجع مبيعات", icon: "RET" },
+  { key: "quotation", label: "عرض سعر", icon: "Q" },
+  { key: "branch_transfer", label: "تحويل فرع", icon: "TR" },
+  { key: "bank_statement", label: "كشف بنكي", icon: "BNK" },
+  { key: "ajal_statement", label: "كشف آجل", icon: "AJL" },
+  { key: "ajal_schedule", label: "جدول أقساط", icon: "SCH" },
+  { key: "cheque_register", label: "سجل شيكات", icon: "CHK" },
+  { key: "payment_receipt", label: "إيصال دفع", icon: "PAY" },
+  { key: "daily_treasury", label: "تقرير الخزينة", icon: "DT" },
+  { key: "payment_methods_report", label: "تقرير وسائل الدفع", icon: "PM" },
+];
 
 // Fields that have a direct, VISIBLE representation in the preview
 const VISUAL_FIELDS = new Set([
@@ -367,15 +386,99 @@ function PagePreview({ settings: s, hovered, onElementClick, size, customBlocks 
 
 // ─── Main ────────────────────────────────────────────────────────────────────────
 
+function DocTypeNav({ activeDocType, onSelect }) {
+  return (
+    <div className="w-[220px] shrink-0 overflow-y-auto border-l border-slate-200 bg-white pl-3">
+      <div className="space-y-1">
+        {DOC_TYPES.map((doc) => (
+          <button key={doc.key} type="button" onClick={() => onSelect(doc.key)}
+            className={`flex w-full items-center gap-2 rounded-sm px-3 py-2 text-right text-[11px] font-black transition-colors ${activeDocType === doc.key ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}>
+            <span className={`min-w-8 rounded-sm px-1.5 py-0.5 text-center text-[9px] ${activeDocType === doc.key ? "bg-white/15" : "bg-slate-100 text-slate-400"}`}>{doc.icon}</span>
+            <span className="truncate">{doc.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PerDocSettingsPanel({ docType, globalSettings, docSettings, onChange, onSave }) {
+  const settings = docSettings[docType] || {};
+  const set = (key, val) => onChange({ ...docSettings, [docType]: { ...(docSettings[docType] || {}), [key]: val } });
+  const merged = { ...(globalSettings || {}), ...settings };
+  const label = DOC_TYPES.find((d) => d.key === docType)?.label || docType;
+
+  return (
+    <div className="flex flex-1 min-w-0 gap-4 overflow-hidden pr-4">
+      <div className="w-[420px] shrink-0 overflow-y-auto space-y-4 rounded-sm border border-slate-200 bg-white p-4">
+        <div>
+          <div className="text-[13px] font-black text-slate-900">تجاوزات خاصة بـ "{label}"</div>
+          <div className="text-[10px] font-bold text-slate-400">اترك الحقل فارغاً لاستخدام الإعداد العام.</div>
+        </div>
+        <div>
+          <label className="mb-2 block text-[11px] font-black text-slate-600">حجم الورق</label>
+          <div className="flex flex-wrap gap-2">
+            {["inherit", "58mm", "80mm", "A5", "A4"].map((size) => (
+              <button key={size} type="button" onClick={() => set("paper_size", size)}
+                className={`rounded-xl border px-3 py-1.5 text-[11px] font-black ${(settings.paper_size || "inherit") === size ? "border-violet-600 bg-violet-600 text-white" : "border-slate-200 text-slate-600"}`}>
+                {size === "inherit" ? "افتراضي" : size}
+              </button>
+            ))}
+          </div>
+        </div>
+        {[["receipt_header", "رأس المستند"], ["receipt_footer", "تذييل المستند"], ["watermark_text", "نص الطابع المائي"]].map(([key, labelText]) => (
+          <label key={key} className="block space-y-1">
+            <span className="text-[11px] font-black text-slate-600">{labelText}</span>
+            <input value={settings[key] || ""} onChange={(e) => set(key, e.target.value)}
+              className="h-10 w-full rounded-xl border border-slate-300 px-3 text-[12px] outline-none focus:border-violet-500" />
+          </label>
+        ))}
+        {[["show_logo", "إظهار الشعار"], ["show_address", "إظهار العنوان"], ["show_phone", "إظهار الهاتف"], ["show_payment_details", "إظهار تفاصيل الدفع"], ["show_signature_lines", "إظهار خطوط التوقيع"], ["show_watermark", "طابع مائي"]].map(([key, labelText]) => (
+          <label key={key} className="flex cursor-pointer items-center justify-between rounded-xl border border-slate-200 px-4 py-3 hover:bg-slate-50">
+            <span className="text-[12px] font-bold text-slate-700">{labelText}</span>
+            <input type="checkbox" checked={settings[key] !== undefined ? Boolean(settings[key]) : true} onChange={(e) => set(key, e.target.checked)} />
+          </label>
+        ))}
+        <button type="button" onClick={() => onSave(docType, settings)}
+          className="w-full rounded-xl bg-violet-600 py-3 text-[13px] font-black text-white hover:bg-violet-700">
+          حفظ إعدادات هذا المستند
+        </button>
+      </div>
+      <div className="flex-1 overflow-auto rounded-sm border border-slate-200 bg-[#e8ecf0] p-8">
+        <div className="mx-auto max-w-[210mm] bg-white shadow-xl">
+          <PagePreview settings={{ ...merged, receipt_width: merged.paper_size === "inherit" ? get(globalSettings, "receipt_width") : merged.paper_size || get(globalSettings, "receipt_width") }} size={merged.paper_size === "A5" ? "A5" : "A4"} hovered={null} onElementClick={() => {}} customBlocks={[]} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function PrintingSettingsPanel({ settings, onChange }) {
   const [hovered, setHovered] = useState(null);
   const [previewTab, setPreviewTab] = useState(get(settings, "receipt_width"));
+  const [activeDocType, setActiveDocType] = useState("global");
+  const [docSettings, setDocSettings] = useState({});
   // Pan & Zoom
   const [viewZoom, setViewZoom] = useState(0.6);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const isDragging = useRef(false);
   const lastPos    = useRef({ x: 0, y: 0 });
   const viewportRef = useRef(null);
+
+  useEffect(() => {
+    api.get("/api/print-settings-per-doc")
+      .then((r) => setDocSettings(r.data.data || {}))
+      .catch(() => {});
+  }, []);
+
+  async function saveDocSettings(docType, nextSettings) {
+    try {
+      await api.put(`/api/print-settings-per-doc/${docType}`, nextSettings || {});
+      toast.success("تم حفظ الإعدادات");
+    } catch {
+      toast.error("خطأ في الحفظ");
+    }
+  }
 
   const hover  = useCallback((k) => setHovered(k), []);
   const leave  = useCallback(() => setHovered(null), []);
@@ -451,9 +554,20 @@ export default function PrintingSettingsPanel({ settings, onChange }) {
 
   return (
     <div
-      className="flex"
+      className="flex gap-4"
       style={{ height: "calc(100vh - 220px)", minHeight: "640px" }}
     >
+      <DocTypeNav activeDocType={activeDocType} onSelect={setActiveDocType} />
+      {activeDocType !== "global" ? (
+        <PerDocSettingsPanel
+          docType={activeDocType}
+          globalSettings={settings}
+          docSettings={docSettings}
+          onChange={setDocSettings}
+          onSave={saveDocSettings}
+        />
+      ) : (
+      <>
 
       {/* ── Controls (right in RTL) — scrolls internally ── */}
       <div className="flex-1 min-w-0 overflow-y-auto pr-4 space-y-10" style={{ paddingBottom: "2rem" }}>
@@ -669,6 +783,8 @@ export default function PrintingSettingsPanel({ settings, onChange }) {
         </div>
 
       </div>
+      </>
+      )}
     </div>
   );
 }
