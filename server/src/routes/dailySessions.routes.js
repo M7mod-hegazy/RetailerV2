@@ -104,8 +104,27 @@ router.get("/today/transactions", (req, res) => {
           SELECT i.id, i.invoice_no AS doc_no, i.total AS amount, i.payment_type,
                  i.created_at, c.name AS party, i.status, NULL AS description,
                  'pos_invoice' AS doc_type,
-                 CASE WHEN i.payment_type = 'cash' THEN 'in' ELSE 'account' END AS cash_direction,
-                 CASE WHEN i.payment_type = 'cash' THEN i.total ELSE 0 END AS cash_effect
+                 CASE
+                   WHEN i.payment_type = 'cash' THEN 'in'
+                   WHEN i.payment_type = 'installments' AND i.total > 0 THEN 'in'
+                   WHEN i.payment_type = 'multi' THEN 'in'
+                   WHEN i.payment_type = 'bank_transfer' THEN 'bank'
+                   ELSE 'account'
+                 END AS cash_direction,
+                 CASE
+                   WHEN i.payment_type = 'cash' THEN i.total
+                   WHEN i.payment_type = 'installments' THEN COALESCE(
+                     (SELECT SUM(pa.amount) FROM payment_allocations pa WHERE pa.invoice_id = i.id),
+                     0
+                   )
+                   WHEN i.payment_type = 'multi' THEN (
+                     SELECT COALESCE(SUM(p.amount), 0)
+                     FROM payments p
+                     WHERE p.notes = 'Invoice ' || i.invoice_no
+                       AND p.method = 'cash'
+                   )
+                   ELSE 0
+                 END AS cash_effect
           FROM invoices i
           LEFT JOIN customers c ON c.id = i.customer_id
           WHERE date(i.created_at) = ? AND i.status != 'cancelled'

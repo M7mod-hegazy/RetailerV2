@@ -13,6 +13,7 @@ import toast from "react-hot-toast";
 import useDebounce from "../../hooks/useDebounce";
 import SearchInput from "../../components/ui/SearchInput";
 import { adaptForServer } from "../../utils/search";
+import TodayInvoicesButton from "../../components/pos/TodayInvoicesButton";
 
 function formatMoney(v) {
   return Number(v || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2 });
@@ -124,9 +125,12 @@ export default function PurchasesListPage() {
           <h1 className="text-[24px] font-black text-slate-800">فواتير المشتريات</h1>
           <p className="text-[13px] font-bold text-slate-400 mt-0.5">تتبع وإدارة كافة فواتير المشتريات الواردة</p>
         </div>
-        <Link to="/purchases/new" className="flex items-center gap-2 rounded-lg bg-slate-800 px-5 py-2.5 text-[13px] font-black text-white shadow-lg hover:bg-slate-700 transition-all active:scale-95">
-          <Plus className="h-4 w-4" /> فاتورة شراء جديدة
-        </Link>
+        <div className="flex items-center gap-2">
+          <TodayInvoicesButton variant="default" />
+          <Link to="/purchases/new" className="flex items-center gap-2 rounded-lg bg-slate-800 px-5 py-2.5 text-[13px] font-black text-white shadow-lg hover:bg-slate-700 transition-all active:scale-95">
+            <Plus className="h-4 w-4" /> فاتورة شراء جديدة
+          </Link>
+        </div>
       </div>
 
       {/* Stats */}

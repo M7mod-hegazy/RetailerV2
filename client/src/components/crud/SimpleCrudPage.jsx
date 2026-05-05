@@ -152,10 +152,14 @@ export default function SimpleCrudPage({
   }
 
   async function handleDelete(id) {
-    if (!window.confirm("تأكيد الحذف النهائي؟")) return;
+    if (!window.confirm("تأكيد الحذف؟")) return;
     try {
-      await api.delete(`${endpoint}/${id}`);
-      toast.success("تم الحذف بنجاح");
+      const res = await api.delete(`${endpoint}/${id}`);
+      if (res.data?.archived) {
+        toast.success(res.data?.message || "تم أرشفة السجل لأنه مرتبط ببيانات أخرى");
+      } else {
+        toast.success("تم الحذف بنجاح");
+      }
       loadRows();
       if (editingRow?.id === id) startCreate();
     } catch { toast.error("فشل الحذف - السجل مرتبط ببيانات أخرى"); }

@@ -39,6 +39,7 @@ const NAV_MODULES = [
       { path: "/payments", label: "القبض والدفع", icon: Coins },
       { path: "/accounts/customers", label: "حسابات العملاء", icon: HeartHandshake },
       { path: "/accounts/suppliers", label: "حسابات الموردين", icon: Building },
+      { path: "/operations/installments", label: "الأقساط والآجل", icon: Coins },
       { path: "/revenues", label: "تسجيل الإيرادات", icon: TrendingUp },
       { path: "/expenses", label: "تسجيل المصروفات", icon: TrendingDown },
       { path: "/operations/payment-methods", label: "وسائل الدفع", icon: CreditCard },

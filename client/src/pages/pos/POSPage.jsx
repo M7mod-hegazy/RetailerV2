@@ -24,6 +24,7 @@ import {
   ShieldCheck,
   ShoppingCart,
   Trash2,
+  Pencil,
   User,
   Wallet,
   X,
@@ -32,6 +33,7 @@ import {
   Clock,
   Filter,
   RefreshCw,
+  Calendar,
 } from "lucide-react";
 import api from "../../services/api";
 import { InvoiceSaveSuccess } from "../../components/pos/InvoiceSaveSuccess";
@@ -229,10 +231,11 @@ const WALK_IN_CUSTOMER = { id: null, name: "زبون نقدي", phone: "", openi
 const DEFAULT_WAREHOUSE = { id: "default", name: "المخزن الرئيسي" };
 
 const PAYMENT_TYPES = [
-  { type: "cash",          label: "نقدي",      Icon: Banknote  },
+  { type: "cash",          label: "نقدي",      Icon: Banknote   },
   { type: "bank_transfer", label: "بنك / فيزا", Icon: CreditCard },
-  { type: "credit",        label: "آجل",        Icon: Wallet    },
-  { type: "multi",         label: "متعدد",      Icon: Layers    },
+  { type: "credit",        label: "آجل",        Icon: Wallet     },
+  { type: "installments",  label: "أقساط",      Icon: Calendar   },
+  { type: "multi",         label: "متعدد",      Icon: Layers     },
 ];
 
 const PAYMENT_STATUS_LABELS = {
@@ -420,6 +423,8 @@ export default function POSPage() {
   const [storeSettings, setStoreSettings] = useState({ company_name: "المتجر", address: "" });
   const [printPreview, setPrintPreview] = useState(false);
   const [paymentMethods, setPaymentMethods] = useState([]);
+  const [showSetDefaultModal, setShowSetDefaultModal] = useState(false);
+  const [pendingViewMode, setPendingViewMode] = useState(null);
 
   const [invoiceTick, setInvoiceTick] = useState(() => Date.now());
   const [invoiceSeq, setInvoiceSeq]   = useState(1);
@@ -454,19 +459,21 @@ export default function POSPage() {
   // Payment
   const [amountPaid, setAmountPaid]         = useState("");
   const [amountReceived, setAmountReceived] = useState("");
+  const [installmentDueDate, setInstallmentDueDate] = useState("");
   const [selectedBankId, setSelectedBankId]         = useState("");
   const [selectedTreasuryId, setSelectedTreasuryId] = useState("");
   const [activeMultiPayments, setActiveMultiPayments] = useState([]);
   const [multiModalOpen, setMultiModalOpen] = useState(false);
-  const [viewMode, setViewMode] = useState("grid");
+  const [viewMode, setViewMode] = useState("detailed");
   const [multiCash, setMultiCash] = useState("");
-  const [multiBank, setMultiBank] = useState("");
   const [multiCredit, setMultiCredit] = useState("");
+  const [customPayMethods, setCustomPayMethods] = useState([]);
+  const [multiCustomAmounts, setMultiCustomAmounts] = useState({});
 
   // Modals
   const [profitModalOpen, setProfitModalOpen]           = useState(false);
   const [customerCreateOpen, setCustomerCreateOpen]     = useState(false);
-  const [customerDraft, setCustomerDraft] = useState({ name: "", phone: "", phone2: "", address: "", notes: "" });
+  const [customerDraft, setCustomerDraft] = useState({ name: "", phone: "", additionalPhones: [""], addresses: [""], notes: "" });
   const [supervisorOverrideOpen, setSupervisorOverrideOpen] = useState(false);
   const [pendingSave, setPendingSave] = useState(null);
 
@@ -479,6 +486,12 @@ export default function POSPage() {
   const [receiptSort, setReceiptSort]         = useState("created_at");
   const [receiptDir, setReceiptDir]           = useState("desc");
   const [receiptsLoading, setReceiptsLoading] = useState(false);
+  const [invoiceSearchNo, setInvoiceSearchNo] = useState("");
+  const [searchedInvoice, setSearchedInvoice] = useState(null);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [editInvoice, setEditInvoice] = useState(null);
+  const [editLines, setEditLines] = useState([]);
+  const [editSaving, setEditSaving] = useState(false);
 
   // Staging area
   const [selectedItem, setSelectedItem] = useState(null);
@@ -567,8 +580,16 @@ export default function POSPage() {
       });
       setStockLevels(grouped);
     }).catch(() => {});
-    api.get("/api/settings").then((r) => setStoreSettings(r.data.data || {})).catch(() => {});
-    api.get("/api/payment-methods").then((r) => setPaymentMethods(r.data.data || [])).catch(() => {});
+    api.get("/api/settings").then((r) => {
+      const s = r.data.data || {};
+      setStoreSettings(s);
+      if (s.default_pos_view) setViewMode(s.default_pos_view);
+    }).catch(() => {});
+    api.get("/api/payment-methods").then((r) => {
+      const all = r.data.data || [];
+      setPaymentMethods(all);
+      setCustomPayMethods(all.filter(m => !m.is_system));
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -610,12 +631,6 @@ export default function POSPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (pendingPrint && lastSavedInvoice) {
-      const t = setTimeout(() => { window.print(); setPendingPrint(false); }, 100);
-      return () => clearTimeout(t);
-    }
-  }, [pendingPrint, lastSavedInvoice]);
 
   useEffect(() => {
     function handleKeyDown(e) {
@@ -801,9 +816,8 @@ export default function POSPage() {
   // ── Helpers ──────────────────────────────────────────────────────────────────
 
   function getItemImage(item) {
-    if (item?.primary_image_url) return item.primary_image_url;
-    if (Array.isArray(item?.image_urls) && item.image_urls.length > 0) return item.image_urls[0];
-    return "";
+    const raw = item?.primary_image_url || (Array.isArray(item?.image_urls) && item.image_urls.length > 0 ? item.image_urls[0] : "");
+    return resolveImageUrl(raw) || "";
   }
 
   function resetStaging() {
@@ -824,6 +838,10 @@ export default function POSPage() {
     setSelectedBankId("");
     setSelectedTreasuryId("");
     setActiveMultiPayments([]);
+    setInstallmentDueDate("");
+    setMultiCash("");
+    setMultiCredit("");
+    setMultiCustomAmounts({});
   }
 
   function handleSelectItem(item) {
@@ -975,15 +993,25 @@ export default function POSPage() {
     if (lines.some((l) => Number(l.quantity || 0) > Number(l.stock_quantity || 0))) {
       setSaveMessage("لا يمكن الحفظ: يوجد صنف يتجاوز المخزون."); setTimeout(() => setSaveMessage(""), 5000); return;
     }
-    if (paymentType === "credit" && !customer?.id) {
-      setCustomerCreateOpen(true); setSaveMessage("البيع الآجل يتطلب تحديد عميل."); return;
+    if ((paymentType === "credit" || paymentType === "installments") && !customer?.id) {
+      setCustomerCreateOpen(true); setSaveMessage("البيع الآجل والأقساط تتطلب تحديد عميل."); return;
     }
     if (paymentType === "bank_transfer" && !selectedBankId && banks.length > 0) {
       setSaveMessage("يرجى اختيار البنك."); setTimeout(() => setSaveMessage(""), 4000); return;
     }
-    if (paymentType === "multi" && Math.abs(totals.total - activeMultiPayments.reduce((acc, p) => acc + Number(p.amount), 0)) > 0.005) {
-      setSaveMessage(`مجموع الدفع المتعدد لا يساوي الإجمالي (${formatMoney(totals.total)}).`);
-      setTimeout(() => setSaveMessage(""), 5000); return;
+    if (paymentType === "multi") {
+      const filteredCustomTotal = customPayMethods
+        .filter(m => !m.name?.includes('بنك') && !m.name?.includes('تحويل') && m.icon !== '🏦')
+        .reduce((s, m) => s + Number(multiCustomAmounts[m.id]||0), 0);
+      const multiTotal = (Number(multiCash)||0) + filteredCustomTotal + (Number(multiCredit)||0);
+      if (Math.abs(totals.total - multiTotal) > 0.005) {
+        setSaveMessage(`مجموع الدفع المتعدد لا يساوي الإجمالي (${formatMoney(totals.total)}).`);
+        setTimeout(() => setSaveMessage(""), 5000); return;
+      }
+      if (Number(multiCredit) > 0 && (!customer || !customer.id)) {
+        setSaveMessage("لا يمكن استخدام الآجل بدون اختيار عميل.");
+        setTimeout(() => setSaveMessage(""), 5000); return;
+      }
     }
 
     setIsSaving(true); setSaveMessage("");
@@ -1005,11 +1033,16 @@ export default function POSPage() {
         })),
         discount,
         promotion_discount: promotionDiscount,
-        payment_type: paymentType,
-        amount_paid:  paymentType === "credit" ? Math.max(0, paidAmountNumber) : totals.total,
+        payment_type: paymentType === "installments" ? "credit" : paymentType,
+        amount_paid:  (paymentType === "credit" || paymentType === "installments") ? Math.max(0, paidAmountNumber) : totals.total,
+        due_date:     paymentType === "installments" ? (installmentDueDate || null) : null,
         bank_id:      selectedBankId  ? Number(selectedBankId)  : null,
         treasury_id:  selectedTreasuryId ? Number(selectedTreasuryId) : null,
-        payments:     paymentType === "multi" ? activeMultiPayments.map(p => ({ method_id: p.method_id, amount: Number(p.amount) })) : [],
+        payments:     paymentType === "multi" ? [
+          ...(Number(multiCash) > 0 ? [{ method_id: null, method: "cash", amount: Number(multiCash) }] : []),
+          ...customPayMethods.filter(m => !m.name?.includes('بنك') && !m.name?.includes('تحويل') && m.icon !== '🏦' && Number(multiCustomAmounts[m.id]||0) > 0).map(m => ({ method_id: m.id, amount: Number(multiCustomAmounts[m.id]) })),
+          ...(Number(multiCredit) > 0 && customer?.id ? [{ method_id: null, method: "credit", amount: Number(multiCredit) }] : []),
+        ] : [],
         allow_loss_sale:    hasBelowCost || Boolean(opts.allowLoss),
         supervisor_override: Boolean(opts.supervisorOverride),
       };
@@ -1028,7 +1061,7 @@ export default function POSPage() {
       setLastSavedInvoice(receiptSnap);
       setSaveSuccess({ invoiceNumber: savedInvoiceNo, total: formatMoney(totals.total) });
       clear(); resetPaymentFields(); resetStaging(); setPaymentType("cash"); setInvoiceSeq((s) => s + 1);
-      if (printAfter) setPendingPrint(true);
+      if (printAfter) setPrintPreview(true);
     } catch (error) {
       if (error.response?.status === 403 && error.response?.data?.code === "DISCOUNT_LIMIT_EXCEEDED") {
         setPendingSave({ printAfter, opts }); setSupervisorOverrideOpen(true);
@@ -1049,21 +1082,72 @@ export default function POSPage() {
     await saveInvoice(printAfter, { ...opts, supervisorOverride: true });
   }
 
+  async function searchByInvoiceNo() {
+    if (!invoiceSearchNo.trim()) return;
+    setSearchLoading(true);
+    try {
+      const r = await api.get(`/api/invoices?search=${invoiceSearchNo.trim()}&limit=5`);
+      const list = r.data.data || r.data || [];
+      const found = list.find(inv => inv.invoice_no === invoiceSearchNo.trim()) || list[0];
+      setSearchedInvoice(found || null);
+      if (!found) setSaveMessage("لم يتم العثور على الفاتورة");
+    } catch { setSaveMessage("خطأ في البحث"); } finally { setSearchLoading(false); }
+  }
+
+  async function handleVoidInvoice(inv) {
+    if (!window.confirm(`إلغاء الفاتورة ${inv.invoice_no}؟ سيتم عكس التأثير على المخزون والخزينة.`)) return;
+    try {
+      await api.post(`/api/invoices/${inv.id}/void`, { reason: "إلغاء من قبل الكاشير" });
+      setSaveMessage("تم إلغاء الفاتورة");
+      setTimeout(() => setSaveMessage(""), 3000);
+      loadReceipts();
+    } catch (e) { setSaveMessage(e.response?.data?.message || "خطأ"); setTimeout(() => setSaveMessage(""), 4000); }
+  }
+
+  async function openEditInvoice(inv) {
+    try {
+      const r = await api.get(`/api/invoices/${inv.id}`);
+      const full = r.data.data || r.data;
+      setEditInvoice(full);
+      setEditLines((full.lines || full.invoice_lines || []).map(l => ({...l, _qty: l.quantity, _price: l.unit_price, _discount: l.discount || 0})));
+    } catch { setSaveMessage("خطأ في تحميل الفاتورة"); setTimeout(() => setSaveMessage(""), 3000); }
+  }
+
+  async function saveEditInvoice() {
+    if (!editInvoice) return;
+    setEditSaving(true);
+    try {
+      await api.put(`/api/invoices/${editInvoice.id}`, {
+        lines: editLines.map(l => ({ item_id: l.item_id, quantity: Number(l._qty), unit_price: Number(l._price), discount: Number(l._discount) })),
+        discount: editInvoice.discount,
+        increase: editInvoice.increase,
+      });
+      setSaveMessage("تم حفظ التعديلات");
+      setTimeout(() => setSaveMessage(""), 3000);
+      setEditInvoice(null);
+      loadReceipts();
+    } catch (e) { setSaveMessage(e.response?.data?.message || "خطأ"); setTimeout(() => setSaveMessage(""), 4000); }
+    finally { setEditSaving(false); }
+  }
+
   async function createQuickCustomer() {
-    if (!customerDraft.name.trim() || !customerDraft.phone.trim()) {
-      setSaveMessage("أدخل اسم العميل ورقم هاتفه."); return;
+    if (!customerDraft.name.trim()) {
+      setSaveMessage("أدخل اسم العميل."); return;
     }
     try {
+      const additionalPhones = customerDraft.additionalPhones.filter(p => p.trim()).join("|");
+      const addresses = customerDraft.addresses.filter(a => a.trim()).join("|");
       const response = await api.post("/api/customers", {
         name:    customerDraft.name.trim(),
-        phone:   `${customerDraft.phone.trim()}${customerDraft.phone2.trim() ? ` | ${customerDraft.phone2.trim()}` : ""}`,
+        phone:   customerDraft.phone.trim() || null,
+        additional_phones: additionalPhones || null,
+        addresses: addresses || null,
         notes:   customerDraft.notes.trim() || null,
-        address: customerDraft.address.trim() || null,
       });
       const newCustomer = response.data?.data;
       if (newCustomer) { setCustomers((prev) => [newCustomer, ...prev]); setCustomer(newCustomer); setCustomerQuery(newCustomer.name); }
       setCustomerCreateOpen(false);
-      setCustomerDraft({ name: "", phone: "", phone2: "", address: "", notes: "" });
+      setCustomerDraft({ name: "", phone: "", additionalPhones: [""], addresses: [""], notes: "" });
       setSaveMessage("");
     } catch (error) { setSaveMessage(error.response?.data?.message || "تعذر إنشاء العميل."); }
   }
@@ -1138,14 +1222,14 @@ export default function POSPage() {
             </div>
             <div className="flex shrink-0 bg-slate-100 rounded-md p-1 border border-slate-200">
               <button 
-                onClick={() => setViewMode("grid")}
-                className={`p-1.5 rounded-sm transition-all ${viewMode === "grid" ? "bg-white shadow-sm text-emerald-600" : "text-slate-500 hover:text-slate-700"}`}
+                onClick={() => { setViewMode("detailed"); setPendingViewMode("detailed"); setShowSetDefaultModal(true); }}
+                className={`p-1.5 rounded-sm transition-all ${viewMode === "detailed" ? "bg-white shadow-sm text-emerald-600" : "text-slate-500 hover:text-slate-700"}`}
                 title="عرض الشبكة"
               >
                 <LayoutGrid className="w-4 h-4" />
               </button>
-              <button 
-                onClick={() => setViewMode("list")}
+              <button
+                onClick={() => { setViewMode("list"); setPendingViewMode("list"); setShowSetDefaultModal(true); }}
                 className={`p-1.5 rounded-sm transition-all ${viewMode === "list" ? "bg-white shadow-sm text-emerald-600" : "text-slate-500 hover:text-slate-700"}`}
                 title="عرض القائمة"
               >
@@ -1181,24 +1265,20 @@ export default function POSPage() {
 
           <div className="flex items-center gap-3 shrink-0">
             <button
-              onClick={() => setPrintPreview(true)}
-              disabled={!lines.length}
-              className="flex h-9 items-center gap-2 rounded-sm border border-slate-300 bg-white px-4 text-[13px] font-black text-slate-700 hover:bg-slate-50 disabled:opacity-40 transition-all"
+              onClick={() => setReceiptsOpen(true)}
+              className="flex h-9 items-center gap-2 rounded-sm border border-slate-300 bg-white px-4 text-[13px] font-black text-slate-700 hover:bg-slate-50 transition-all"
+              title="فواتير اليوم"
             >
-              <Printer className="h-4 w-4" /> طباعة ومراجعة المستند
+              <ListTodo className="h-4 w-4" />
             </button>
             <button
-              onClick={() => saveInvoice(false)}
-              disabled={isSaving || !lines.length || hasBlockingErrors}
+              onClick={() => setPrintPreview(true)}
+              disabled={!lines.length || isSaving || hasBlockingErrors}
               className={`flex h-9 items-center gap-2 rounded-sm px-6 text-[13px] font-black text-white transition-all disabled:opacity-50
                 ${hasBlockingErrors && lines.length ? "bg-rose-600" : "bg-slate-800 hover:bg-slate-700"}`}
             >
-              {isSaving ? "جاري الحفظ..." : (
-                <>
-                  حفظ الفاتورة (F9)
-                  {hasBlockingErrors && <span className="ml-1.5 rounded-full bg-rose-400 text-white text-[9px] font-black px-1.5 py-0.5">{blockingErrorCount}</span>}
-                </>
-              )}
+              <Printer className="h-4 w-4" /> طباعة ومراجعة المستند
+              {hasBlockingErrors && <span className="ml-1.5 rounded-full bg-rose-400 text-white text-[9px] font-black px-1.5 py-0.5">{blockingErrorCount}</span>}
             </button>
           </div>
         </header>
@@ -1206,32 +1286,42 @@ export default function POSPage() {
         <main className="flex min-h-0 flex-1 gap-4 p-4 overflow-hidden">
           
           {/* Right Sidebar (Customer, Summary, Payment) */}
-          <aside className="w-[280px] shrink-0 flex flex-col gap-3 overflow-y-auto custom-scrollbar">
-            <div className="rounded-md border border-slate-300 bg-white p-4 shadow-sm">
+          <aside className="w-[400px] shrink-0 flex flex-col gap-3 overflow-y-auto custom-scrollbar">
+            {/* Customer Card */}
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-widest">العميل</h3>
-                {customer && customer.id && (
-                  <button
-                    onClick={() => { setCustomer(null); setCustomerQuery(""); setPaymentType("cash"); }}
-                    title="إلغاء تحديد العميل"
-                    className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-100 text-slate-400 hover:bg-rose-100 hover:text-rose-600 transition-colors"
-                  >
-                    <X className="h-3 w-3" />
+                <div className="flex items-center gap-1.5">
+                  <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-slate-100">
+                    <User className="h-3.5 w-3.5 text-slate-500" />
+                  </div>
+                  <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-widest">العميل</h3>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => setCustomerCreateOpen(true)} title="إنشاء عميل جديد" className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors">
+                    <Plus className="h-3.5 w-3.5" />
                   </button>
-                )}
+                  {customer && customer.id && (
+                    <button
+                      onClick={() => { setCustomer(null); setCustomerQuery(""); setPaymentType("cash"); }}
+                      title="إلغاء تحديد العميل"
+                      className="flex h-6 w-6 items-center justify-center rounded-full bg-rose-50 text-rose-500 hover:bg-rose-100 hover:text-rose-700 transition-colors"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="relative">
-                <User className="absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400 pointer-events-none" />
                 <input
                   ref={customerInputRef}
                   type="text"
                   value={customerQuery}
-                  placeholder={customer?.id ? customer.name : "زبون نقدي — ابحث لتغيير..."}
+                  placeholder={customer?.id ? customer.name : "ابحث عن عميل..."}
                   onChange={(e) => { setCustomerQuery(e.target.value); setCustomerLookupOpen(true); if (!e.target.value) { setCustomer(null); setPaymentType("cash"); } }}
                   onFocus={() => { if (!customer?.id) setCustomerQuery(""); setCustomerLookupOpen(true); }}
                   onBlur={() => { setTimeout(() => { setCustomerLookupOpen(false); if (!customer?.id) setCustomerQuery(""); }, 200); }}
                   onKeyDown={handleCustomerKeyDown}
-                  className="w-full rounded-sm border border-slate-300 bg-white py-2 pl-3 pr-9 text-[12px] font-bold text-slate-800 outline-none focus:border-slate-800 placeholder:text-slate-400 placeholder:font-normal"
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2.5 pl-3 pr-4 text-[13px] font-bold text-slate-800 outline-none focus:border-slate-400 focus:bg-white focus:ring-2 focus:ring-slate-100 transition-all placeholder:text-slate-400 placeholder:font-normal"
                 />
                 {customerLookupOpen && (
                   <LookupList
@@ -1243,39 +1333,61 @@ export default function POSPage() {
                   />
                 )}
               </div>
-              {/* Show selected customer name badge */}
               {customer?.id && (
-                <div className="mt-2 flex items-center gap-2 rounded-sm bg-emerald-50 border border-emerald-200 px-3 py-1.5">
+                <div className="mt-2.5 flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2">
                   <div className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
-                  <span className="text-[11px] font-black text-emerald-800 truncate">{customer.name}</span>
-                  {customer.phone && <span className="text-[10px] text-emerald-600 mr-auto shrink-0">{customer.phone}</span>}
+                  <span className="text-[12px] font-black text-emerald-800 truncate">{customer.name}</span>
+                  {customer.phone && <span className="text-[11px] text-emerald-600 mr-auto shrink-0 font-mono">{customer.phone}</span>}
+                </div>
+              )}
+              {!customer?.id && customers.length > 0 && (
+                <div className="mt-2.5">
+                  <div className="text-[10px] font-bold text-slate-400 mb-1.5">اختيار سريع:</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {customers.slice(0, 4).map(c => (
+                      <button
+                        key={c.id}
+                        onClick={() => handlePickCustomer(c)}
+                        className="px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-100 text-[11px] font-bold text-slate-600 hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-700 transition-all"
+                      >
+                        {c.name}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
 
             {/* Invoice Summary */}
-            <div className="rounded-md border border-slate-300 bg-white p-4 shadow-sm">
-              <h3 className="mb-3 text-[11px] font-black text-slate-400 uppercase tracking-widest border-b pb-2 border-slate-100">
-                ملخص الفاتورة
-              </h3>
-              <div className="space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-[12px] font-bold text-slate-500">إجمالي الأصناف</span>
-                  <span className="text-[12px] font-black text-slate-800">{lines.length}</span>
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex items-center gap-1.5 mb-3">
+                <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-slate-100">
+                  <Receipt className="h-3.5 w-3.5 text-slate-500" />
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-[12px] font-bold text-slate-500">مجموع الكميات</span>
-                  <span className="text-[12px] font-black text-slate-800">{lines.reduce((acc, l) => acc + Number(l.quantity), 0)}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-[12px] font-bold text-slate-500">الإجمالي الفرعي</span>
-                  <span className="text-[12px] font-black font-mono text-slate-800">{formatMoney(totals.subtotal)}</span>
-                </div>
-                <div className="h-px bg-slate-100" />
+                <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-widest">ملخص الفاتورة</h3>
+              </div>
 
-                <div className="flex flex-col gap-1">
-                  <label className="text-[11px] font-bold text-rose-600">خصم الفاتورة</label>
-                  <div className="flex items-center gap-1">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+                  <span className="text-[12px] font-bold text-slate-500">إجمالي الأصناف</span>
+                  <span className="text-[13px] font-black text-slate-800 font-mono">{lines.length}</span>
+                </div>
+                <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+                  <span className="text-[12px] font-bold text-slate-500">مجموع الكميات</span>
+                  <span className="text-[13px] font-black text-slate-800 font-mono">{lines.reduce((acc, l) => acc + Number(l.quantity), 0)}</span>
+                </div>
+                <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+                  <span className="text-[12px] font-bold text-slate-500">الإجمالي الفرعي</span>
+                  <span className="text-[13px] font-black font-mono text-slate-800">{formatMoney(totals.subtotal)}</span>
+                </div>
+
+                <div className="h-px bg-slate-100 my-1" />
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[11px] font-bold text-rose-600 flex items-center gap-1">
+                    <span className="h-1.5 w-1.5 rounded-full bg-rose-400" /> خصم الفاتورة
+                  </label>
+                  <div className="flex items-center gap-1.5">
                     <input
                       type="number"
                       min="0"
@@ -1290,28 +1402,30 @@ export default function POSPage() {
                           setDiscount(Math.min(v, totals.subtotal));
                         }
                       }}
-                      className="flex-1 min-w-0 rounded-sm border border-rose-300 bg-rose-50 px-2 py-1.5 text-[12px] font-black text-rose-900 outline-none focus:border-rose-500 text-center"
+                      className="flex-1 min-w-0 rounded-lg border border-rose-200 bg-rose-50/50 px-3 py-2 text-[13px] font-black text-rose-900 outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-100 text-center transition-all"
                     />
                     <button
                       type="button"
                       onClick={() => setInvoiceDiscountMode((m) => m === "pct" ? "flat" : "pct")}
                       title={invoiceDiscountMode === "pct" ? "تغيير إلى قيمة ثابتة" : "تغيير إلى نسبة مئوية"}
-                      className={`h-[34px] px-2.5 rounded-sm text-[11px] font-black border transition-colors shrink-0
+                      className={`h-[40px] px-3 rounded-lg text-[12px] font-black border transition-all shrink-0
                         ${invoiceDiscountMode === "pct"
-                          ? "bg-rose-100 border-rose-300 text-rose-700"
-                          : "bg-slate-100 border-slate-300 text-slate-500 hover:bg-slate-200"}`}
+                          ? "bg-rose-100 border-rose-300 text-rose-700 shadow-sm"
+                          : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"}`}
                     >
                       {invoiceDiscountMode === "pct" ? "%" : "ج"}
                     </button>
                   </div>
                   {discount > 0 && invoiceDiscountMode === "flat" && totals.subtotal > 0 && (
-                    <span className="text-[10px] font-mono text-rose-400">{((discount / totals.subtotal) * 100).toFixed(1)}% من الإجمالي</span>
+                    <span className="text-[10px] font-mono text-rose-400 px-1">{((discount / totals.subtotal) * 100).toFixed(1)}% من الإجمالي</span>
                   )}
                 </div>
 
-                <div className="flex flex-col gap-1">
-                  <label className="text-[11px] font-bold text-blue-600">إضافة / رسوم</label>
-                  <div className="flex items-center gap-1">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[11px] font-bold text-blue-600 flex items-center gap-1">
+                    <span className="h-1.5 w-1.5 rounded-full bg-blue-400" /> إضافة / رسوم
+                  </label>
+                  <div className="flex items-center gap-1.5">
                     <input
                       type="number"
                       min="0"
@@ -1326,40 +1440,43 @@ export default function POSPage() {
                           setIncrease(v);
                         }
                       }}
-                      className="flex-1 min-w-0 rounded-sm border border-blue-300 bg-blue-50 px-2 py-1.5 text-[12px] font-black text-blue-900 outline-none focus:border-blue-500 text-center"
+                      className="flex-1 min-w-0 rounded-lg border border-blue-200 bg-blue-50/50 px-3 py-2 text-[13px] font-black text-blue-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 text-center transition-all"
                     />
                     <button
                       type="button"
                       onClick={() => setInvoiceIncreaseMode((m) => m === "pct" ? "flat" : "pct")}
                       title={invoiceIncreaseMode === "pct" ? "تغيير إلى قيمة ثابتة" : "تغيير إلى نسبة مئوية"}
-                      className={`h-[34px] px-2.5 rounded-sm text-[11px] font-black border transition-colors shrink-0
+                      className={`h-[40px] px-3 rounded-lg text-[12px] font-black border transition-all shrink-0
                         ${invoiceIncreaseMode === "pct"
-                          ? "bg-blue-100 border-blue-300 text-blue-700"
-                          : "bg-slate-100 border-slate-300 text-slate-500 hover:bg-slate-200"}`}
+                          ? "bg-blue-100 border-blue-300 text-blue-700 shadow-sm"
+                          : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"}`}
                     >
                       {invoiceIncreaseMode === "pct" ? "%" : "ج"}
                     </button>
                   </div>
                 </div>
 
-                <div className="h-px bg-slate-200" />
-                <div className="rounded-sm bg-slate-900 p-4 text-center text-white">
+                <div className="h-px bg-slate-100 my-1" />
+
+                <div className="rounded-xl bg-slate-900 p-4 text-center text-white shadow-lg">
                   <div className="text-[10px] font-bold opacity-60 uppercase tracking-widest">إجمالي المستحق</div>
-                  <div className="text-[28px] font-black tracking-tighter font-mono leading-none mt-1">
+                  <div className="text-[28px] font-black tracking-tighter font-mono leading-none mt-1.5">
                     {totals.total.toLocaleString("ar-EG", { minimumFractionDigits: 2 })}
                   </div>
                   <div className="text-[10px] opacity-40 mt-1">ج.م</div>
                 </div>
 
                 {hasBlockingErrors && (
-                  <div className="rounded-sm bg-rose-50 border border-rose-200 px-3 py-2">
-                    <div className="text-[11px] font-black text-rose-700 mb-1">تحذيرات تمنع الحفظ:</div>
+                  <div className="rounded-xl bg-rose-50 border border-rose-200 px-3 py-3">
+                    <div className="text-[11px] font-black text-rose-700 mb-1.5 flex items-center gap-1">
+                      <AlertTriangle className="h-3 w-3" /> تحذيرات تمنع الحفظ
+                    </div>
                     {Object.entries(lineWarnings).flatMap(([itemId, ws]) =>
                       ws.filter((w) => w.type === "error").map((w, i) => {
                         const l = lines.find((ln) => String(ln.item_id) === String(itemId));
                         return (
-                          <div key={`${itemId}-${i}`} className="text-[10px] text-rose-600 font-bold">
-                            • {l?.item_name || itemId}: {w.msg}
+                          <div key={`${itemId}-${i}`} className="text-[10px] text-rose-600 font-bold flex items-center gap-1">
+                            <span className="h-1 w-1 rounded-full bg-rose-400 shrink-0" /> {l?.item_name || itemId}: {w.msg}
                           </div>
                         );
                       })
@@ -1370,30 +1487,40 @@ export default function POSPage() {
             </div>
 
             {/* Payment Method */}
-            <div className="rounded-md border border-slate-300 bg-white p-4 shadow-sm">
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <h3 className="mb-3 text-[11px] font-black text-slate-400 uppercase tracking-widest">طريقة الدفع</h3>
-              <div className="space-y-2">
+              <div className="grid grid-cols-3 gap-2">
                 {PAYMENT_TYPES.map(({ type, label, Icon }) => {
                   const isWalkIn = !customer || customer.id === null;
-                  const isDisabled = isWalkIn && type !== "cash";
+                  const isDisabled = isWalkIn && (type === "credit" || type === "installments" || type === "bank_transfer");
+                  const isActive = paymentType === type;
+                  const colorMap = {
+                    cash: { bg: "bg-emerald-50", text: "text-emerald-600", border: "border-emerald-200", ring: "ring-emerald-200", activeBg: "bg-emerald-600" },
+                    bank_transfer: { bg: "bg-blue-50", text: "text-blue-600", border: "border-blue-200", ring: "ring-blue-200", activeBg: "bg-blue-600" },
+                    credit: { bg: "bg-amber-50", text: "text-amber-600", border: "border-amber-200", ring: "ring-amber-200", activeBg: "bg-amber-600" },
+                    installments: { bg: "bg-violet-50", text: "text-violet-600", border: "border-violet-200", ring: "ring-violet-200", activeBg: "bg-violet-600" },
+                    multi: { bg: "bg-slate-50", text: "text-slate-600", border: "border-slate-200", ring: "ring-slate-200", activeBg: "bg-slate-700" },
+                  };
+                  const c = colorMap[type];
                   return (
                     <button
                       key={type}
                       onClick={() => !isDisabled && setPaymentType(type)}
                       disabled={isDisabled}
                       title={isDisabled ? "يجب اختيار عميل مسجل أولاً" : undefined}
-                      className={`flex w-full items-center gap-3 rounded-sm border p-3 text-right transition-all ${
-                        paymentType === type
-                          ? "border-emerald-500 bg-emerald-50 text-emerald-800 shadow-sm"
+                      className={`relative flex flex-col items-center gap-1 rounded-xl border p-2 text-center transition-all duration-150 ${
+                        isActive
+                          ? `${c.activeBg} text-white border-transparent shadow-md ring-2 ${c.ring} ring-offset-1`
                           : isDisabled
-                            ? "border-slate-200 opacity-40 cursor-not-allowed bg-slate-50 text-slate-400"
-                            : "border-slate-200 hover:bg-slate-50 text-slate-700"
+                            ? "border-slate-100 opacity-40 cursor-not-allowed bg-slate-50 text-slate-400"
+                            : `border-slate-200 hover:border-slate-300 hover:shadow-sm hover:-translate-y-px text-slate-700 bg-white`
                       }`}
                     >
-                      <Icon className="h-4 w-4 shrink-0" />
-                      <div className="flex flex-col">
-                        <span className="text-[12px] font-black">{label}</span>
+                      <div className={`flex h-7 w-7 items-center justify-center rounded-md ${isActive ? "bg-white/20" : c.bg}`}>
+                        <Icon className={`h-3.5 w-3.5 ${isActive ? "text-white" : c.text}`} />
                       </div>
+                      <span className="text-[10px] font-black leading-tight whitespace-nowrap">{label}</span>
+                      {isActive && <div className="absolute top-1 left-1 h-1.5 w-1.5 rounded-full bg-white/80" />}
                     </button>
                   );
                 })}
@@ -1401,26 +1528,67 @@ export default function POSPage() {
 
               {/* Payment extra inputs */}
               {paymentType === "bank_transfer" && (
-                <div className="mt-3 flex flex-col gap-1">
-                  <label className="text-[11px] font-bold text-slate-600">اختر البنك</label>
-                  <select value={selectedBankId} onChange={(e) => setSelectedBankId(e.target.value)} className="w-full border border-blue-300 rounded-sm bg-blue-50 px-3 py-2 text-[12px] font-bold outline-none focus:border-blue-500">
+                <div className="mt-4 flex flex-col gap-1.5 rounded-xl bg-blue-50/50 border border-blue-100 p-3">
+                  <label className="text-[11px] font-bold text-blue-700 flex items-center gap-1.5">
+                    <CreditCard className="w-3 h-3" /> اختر البنك / البطاقة
+                  </label>
+                  <select value={selectedBankId} onChange={(e) => setSelectedBankId(e.target.value)} className="w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-[12px] font-bold text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all">
                     <option value="">اختر البنك / البطاقة</option>
                     {banks.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                   </select>
                 </div>
               )}
               {paymentType === "credit" && customer && (
-                <div className="mt-3 rounded-sm border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-700 font-bold">
-                  سيتم إضافة {formatMoney(totals.total)} لرصيد {customer.name}
+                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-[11px] text-amber-800 font-bold flex items-center gap-2">
+                  <Wallet className="w-4 h-4 shrink-0 text-amber-600" />
+                  <span>سيتم إضافة {formatMoney(totals.total)} لرصيد {customer.name}</span>
+                </div>
+              )}
+              {paymentType === "installments" && (
+                <div className="mt-4 flex flex-col gap-2.5 rounded-xl bg-violet-50/50 border border-violet-100 p-4">
+                  <div className="text-[11px] font-black text-violet-700 flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5" /> إعداد الأقساط
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold text-slate-600 w-20 shrink-0 whitespace-nowrap">دفعة مقدم:</span>
+                    <input type="number" min="0" value={amountPaid} onChange={(e) => setAmountPaid(e.target.value)} placeholder="0.00" className="flex-1 rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-[12px] font-black text-slate-800 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 transition-all" />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold text-slate-600 w-20 shrink-0 whitespace-nowrap">تاريخ القسط:</span>
+                    <input type="date" value={installmentDueDate} onChange={e => setInstallmentDueDate(e.target.value)} className="flex-1 rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-[12px] font-bold text-slate-700 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 transition-all" />
+                  </div>
+                  {customer && (
+                    <div className="text-[11px] font-black text-violet-700 bg-violet-100/60 rounded-lg px-3 py-1.5 text-center border border-violet-200">
+                      المتبقي كأقساط: {formatMoney(Math.max(0, totals.total - Number(amountPaid || 0)))} على {customer.name}
+                    </div>
+                  )}
                 </div>
               )}
               {paymentType === "multi" && (
-                <div className="mt-3 flex flex-col gap-2 p-2 bg-slate-50 border border-slate-200 rounded-md">
-                  <div className="flex items-center gap-2"><span className="text-[11px] font-black text-slate-500 w-10">نقدي:</span><input type="number" min="0" value={multiCash} onChange={(e) => setMultiCash(e.target.value)} placeholder="0.00" className="flex-1 rounded-sm border border-slate-300 px-2 py-1 text-[12px] font-black outline-none focus:border-emerald-500" /></div>
-                  <div className="flex items-center gap-2"><span className="text-[11px] font-black text-slate-500 w-10">بنكي:</span><input type="number" min="0" value={multiBank} onChange={(e) => setMultiBank(e.target.value)} placeholder="0.00" className="w-20 rounded-sm border border-slate-300 px-2 py-1 text-[12px] font-black outline-none focus:border-emerald-500" /><select value={selectedBankId} onChange={(e) => setSelectedBankId(e.target.value)} className="flex-1 rounded-sm border border-slate-300 px-2 py-1 text-[11px] outline-none"><option value="">بنك</option>{banks.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</select></div>
-                  <div className="flex items-center gap-2"><span className="text-[11px] font-black text-slate-500 w-10">آجل:</span><input type="number" min="0" value={multiCredit} onChange={(e) => setMultiCredit(e.target.value)} placeholder="0.00" className="flex-1 rounded-sm border border-amber-300 px-2 py-1 text-[12px] font-black text-amber-900 outline-none focus:border-amber-500 bg-amber-50" /></div>
-                  <div className={`text-center text-[11px] font-black rounded-sm py-1 ${Math.abs((Number(multiCash)||0)+(Number(multiBank)||0)+(Number(multiCredit)||0)-totals.total)<0.01?"bg-emerald-100 text-emerald-700":"bg-rose-100 text-rose-700"}`}>
-                    المُدخل: {formatMoney((Number(multiCash)||0)+(Number(multiBank)||0)+(Number(multiCredit)||0))} / {formatMoney(totals.total)}
+                <div className="mt-4 flex flex-col gap-2.5 rounded-xl bg-slate-50/60 border border-slate-200 p-4">
+                  <div className="text-[11px] font-black text-slate-600 mb-0.5 flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5" /> تفاصيل الدفع المتعدد
+                  </div>
+                  <div className="max-h-[160px] overflow-y-auto custom-scrollbar flex flex-col gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-black text-slate-500 w-24 shrink-0 whitespace-nowrap truncate">نقدي:</span>
+                      <input type="number" min="0" value={multiCash} onChange={(e) => setMultiCash(e.target.value)} placeholder="0.00" className="flex-1 min-w-0 rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-[12px] font-black text-slate-800 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 transition-all" />
+                    </div>
+                    {customPayMethods.filter(m => !m.name?.includes('بنك') && !m.name?.includes('تحويل') && m.icon !== '🏦').map(m => (
+                      <div key={m.id} className="flex items-center gap-2">
+                        <span className="text-[11px] font-black text-slate-500 w-24 shrink-0 whitespace-nowrap truncate" title={`${m.icon} ${m.name}`}>{m.icon} {m.name}:</span>
+                        <input type="number" min="0" value={multiCustomAmounts[m.id] || ""} onChange={(e) => setMultiCustomAmounts(prev => ({...prev, [m.id]: e.target.value}))} placeholder="0.00" className="flex-1 min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-black text-slate-800 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 transition-all" />
+                      </div>
+                    ))}
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-black text-slate-500 w-24 shrink-0 whitespace-nowrap truncate">آجل:</span>
+                      <input type="number" min="0" value={multiCredit} onChange={(e) => setMultiCredit(e.target.value)} placeholder={customer?.id ? "0.00" : "اختر عميل..."} disabled={!customer?.id} className={`flex-1 min-w-0 rounded-lg px-3 py-1.5 text-[12px] font-black outline-none transition-all ${customer?.id ? 'border border-amber-200 bg-amber-50 text-amber-900 focus:border-amber-400 focus:ring-2 focus:ring-amber-100' : 'border border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'}`} />
+                    </div>
+                  </div>
+                  <div className={`text-center text-[11px] font-black rounded-lg py-1.5 border ${Math.abs(
+                    (Number(multiCash)||0) + customPayMethods.filter(m => !m.name?.includes('بنك') && !m.name?.includes('تحويل') && m.icon !== '🏦').reduce((s, m) => s + Number(multiCustomAmounts[m.id]||0), 0) + (Number(multiCredit)||0) - totals.total
+                  ) < 0.01 ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-rose-50 text-rose-700 border-rose-200"}`}>
+                    المُدخل: {formatMoney((Number(multiCash)||0) + customPayMethods.filter(m => !m.name?.includes('بنك') && !m.name?.includes('تحويل') && m.icon !== '🏦').reduce((s, m) => s + Number(multiCustomAmounts[m.id]||0), 0) + (Number(multiCredit)||0))} / {formatMoney(totals.total)}
                   </div>
                 </div>
               )}
@@ -1428,20 +1596,49 @@ export default function POSPage() {
 
             {/* Customer detail when selected */}
             {customer && customer.id && (
-              <div className="rounded-md border border-slate-300 bg-white p-4 shadow-sm">
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="flex items-start gap-3">
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-800 text-white text-[14px] font-black">{customer.name[0]}</div>
                   <div className="flex-1 min-w-0">
                     <p className="text-[13px] font-black text-slate-800 truncate">{customer.name}</p>
-                    {customer.phone && <p className="text-[11px] text-slate-500 mt-0.5">{customer.phone}</p>}
-                    <div className="mt-2 flex items-center justify-between rounded-sm bg-slate-50 border border-slate-200 px-3 py-1.5">
-                      <span className="text-[10px] font-bold text-slate-500">الرصيد الحالي</span>
+                    {customer.phone && <p className="text-[11px] text-slate-500 mt-0.5 font-mono">{customer.phone}</p>}
+                    <div className="mt-2 flex items-center justify-between rounded-lg bg-slate-50 border border-slate-100 px-3 py-2">
+                      <span className="text-[11px] font-bold text-slate-500">الرصيد الحالي</span>
                       <span className={`text-[13px] font-black font-mono ${Number(customer.opening_balance) > 0 ? "text-rose-600" : "text-slate-800"}`}>{Number(customer.opening_balance || 0).toFixed(3)}</span>
                     </div>
                   </div>
                 </div>
               </div>
             )}
+
+            {/* Action Buttons */}
+            <div className="mt-auto rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex flex-col gap-2.5">
+                <button
+                  onClick={() => setPrintPreview(true)}
+                  disabled={!lines.length || isSaving || hasBlockingErrors}
+                  className={`flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-[13px] font-black text-white transition-all shadow-md ${!lines.length || isSaving || hasBlockingErrors ? "cursor-not-allowed bg-slate-300" : "bg-emerald-600 hover:bg-emerald-700 hover:shadow-lg active:scale-[0.98]"}`}
+                >
+                  <Printer className="h-5 w-5" /> طباعة ومراجعة المستند
+                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setPrintPreview(true)}
+                    disabled={!lines.length || isSaving || hasBlockingErrors}
+                    className={`flex flex-1 items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-[12px] font-black transition-all ${!lines.length || isSaving || hasBlockingErrors ? "cursor-not-allowed border-slate-100 bg-slate-50 text-slate-400" : "border-slate-200 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50"}`}
+                  >
+                    حفظ فقط
+                  </button>
+                  <button
+                    onClick={() => { if(window.confirm("هل تريد إلغاء الفاتورة الحالية؟")) { clear(); resetPaymentFields(); resetStaging(); setPaymentType("cash"); setInvoiceSeq((s) => s + 1); } }}
+                    disabled={!lines.length}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-[12px] font-black text-rose-700 hover:bg-rose-100 hover:border-rose-300 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                  >
+                    <Trash2 className="h-4 w-4" /> إلغاء
+                  </button>
+                </div>
+              </div>
+            </div>
           </aside>
 
 
@@ -1885,6 +2082,11 @@ export default function POSPage() {
           }}
           settings={storeSettings}
           operationLabel="فاتورة مبيعات نقدية"
+          onConfirmPrint={() => saveInvoice(true)}
+          confirmLabel="حفظ وطباعة"
+          onSaveOnly={() => saveInvoice(false)}
+          saveOnlyLabel="حفظ فقط"
+          isSaving={isSaving}
         />
 
         <GalleryModal
@@ -1897,12 +2099,216 @@ export default function POSPage() {
           setZoom={setGalleryZoom}
         />
 
+        {/* Today's Receipts Modal for list view */}
+        <Modal open={receiptsOpen} onClose={() => setReceiptsOpen(false)} title="فواتير اليوم" maxWidth="max-w-5xl">
+          <div className="flex flex-col gap-4">
+            {/* Invoice search by number */}
+            <div className="flex items-center gap-2 p-3 bg-slate-900 rounded-sm border border-slate-700">
+              <span className="text-[11px] font-black text-slate-400 shrink-0">بحث برقم فاتورة:</span>
+              <input
+                value={invoiceSearchNo}
+                onChange={e => setInvoiceSearchNo(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && searchByInvoiceNo()}
+                placeholder="INV-0001..."
+                className="flex-1 rounded-sm border border-slate-600 bg-slate-800 px-3 py-1.5 text-[12px] font-bold text-white outline-none focus:border-slate-400"
+              />
+              <button onClick={searchByInvoiceNo} disabled={searchLoading} className="flex items-center gap-1.5 rounded-sm bg-slate-700 px-3 py-1.5 text-[11px] font-black text-white hover:bg-slate-600">
+                {searchLoading ? "..." : "بحث"}
+              </button>
+              {searchedInvoice && <button onClick={() => setSearchedInvoice(null)} className="text-slate-400 hover:text-slate-200"><X className="h-4 w-4" /></button>}
+            </div>
+            {/* Searched invoice highlight */}
+            {searchedInvoice && (
+              <div className="rounded-sm border border-blue-400 bg-blue-50 p-3 text-[12px] font-bold text-blue-900 flex items-center gap-4 flex-wrap">
+                <span className="font-mono font-black">{searchedInvoice.invoice_no}</span>
+                <span>{searchedInvoice.customer_name || "زبون نقدي"}</span>
+                <span className="font-mono text-emerald-700">{formatMoney(searchedInvoice.total)}</span>
+                <span className="text-slate-500">{searchedInvoice.created_at ? formatArabicDateTime(new Date(searchedInvoice.created_at)) : ""}</span>
+                <div className="flex gap-1 mr-auto">
+                  <button onClick={() => openEditInvoice(searchedInvoice)} className="flex h-7 w-7 items-center justify-center rounded text-blue-600 hover:bg-blue-100" title="تعديل"><Pencil className="h-4 w-4" /></button>
+                  <button onClick={() => handleVoidInvoice(searchedInvoice)} className="flex h-7 w-7 items-center justify-center rounded text-rose-600 hover:bg-rose-100" title="إلغاء"><Trash2 className="h-4 w-4" /></button>
+                </div>
+              </div>
+            )}
+            {/* Filters */}
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-1.5">
+                <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest">من</label>
+                <input type="date" value={receiptDateFrom} onChange={(e) => setReceiptDateFrom(e.target.value)}
+                  className="rounded-sm border border-slate-200 px-2 py-1.5 text-[12px] font-bold outline-none focus:border-slate-800" />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest">إلى</label>
+                <input type="date" value={receiptDateTo} onChange={(e) => setReceiptDateTo(e.target.value)}
+                  className="rounded-sm border border-slate-200 px-2 py-1.5 text-[12px] font-bold outline-none focus:border-slate-800" />
+              </div>
+              <button onClick={loadReceipts}
+                className="flex items-center gap-1.5 rounded-sm border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-black text-slate-600 hover:border-slate-800 hover:text-slate-900 transition-colors">
+                <RefreshCw className={`h-3.5 w-3.5 ${receiptsLoading ? "animate-spin" : ""}`} /> تحديث
+              </button>
+            </div>
+
+            {/* Summary strip */}
+            <div className="flex items-center gap-4 rounded-sm bg-slate-950 px-4 py-3">
+              <div className="flex flex-col">
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">عدد الفواتير</span>
+                <span className="font-mono text-[20px] font-black text-white leading-none">{receiptSummary.count}</span>
+              </div>
+              <div className="h-8 w-px bg-slate-800" />
+              <div className="flex flex-col">
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">إجمالي الإيرادات</span>
+                <span className="font-mono text-[20px] font-black text-emerald-400 leading-none">{formatMoney(receiptSummary.total)}</span>
+              </div>
+            </div>
+
+            {/* Table */}
+            <div className="max-h-[420px] overflow-auto rounded-sm border border-slate-200">
+              <DataGrid
+                data={receiptsLoading ? [] : receipts}
+                rowKey="id"
+                emptyMessage={receiptsLoading ? "جاري التحميل..." : "لا توجد فواتير في هذه الفترة"}
+                className="border-0"
+                columns={[
+                  { id: "invoice_no", header: "رقم الفاتورة", width: 140, cellClass: "px-3 font-mono text-[12px] font-black text-slate-700", render: (inv) => inv.invoice_no },
+                  { id: "customer_name", header: "العميل", width: 160, cellClass: "px-3 text-[12px] font-bold text-slate-800", render: (inv) => inv.customer_name || "زبون نقدي" },
+                  { id: "total", header: "الإجمالي", width: 120, cellClass: "px-3 font-mono text-[13px] font-black text-emerald-700", render: (inv) => formatMoney(inv.total) },
+                  { id: "payment_type", header: "طريقة الدفع", width: 120, cellClass: "px-3 text-[12px] font-bold text-slate-600", render: (inv) => PAYMENT_TYPES.find((p) => p.type === inv.payment_type)?.label || inv.payment_type },
+                  { id: "created_at", header: "الوقت", width: 150, cellClass: "px-3 text-[11px] font-bold text-slate-500 font-mono whitespace-nowrap", render: (inv) => formatArabicDateTime(new Date(inv.created_at)) },
+                  { id: "actions", header: "", width: 90, cellClass: "px-3", render: (inv) => (
+                    <div className="flex gap-1">
+                      <button onClick={() => openEditInvoice(inv)} className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-blue-50 hover:text-blue-600" title="تعديل"><Pencil className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => handleVoidInvoice(inv)} className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="إلغاء"><Trash2 className="h-3.5 w-3.5" /></button>
+                    </div>
+                  )}
+                ]}
+              />
+            </div>
+          </div>
+        </Modal>
+
+        {/* Quick customer creation modal for list view */}
+        <Modal open={customerCreateOpen} onClose={() => setCustomerCreateOpen(false)} title="إنشاء عميل جديد">
+          <div className="space-y-4">
+            <div>
+              <label className="mb-1 block text-[11px] font-bold text-slate-600">اسم العميل *</label>
+              <input value={customerDraft.name} onChange={(e) => setCustomerDraft((s) => ({ ...s, name: e.target.value }))}
+                placeholder="الاسم بالكامل..."
+                className="w-full rounded-sm border border-slate-300 px-3 py-2 text-[13px] outline-none focus:border-slate-800" />
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] font-bold text-slate-600">رقم الهاتف الأساسي</label>
+              <input value={customerDraft.phone} onChange={(e) => setCustomerDraft((s) => ({ ...s, phone: e.target.value }))}
+                placeholder="01..."
+                className="w-full rounded-sm border border-slate-300 px-3 py-2 text-[13px] outline-none focus:border-slate-800" />
+            </div>
+            {/* Additional Phones */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[11px] font-bold text-slate-600">أرقام هواتف إضافية</label>
+                <button type="button" onClick={() => setCustomerDraft(s => ({ ...s, additionalPhones: [...s.additionalPhones, ""] }))}
+                  className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 hover:text-emerald-700">
+                  <Plus className="h-3 w-3" /> إضافة رقم
+                </button>
+              </div>
+              {customerDraft.additionalPhones.map((p, i) => (
+                <div key={i} className="flex items-center gap-2 mb-1.5">
+                  <input value={p} onChange={(e) => setCustomerDraft(s => ({ ...s, additionalPhones: s.additionalPhones.map((ph, idx) => idx === i ? e.target.value : ph) }))}
+                    placeholder="رقم هاتف إضافي..."
+                    className="flex-1 rounded-sm border border-slate-300 px-3 py-1.5 text-[12px] outline-none focus:border-slate-800" />
+                  {customerDraft.additionalPhones.length > 1 && (
+                    <button type="button" onClick={() => setCustomerDraft(s => ({ ...s, additionalPhones: s.additionalPhones.filter((_, idx) => idx !== i) }))}
+                      className="text-rose-500 hover:text-rose-700"><X className="h-4 w-4" /></button>
+                  )}
+                </div>
+              ))}
+            </div>
+            {/* Addresses */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[11px] font-bold text-slate-600">العناوين</label>
+                <button type="button" onClick={() => setCustomerDraft(s => ({ ...s, addresses: [...s.addresses, ""] }))}
+                  className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 hover:text-emerald-700">
+                  <Plus className="h-3 w-3" /> إضافة عنوان
+                </button>
+              </div>
+              {customerDraft.addresses.map((a, i) => (
+                <div key={i} className="flex items-center gap-2 mb-1.5">
+                  <input value={a} onChange={(e) => setCustomerDraft(s => ({ ...s, addresses: s.addresses.map((ad, idx) => idx === i ? e.target.value : ad) }))}
+                    placeholder="العنوان..."
+                    className="flex-1 rounded-sm border border-slate-300 px-3 py-1.5 text-[12px] outline-none focus:border-slate-800" />
+                  {customerDraft.addresses.length > 1 && (
+                    <button type="button" onClick={() => setCustomerDraft(s => ({ ...s, addresses: s.addresses.filter((_, idx) => idx !== i) }))}
+                      className="text-rose-500 hover:text-rose-700"><X className="h-4 w-4" /></button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] font-bold text-slate-600">ملاحظات</label>
+              <textarea value={customerDraft.notes} onChange={(e) => setCustomerDraft((s) => ({ ...s, notes: e.target.value }))}
+                placeholder="أي ملاحظات..."
+                className="w-full rounded-sm border border-slate-300 px-3 py-2 text-[13px] outline-none focus:border-slate-800" rows={2} />
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+              <button type="button" onClick={() => setCustomerCreateOpen(false)}
+                className="rounded-sm border border-slate-300 px-5 py-2 text-[13px] font-bold text-slate-700 hover:bg-slate-50">إلغاء</button>
+              <button type="button" onClick={createQuickCustomer}
+                className="rounded-sm bg-slate-900 px-6 py-2 text-[13px] font-bold text-white hover:bg-slate-800">تأكيد وإنشاء</button>
+            </div>
+          </div>
+        </Modal>
+
+        {/* Supervisor override modal for list view */}
+        <Modal open={supervisorOverrideOpen} onClose={() => { setSupervisorOverrideOpen(false); setPendingSave(null); }} title="تجاوز حد الخصم">
+          <div className="space-y-4 text-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-amber-100 mx-auto">
+              <ShieldCheck className="h-7 w-7 text-amber-600" />
+            </div>
+            <p className="text-[13px] font-bold text-slate-700">الخصم المطبق يتجاوز الحد المسموح (15% من الإجمالي).</p>
+            <p className="text-[12px] text-slate-500">هل تريد تجاوز هذا القيد بصلاحية المشرف؟</p>
+            <div className="flex justify-center gap-3 pt-2">
+              <button type="button" onClick={() => { setSupervisorOverrideOpen(false); setPendingSave(null); }}
+                className="rounded-sm border border-slate-200 px-5 py-2.5 text-[13px] font-bold text-slate-600 hover:bg-slate-50">إلغاء — تعديل الخصم</button>
+              <button type="button" onClick={confirmSupervisorOverride}
+                className="rounded-sm bg-amber-600 px-5 py-2.5 text-[13px] font-bold text-white hover:bg-amber-700">تجاوز بصلاحية المشرف</button>
+            </div>
+          </div>
+        </Modal>
+
         {/* Toast */}
         {saveMessage && (
           <div className="absolute left-1/2 top-4 z-[150] -translate-x-1/2 rounded-sm border border-rose-200 bg-rose-50 px-5 py-2.5 font-bold text-[13px] text-rose-700 shadow-xl">
             {saveMessage}
           </div>
         )}
+
+        {/* Set Default View Modal */}
+        <Modal open={showSetDefaultModal} onClose={() => setShowSetDefaultModal(false)} title="حفظ تفضيل العرض">
+          <div className="flex flex-col gap-4 mt-2">
+            <p className="text-[13px] font-bold text-slate-700">هل تريد حفظ <strong>{pendingViewMode === "list" ? "عرض القائمة" : "عرض الشبكة"}</strong> كعرض افتراضي لنقطة البيع؟</p>
+            <div className="flex gap-2">
+              <button onClick={() => setShowSetDefaultModal(false)} className="flex-1 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-[13px] font-black text-slate-600 hover:bg-slate-100 transition-colors">لا، لاحقاً</button>
+              <button
+                onClick={() => {
+                  api.put("/api/settings", { ...storeSettings, default_pos_view: pendingViewMode })
+                    .then(() => {
+                      setStoreSettings(s => ({ ...s, default_pos_view: pendingViewMode }));
+                      setSaveMessage("تم حفظ تفضيل العرض");
+                      setTimeout(() => setSaveMessage(""), 3000);
+                    })
+                    .catch((e) => {
+                      setSaveMessage(e.response?.data?.message || "فشل الحفظ");
+                      setTimeout(() => setSaveMessage(""), 4000);
+                    });
+                  setShowSetDefaultModal(false);
+                }}
+                className="flex-[2] flex items-center justify-center gap-2 rounded-lg bg-slate-800 px-4 py-2.5 text-[13px] font-black text-white hover:bg-slate-700 transition-colors"
+              >
+                نعم، احفظه كافتراضي
+              </button>
+            </div>
+          </div>
+        </Modal>
       </div>
     );
   }
@@ -1961,14 +2367,14 @@ export default function POSPage() {
               </div>
               <div className="flex shrink-0 bg-slate-100 rounded-md p-1 border border-slate-200">
                 <button 
-                  onClick={() => setViewMode("grid")}
-                  className={`p-1.5 rounded-sm transition-all ${viewMode === "grid" ? "bg-white shadow-sm text-emerald-600" : "text-slate-500 hover:text-slate-700"}`}
+                  onClick={() => { setViewMode("detailed"); setPendingViewMode("detailed"); setShowSetDefaultModal(true); }}
+                  className={`p-1.5 rounded-sm transition-all ${viewMode === "detailed" ? "bg-white shadow-sm text-emerald-600" : "text-slate-500 hover:text-slate-700"}`}
                   title="عرض الشبكة"
                 >
                   <LayoutGrid className="w-4 h-4" />
                 </button>
                 <button 
-                  onClick={() => setViewMode("list")}
+                  onClick={() => { setViewMode("list"); setPendingViewMode("list"); setShowSetDefaultModal(true); }}
                   className={`p-1.5 rounded-sm transition-all ${viewMode === "list" ? "bg-white shadow-sm text-emerald-600" : "text-slate-500 hover:text-slate-700"}`}
                   title="عرض القائمة"
                 >
@@ -1996,7 +2402,7 @@ export default function POSPage() {
 
 
           {/* Main Body Toggle */}
-          {viewMode === "grid" ? (
+          {viewMode === "detailed" ? (
              <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
 
             {detailedItemResults.length === 0 ? (
@@ -2043,16 +2449,16 @@ export default function POSPage() {
                   colWidths={detailedColWidths}
                   onResizeColumn={(k, w) => setDetailedColWidths(p => ({...p, [k]: w}))}
                   columns={[
-                    { key: "image", label: "صورة", width: detailedColWidths.image, render: (r) => (
+                    { id: "image", header: "صورة", width: detailedColWidths.image, render: (r) => (
                       <div className="flex h-8 w-8 items-center justify-center rounded-md border bg-slate-50 overflow-hidden">
                          {getItemImage(r) ? <img src={getItemImage(r)} className="h-full w-full object-cover" /> : <ImageIcon className="h-4 w-4 text-slate-300"/>}
                       </div>
                     )},
-                    { key: "code", label: "الكود", width: detailedColWidths.code, render: r => <span className="font-mono text-slate-500">{r.code}</span> },
-                    { key: "name", label: "اسم الصنف", width: detailedColWidths.name, render: r => <span className="font-bold">{r.name}</span> },
-                    { key: "price", label: "السعر", width: detailedColWidths.price, render: r => <span className="font-mono font-bold text-emerald-600">{formatMoney(r.sale_price || r.price)}</span> },
-                    { key: "stock", label: "الرصيد", width: detailedColWidths.stock, render: r => <span className="font-mono">{r.stock_quantity || r.stock || 0}</span> },
-                    { key: "actions", label: "", width: 60, render: r => (
+                    { id: "code", header: "الكود", width: detailedColWidths.code, render: r => <span className="font-mono text-slate-500">{r.code}</span> },
+                    { id: "name", header: "اسم الصنف", width: detailedColWidths.name, render: r => <span className="font-bold">{r.name}</span> },
+                    { id: "price", header: "السعر", width: detailedColWidths.price, render: r => <span className="font-mono font-bold text-emerald-600">{formatMoney(r.sale_price || r.price)}</span> },
+                    { id: "stock", header: "الرصيد", width: detailedColWidths.stock, render: r => <span className="font-mono">{r.stock_quantity || r.stock || 0}</span> },
+                    { id: "actions", header: "", width: 60, render: r => (
                         <button onClick={() => handleGridItemClick(r)} className="flex h-7 w-7 items-center justify-center rounded-md bg-emerald-50 text-emerald-600 hover:bg-emerald-100"><Plus className="h-4 w-4"/></button>
                     )}
                   ]}
@@ -2063,7 +2469,7 @@ export default function POSPage() {
 
 
         {/* ── Right Column: Fixed Invoice Panel (~35%) ── */}
-        <div className="flex flex-col flex-1 max-w-[420px] min-w-[340px] bg-white shadow-[-10px_0_30px_-15px_rgba(0,0,0,0.1)] z-20">
+        <div className="flex flex-col flex-1 max-w-[560px] min-w-[480px] bg-white shadow-[-10px_0_30px_-15px_rgba(0,0,0,0.1)] z-20 overflow-y-auto custom-scrollbar">
           
           {/* Top Panel: Customer & Actions */}
           <div className="flex flex-col shrink-0 border-b border-slate-100 bg-slate-50 p-3 gap-2.5">
@@ -2124,91 +2530,144 @@ export default function POSPage() {
                 رصيد العميل الحالي: {formatMoney(selectedCustomer.opening_balance)}
               </div>
             )}
+            {/* Default customer quick-select */}
+            {!customer?.id && customers.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {customers.slice(0, 3).map(c => (
+                  <button
+                    key={c.id}
+                    onClick={() => { setCustomer(c); setCustomerQuery(c.name); }}
+                    className="px-2 py-0.5 rounded-sm bg-slate-100 text-[10px] font-bold text-slate-600 hover:bg-emerald-100 hover:text-emerald-700 transition-colors"
+                  >
+                    {c.name}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Cart List */}
-          <div className="flex-1 overflow-y-auto p-2 bg-slate-50 custom-scrollbar shadow-inner relative">
+          <div className="shrink-0 p-3 bg-slate-50 shadow-inner relative">
             {lines.length === 0 ? (
               <div className="flex h-full flex-col items-center justify-center opacity-40">
-                <ShoppingCart className="h-16 w-16 mb-4 text-slate-400" />
-                <span className="text-[14px] font-black tracking-widest text-slate-500">الفاتورة فارغة</span>
-                <span className="mt-1 text-[11px] font-bold text-slate-400">اضغط على الأصناف لإضافتها</span>
+                <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-slate-100 mb-5">
+                  <ShoppingCart className="h-10 w-10 text-slate-300" />
+                </div>
+                <span className="text-[15px] font-black tracking-widest text-slate-500">الفاتورة فارغة</span>
+                <span className="mt-1.5 text-[12px] font-bold text-slate-400">اضغط على الأصناف لإضافتها</span>
               </div>
             ) : (
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2.5">
                 {lines.map((line, idx) => {
                   const isExceedingStock = Number(line.quantity || 0) > Number(line.stock_quantity || 0);
                   const lineTotal = Math.max(0, Number(line.quantity || 0) * Number(line.sale_price || line.unit_price || 0) - Number(line.line_discount || 0));
+                  const unitPrice = Number(line.sale_price || line.unit_price || 0);
+                  const qty = Number(line.quantity || 0);
+                  const item = items.find((it) => it.id === line.item_id);
+                  const cost = Number(item?.purchase_price || 0);
+                  const isBelowCost = cost > 0 && unitPrice > 0 && unitPrice < cost;
+                  const isDiscountOverflow = Number(line.line_discount || 0) > unitPrice * qty && unitPrice > 0;
+                  const hasWarning = isExceedingStock || isBelowCost || isDiscountOverflow;
                   return (
-                    <div key={`${line.item_id}-${idx}`} className={`flex flex-col gap-1.5 p-2.5 rounded-lg border shadow-sm transition-all ${isExceedingStock ? "border-rose-300 bg-rose-50" : "border-slate-200 bg-white"}`}>
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex flex-col min-w-0">
-                          <span className="text-[13px] font-black text-slate-800 truncate block leading-tight" title={line.item_name || line.name}>{line.item_name || line.name}</span>
-                          <span className="text-[10px] font-mono text-slate-400 truncate">{line.code || "—"}</span>
+                    <div key={`${line.item_id}-${idx}`} className={`group relative flex flex-col gap-2.5 p-3 rounded-xl border bg-white shadow-sm transition-all hover:shadow-md hover:-translate-y-px ${
+                      isExceedingStock ? "border-rose-300 ring-1 ring-rose-100" : hasWarning ? "border-amber-200 ring-1 ring-amber-50" : "border-slate-200 hover:border-emerald-300"
+                    }`}>
+                      {/* Left accent bar */}
+                      <div className={`absolute right-0 top-3 bottom-3 w-1 rounded-l-full ${
+                        isExceedingStock ? "bg-rose-400" : isBelowCost ? "bg-amber-400" : "bg-emerald-400"
+                      }`} />
+
+                      {/* Row 1: name + delete */}
+                      <div className="flex items-center justify-between gap-2 pr-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[10px] font-black text-slate-500">{idx + 1}</span>
+                          <div className="flex flex-col min-w-0">
+                            <span className="text-[13px] font-black text-slate-800 truncate block leading-tight whitespace-nowrap" title={line.item_name || line.name}>{line.item_name || line.name}</span>
+                            <span className="text-[10px] font-mono text-slate-400 truncate whitespace-nowrap">{line.code || "—"}</span>
+                          </div>
                         </div>
-                        <button onClick={() => removeLine(line.item_id)} className="shrink-0 p-1 rounded-sm text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition-colors">
-                          <Trash2 className="w-4 h-4" />
+                        <button onClick={() => removeLine(line.item_id)} className="shrink-0 flex h-7 w-7 items-center justify-center rounded-full text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition-all">
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
-                      <div className="flex items-center gap-1 mt-1.5">
-                        <span className="text-[10px] font-bold text-slate-400 shrink-0">خصم:</span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="any"
-                          value={
-                            discountModes[line.item_id] === "pct"
-                              ? parseFloat(((Number(line.line_discount || 0) / (Number(line.unit_price || 1) * Number(line.quantity || 1))) * 100).toFixed(2))
-                              : Number(line.line_discount || 0)
-                          }
-                          onChange={(e) => {
-                            const v = Math.max(0, Number(e.target.value || 0));
-                            const lineMax = Number(line.unit_price || 0) * Number(line.quantity || 0);
-                            if (discountModes[line.item_id] === "pct") {
-                              updateLine(line.item_id, { line_discount: Math.min(parseFloat(((v / 100) * lineMax).toFixed(4)), lineMax) });
-                            } else {
-                              updateLine(line.item_id, { line_discount: Math.min(v, lineMax) });
-                            }
-                          }}
-                          className="w-16 rounded-sm border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] font-black text-center outline-none focus:border-amber-400 focus:bg-amber-50/50"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setDiscountModes((m) => ({
-                            ...m,
-                            [line.item_id]: m[line.item_id] === "pct" ? "flat" : "pct"
-                          }))}
-                          className={`px-1.5 py-0.5 rounded-sm text-[10px] font-black border shrink-0 transition-colors
-                            ${discountModes[line.item_id] === "pct"
-                              ? "bg-amber-100 border-amber-300 text-amber-700"
-                              : "bg-slate-100 border-slate-300 text-slate-500 hover:bg-slate-200"}`}
-                        >
-                          {discountModes[line.item_id] === "pct" ? "%" : "ج"}
-                        </button>
-                      </div>
-                      <div className="flex items-center justify-between mt-1">
-                        <div className="flex items-center border border-slate-200 rounded-md overflow-hidden bg-slate-50">
-                          <button onClick={() => updateLine(line.item_id, { quantity: Math.max(1, Number(line.quantity) - 1) })} className="w-7 h-7 flex items-center justify-center text-slate-600 hover:bg-slate-200 transition-colors"><Minus className="w-3 h-3" /></button>
-                          <input type="number" min="1" value={line.quantity} onChange={(e) => updateLine(line.item_id, { quantity: Number(e.target.value || 1) })} className="w-10 h-7 text-center text-[12px] font-black bg-transparent outline-none ring-0 border-0" />
-                          <button onClick={() => updateLine(line.item_id, { quantity: Number(line.quantity) + 1 })} className="w-7 h-7 flex items-center justify-center text-slate-600 hover:bg-slate-200 transition-colors"><Plus className="w-3 h-3" /></button>
+
+                      {/* Row 2: stepper + discount + price — all on one line */}
+                      <div className="flex items-center justify-between gap-2 pr-2">
+                        {/* Left group: stepper + discount */}
+                        <div className="flex items-center gap-2 min-w-0">
+                          {/* Stepper */}
+                          <div className="flex items-center shrink-0 rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
+                            <button onClick={() => updateLine(line.item_id, { quantity: Math.max(1, Number(line.quantity) - 1) })} className="w-8 h-8 flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors active:bg-slate-200"><Minus className="w-3.5 h-3.5" /></button>
+                            <div className="w-px h-5 bg-slate-100" />
+                            <input type="number" min="1" value={line.quantity} onChange={(e) => updateLine(line.item_id, { quantity: Number(e.target.value || 1) })} className="w-11 h-8 text-center text-[12px] font-black bg-transparent outline-none ring-0 border-0 text-slate-800" />
+                            <div className="w-px h-5 bg-slate-100" />
+                            <button onClick={() => updateLine(line.item_id, { quantity: Number(line.quantity) + 1 })} className="w-8 h-8 flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition-colors active:bg-slate-200"><Plus className="w-3.5 h-3.5" /></button>
+                          </div>
+
+                          {/* Discount */}
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="text-[10px] font-bold text-slate-400 whitespace-nowrap">خصم</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="any"
+                              value={
+                                discountModes[line.item_id] === "pct"
+                                  ? parseFloat(((Number(line.line_discount || 0) / (Number(line.unit_price || 1) * Number(line.quantity || 1))) * 100).toFixed(2))
+                                  : Number(line.line_discount || 0)
+                              }
+                              onChange={(e) => {
+                                const v = Math.max(0, Number(e.target.value || 0));
+                                const lineMax = Number(line.unit_price || 0) * Number(line.quantity || 0);
+                                if (discountModes[line.item_id] === "pct") {
+                                  updateLine(line.item_id, { line_discount: Math.min(parseFloat(((v / 100) * lineMax).toFixed(4)), lineMax) });
+                                } else {
+                                  updateLine(line.item_id, { line_discount: Math.min(v, lineMax) });
+                                }
+                              }}
+                              className="w-14 rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] font-black text-center outline-none focus:border-amber-400 focus:bg-amber-50/50 transition-colors"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setDiscountModes((m) => ({
+                                ...m,
+                                [line.item_id]: m[line.item_id] === "pct" ? "flat" : "pct"
+                              }))}
+                              className={`px-1.5 py-0.5 rounded-lg text-[10px] font-black border transition-all
+                                ${discountModes[line.item_id] === "pct"
+                                  ? "bg-amber-100 border-amber-300 text-amber-700 shadow-sm"
+                                  : "bg-slate-100 border-slate-300 text-slate-500 hover:bg-slate-200"}`}
+                            >
+                              {discountModes[line.item_id] === "pct" ? "%" : "ج"}
+                            </button>
+                          </div>
                         </div>
-                        <div className="flex flex-col items-end">
-                          <span className="font-mono text-[14px] font-black text-emerald-700">{formatMoney(lineTotal)}</span>
-                          <span className="text-[10px] font-bold text-slate-400">{formatMoney(line.sale_price || line.unit_price)} للقطعة</span>
+
+                        {/* Price */}
+                        <div className="flex flex-col items-end gap-0.5 shrink-0">
+                          <div className="rounded-lg bg-emerald-50 px-2.5 py-1 border border-emerald-100 whitespace-nowrap">
+                            <span className="font-mono text-[14px] font-black text-emerald-700">{formatMoney(lineTotal)}</span>
+                          </div>
+                          <span className="text-[10px] font-bold text-slate-400 whitespace-nowrap">{formatMoney(line.sale_price || line.unit_price)} للقطعة</span>
                         </div>
                       </div>
-                      {isExceedingStock && <div className="text-[10px] font-bold text-rose-600 bg-rose-100/50 px-1.5 py-0.5 rounded-sm self-start mt-0.5">تجاوز المخزون (متاح: {line.stock_quantity})</div>}
-                      {(() => {
-                        const item = items.find((it) => it.id === line.item_id);
-                        const price = Number(line.unit_price || line.sale_price || 0);
-                        const cost = Number(item?.purchase_price || 0);
-                        if (cost > 0 && price > 0 && price < cost) {
-                          return <div className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-100 px-1.5 py-0.5 rounded-sm self-start mt-0.5">سعر أقل من التكلفة ({cost.toFixed(2)})</div>;
-                        }
-                        return null;
-                      })()}
-                      {Number(line.line_discount || 0) > Number(line.unit_price || 0) * Number(line.quantity || 0) && Number(line.unit_price || 0) > 0 && (
-                        <div className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded-sm self-start mt-0.5">
+
+                      {/* Warnings */}
+                      {isExceedingStock && (
+                        <div className="flex items-center gap-1.5 text-[10px] font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-1 rounded-lg self-start">
+                          <AlertTriangle className="w-3 h-3 shrink-0" />
+                          تجاوز المخزون (متاح: {line.stock_quantity})
+                        </div>
+                      )}
+                      {isBelowCost && (
+                        <div className="flex items-center gap-1.5 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded-lg self-start">
+                          <TrendingUp className="w-3 h-3 shrink-0 rotate-180" />
+                          سعر أقل من التكلفة ({cost.toFixed(2)})
+                        </div>
+                      )}
+                      {isDiscountOverflow && (
+                        <div className="flex items-center gap-1.5 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded-lg self-start">
+                          <AlertTriangle className="w-3 h-3 shrink-0" />
                           الخصم يتجاوز إجمالي السطر
                         </div>
                       )}
@@ -2296,22 +2755,35 @@ export default function POSPage() {
             </div>
             {/* Payment Methods */}
             <div className="flex flex-col p-3 gap-3 bg-white">
-              <div className="flex gap-1.5">
+              <div className="grid grid-cols-5 gap-1.5">
                 {PAYMENT_TYPES.map(({ type, label, Icon }) => {
                   const isWalkIn = !customer || customer.id === null;
-                  const isDisabled = isWalkIn && type !== "cash";
+                  const isDisabled = isWalkIn && (type === "credit" || type === "installments" || type === "bank_transfer");
+                  const isActive = paymentType === type;
+                  const colorMap = {
+                    cash: { bg: "bg-emerald-50", text: "text-emerald-600", border: "border-emerald-200", activeBg: "bg-emerald-600" },
+                    bank_transfer: { bg: "bg-blue-50", text: "text-blue-600", border: "border-blue-200", activeBg: "bg-blue-600" },
+                    credit: { bg: "bg-amber-50", text: "text-amber-600", border: "border-amber-200", activeBg: "bg-amber-600" },
+                    installments: { bg: "bg-violet-50", text: "text-violet-600", border: "border-violet-200", activeBg: "bg-violet-600" },
+                    multi: { bg: "bg-slate-50", text: "text-slate-600", border: "border-slate-200", activeBg: "bg-slate-700" },
+                  };
+                  const c = colorMap[type];
                   return (
-                    <button 
-                      key={type} 
-                      type="button" 
-                      onClick={() => !isDisabled && setPaymentType(type)} 
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => !isDisabled && setPaymentType(type)}
                       disabled={isDisabled}
-                      className={`flex flex-1 items-center justify-center gap-1.5 rounded-md border px-1 py-2 text-[11px] font-black transition-all 
-                        ${paymentType === type ? "border-slate-800 bg-slate-800 text-white shadow-md" : 
-                          isDisabled ? "opacity-40 cursor-not-allowed bg-slate-100 border-slate-200 text-slate-400" : "border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-400"}`}
+                      className={`flex flex-col items-center justify-center gap-1 rounded-lg border py-2 text-[10px] font-black transition-all whitespace-nowrap
+                        ${isActive
+                          ? `${c.activeBg} text-white border-transparent shadow-sm`
+                          : isDisabled
+                            ? "opacity-40 cursor-not-allowed bg-slate-50 border-slate-100 text-slate-400"
+                            : `${c.bg} ${c.text} ${c.border} hover:shadow-sm hover:-translate-y-px bg-white`}`}
                       title={isDisabled ? "متاح للعملاء المسجلين فقط" : label}
                     >
-                      <Icon className="h-3.5 w-3.5 shrink-0" /> {label}
+                      <Icon className="h-3.5 w-3.5 shrink-0" />
+                      <span>{label}</span>
                     </button>
                   );
                 })}
@@ -2320,58 +2792,89 @@ export default function POSPage() {
               {/* Dynamic Payment Input */}
               {paymentType === "cash" && (
                 <div className="flex gap-2 items-center">
-                  <input type="number" min="0" value={amountReceived} onChange={(e) => setAmountReceived(e.target.value)} placeholder="المبلغ المستلم..." className="flex-1 rounded-sm border border-slate-300 bg-slate-50 px-3 py-2 text-[14px] font-black text-slate-800 outline-none focus:border-emerald-500 focus:bg-white shadow-inner" />
+                  <input type="number" min="0" value={amountReceived} onChange={(e) => setAmountReceived(e.target.value)} placeholder="المبلغ المستلم..." className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-[14px] font-black text-slate-800 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 transition-all" />
                   {Number(amountReceived) > 0 && (
-                    <div className={`rounded-sm px-3 py-2 text-[12px] font-black shrink-0 ${Number(amountReceived) - totals.total >= 0 ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"}`}>
+                    <div className={`rounded-lg px-3 py-2.5 text-[12px] font-black shrink-0 ${Number(amountReceived) - totals.total >= 0 ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-rose-50 text-rose-700 border border-rose-200"}`}>
                       الباقي: {formatMoney(Math.abs(Number(amountReceived) - totals.total))}
                     </div>
                   )}
                 </div>
               )}
               {paymentType === "bank_transfer" && (
-                <select value={selectedBankId} onChange={(e) => setSelectedBankId(e.target.value)} className="w-full rounded-sm border border-slate-300 bg-slate-50 px-3 py-2 text-[13px] font-black text-slate-700 outline-none focus:border-slate-800 shadow-inner">
-                  <option value="">اختر البنك / البطاقة</option>
-                  {banks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                </select>
+                <div className="rounded-xl bg-blue-50/50 border border-blue-100 p-3">
+                  <label className="text-[11px] font-bold text-blue-700 flex items-center gap-1.5 mb-1.5">
+                    <CreditCard className="w-3 h-3" /> اختر البنك / البطاقة
+                  </label>
+                  <select value={selectedBankId} onChange={(e) => setSelectedBankId(e.target.value)} className="w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-[13px] font-bold text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all">
+                    <option value="">اختر البنك / البطاقة</option>
+                    {banks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                </div>
               )}
               {paymentType === "credit" && (
-                <div className="flex flex-col gap-1.5">
-                  <input type="number" min="0" value={amountPaid} onChange={(e) => setAmountPaid(e.target.value)} placeholder="المدفوع الآن (اختياري)" className="w-full rounded-sm border border-amber-300 bg-amber-50 px-3 py-2 text-[13px] font-black text-amber-900 outline-none focus:border-amber-500 shadow-inner" />
-                  <div className="text-[11px] font-black text-amber-700 text-center">المتبقي آجل على العميل: {formatMoney(Math.max(0, totals.total - Number(amountPaid)))}</div>
+                <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-[11px] text-amber-800 font-bold flex items-center gap-2">
+                  <Wallet className="w-4 h-4 shrink-0 text-amber-600" />
+                  <span>سيتم إضافة {formatMoney(totals.total)} لرصيد {customer?.name || "العميل"}</span>
+                </div>
+              )}
+              {paymentType === "installments" && (
+                <div className="flex flex-col gap-2.5 rounded-xl bg-violet-50/50 border border-violet-100 p-4">
+                  <div className="text-[11px] font-black text-violet-700 flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5" /> إعداد الأقساط
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold text-slate-600 w-20 shrink-0 whitespace-nowrap">دفعة مقدم:</span>
+                    <input type="number" min="0" value={amountPaid} onChange={(e) => setAmountPaid(e.target.value)} placeholder="0.00" className="flex-1 min-w-0 rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-[13px] font-black text-slate-800 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 transition-all" />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold text-slate-600 w-20 shrink-0 whitespace-nowrap">تاريخ القسط:</span>
+                    <input type="date" value={installmentDueDate} onChange={e => setInstallmentDueDate(e.target.value)} className="flex-1 min-w-0 rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-[12px] font-bold text-slate-700 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 transition-all" />
+                  </div>
+                  <div className="text-[11px] font-black text-violet-700 bg-violet-100/60 rounded-lg px-3 py-1.5 text-center border border-violet-200">المتبقي كأقساط: {formatMoney(Math.max(0, totals.total - Number(amountPaid || 0)))}</div>
                 </div>
               )}
               {paymentType === "multi" && (
-                <div className="flex flex-col gap-2 p-2 bg-slate-50 border border-slate-200 rounded-md shadow-inner">
-                   <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-black text-slate-500 w-12">نقدي:</span>
-                      <input type="number" min="0" value={multiCash} onChange={(e) => setMultiCash(e.target.value)} placeholder="0.00" className="flex-1 rounded-sm border border-slate-300 px-2 py-1.5 text-[13px] font-black outline-none focus:border-emerald-500" />
-                   </div>
-                   <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-black text-slate-500 w-12">بنكي:</span>
-                      <input type="number" min="0" value={multiBank} onChange={(e) => setMultiBank(e.target.value)} placeholder="0.00" className="w-24 rounded-sm border border-slate-300 px-2 py-1.5 text-[13px] font-black outline-none focus:border-emerald-500" />
-                      <select value={selectedBankId} onChange={(e) => setSelectedBankId(e.target.value)} className="flex-1 rounded-sm border border-slate-300 px-2 py-1.5 text-[12px] font-bold outline-none focus:border-slate-800">
-                         <option value="">اختر بنك</option>
-                         {banks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                      </select>
-                   </div>
-                   <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-black text-slate-500 w-12">آجل:</span>
-                      <input type="number" min="0" value={multiCredit} onChange={(e) => setMultiCredit(e.target.value)} placeholder="0.00" className="flex-1 rounded-sm border border-amber-300 px-2 py-1.5 text-[13px] font-black text-amber-900 outline-none focus:border-amber-500 bg-amber-50" />
-                   </div>
-                   <div className={`mt-1 text-center text-[11px] font-black rounded-sm py-1 ${Math.abs((Number(multiCash)||0) + (Number(multiBank)||0) + (Number(multiCredit)||0) - totals.total) < 0.01 ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>
-                      الإجمالي المُدخل: {formatMoney((Number(multiCash)||0) + (Number(multiBank)||0) + (Number(multiCredit)||0))} من {formatMoney(totals.total)}
-                   </div>
+                <div className="flex flex-col gap-2.5 rounded-xl bg-slate-50/60 border border-slate-200 p-4">
+                  <div className="text-[11px] font-black text-slate-600 mb-0.5 flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5" /> تفاصيل الدفع المتعدد
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-black text-slate-500 w-24 shrink-0 whitespace-nowrap truncate">نقدي:</span>
+                      <input type="number" min="0" value={multiCash} onChange={(e) => setMultiCash(e.target.value)} placeholder="0.00" className="flex-1 min-w-0 rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-[13px] font-black text-slate-800 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 transition-all" />
+                    </div>
+                    {customPayMethods.filter(m => !m.name?.includes('بنك') && !m.name?.includes('تحويل') && m.icon !== '🏦').map(m => (
+                      <div key={m.id} className="flex items-center gap-2">
+                        <span className="text-[11px] font-black text-slate-500 w-24 shrink-0 whitespace-nowrap truncate" title={`${m.icon} ${m.name}`}>{m.icon} {m.name}:</span>
+                        <input type="number" min="0" value={multiCustomAmounts[m.id] || ""} onChange={(e) => setMultiCustomAmounts(prev => ({...prev, [m.id]: e.target.value}))} placeholder="0.00" className="flex-1 min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[13px] font-black text-slate-800 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 transition-all" />
+                      </div>
+                    ))}
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-black text-slate-500 w-24 shrink-0 whitespace-nowrap truncate">آجل:</span>
+                      <input type="number" min="0" value={multiCredit} onChange={(e) => setMultiCredit(e.target.value)} placeholder={customer?.id ? "0.00" : "اختر عميل..."} disabled={!customer?.id} className={`flex-1 min-w-0 rounded-lg px-3 py-1.5 text-[13px] font-black outline-none transition-all ${customer?.id ? 'border border-amber-200 bg-amber-50 text-amber-900 focus:border-amber-400 focus:ring-2 focus:ring-amber-100' : 'border border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'}`} />
+                    </div>
+                  </div>
+                  <div className={`text-center text-[11px] font-black rounded-lg py-1.5 border ${Math.abs(
+                    (Number(multiCash)||0) + customPayMethods.filter(m => !m.name?.includes('بنك') && !m.name?.includes('تحويل') && m.icon !== '🏦').reduce((s, m) => s + Number(multiCustomAmounts[m.id]||0), 0) + (Number(multiCredit)||0) - totals.total
+                  ) < 0.01 ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-rose-50 text-rose-700 border-rose-200"}`}>
+                    الإجمالي المُدخل: {formatMoney((Number(multiCash)||0) + customPayMethods.filter(m => !m.name?.includes('بنك') && !m.name?.includes('تحويل') && m.icon !== '🏦').reduce((s, m) => s + Number(multiCustomAmounts[m.id]||0), 0) + (Number(multiCredit)||0))} من {formatMoney(totals.total)}
+                  </div>
                 </div>
               )}
 
               {/* Main Actions */}
-              <div className="flex gap-2 mt-1">
-                <button type="button" onClick={() => saveInvoice(false)} disabled={!lines.length || isSaving || hasBlockingErrors} className={`flex flex-1 items-center justify-center gap-2 rounded-md border px-3 py-3 text-[13px] font-black transition-all ${!lines.length || isSaving || hasBlockingErrors ? "cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400" : "border-slate-300 bg-white text-slate-800 hover:border-slate-800 hover:bg-slate-50 shadow-sm"}`}>
-                  {isSaving ? "جارٍ الحفظ..." : "حفظ فقط"}
+              <div className="flex flex-col gap-2 mt-1">
+                <button type="button" onClick={() => setPrintPreview(true)} disabled={!lines.length || isSaving || hasBlockingErrors} className={`flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-[14px] font-black text-white transition-all shadow-md ${!lines.length || isSaving || hasBlockingErrors ? "cursor-not-allowed bg-slate-300" : "bg-emerald-600 hover:bg-emerald-700 hover:shadow-lg active:scale-[0.98]"}`}>
+                  <Printer className="h-5 w-5" /> طباعة ومراجعة المستند
                 </button>
-                <button type="button" onClick={() => saveInvoice(true)} disabled={!lines.length || isSaving || hasBlockingErrors} className={`flex flex-[2] items-center justify-center gap-2 rounded-md px-3 py-3 text-[14px] font-black text-white transition-all shadow-md ${!lines.length || isSaving || hasBlockingErrors ? "cursor-not-allowed bg-slate-300" : "bg-emerald-600 hover:bg-emerald-700 hover:shadow-lg"}`}>
-                  <Printer className="h-5 w-5" /> {isSaving ? "جارٍ الحفظ..." : "دفع وطباعة"}
-                </button>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setPrintPreview(true)} disabled={!lines.length || isSaving || hasBlockingErrors} className={`flex flex-1 items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-[12px] font-black transition-all ${!lines.length || isSaving || hasBlockingErrors ? "cursor-not-allowed border-slate-100 bg-slate-50 text-slate-400" : "border-slate-200 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50"}`}>
+                    حفظ فقط
+                  </button>
+                  <button type="button" onClick={() => { if(window.confirm("هل تريد إلغاء الفاتورة الحالية؟")) { clear(); resetPaymentFields(); resetStaging(); setPaymentType("cash"); setInvoiceSeq((s) => s + 1); } }} disabled={!lines.length} className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-[12px] font-black text-rose-700 hover:bg-rose-100 hover:border-rose-300 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+                    <Trash2 className="h-4 w-4" /> إلغاء
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -2396,8 +2899,36 @@ export default function POSPage() {
       />
 
       {/* ── Today's Receipts Modal ── */}
-      <Modal open={receiptsOpen} onClose={() => setReceiptsOpen(false)} title="فواتير اليوم">
+      <Modal open={receiptsOpen} onClose={() => setReceiptsOpen(false)} title="فواتير اليوم" maxWidth="max-w-5xl">
         <div className="flex flex-col gap-4">
+          {/* Invoice search by number */}
+          <div className="flex items-center gap-2 p-3 bg-slate-900 rounded-sm border border-slate-700">
+            <span className="text-[11px] font-black text-slate-400 shrink-0">بحث برقم فاتورة:</span>
+            <input
+              value={invoiceSearchNo}
+              onChange={e => setInvoiceSearchNo(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && searchByInvoiceNo()}
+              placeholder="INV-0001..."
+              className="flex-1 rounded-sm border border-slate-600 bg-slate-800 px-3 py-1.5 text-[12px] font-bold text-white outline-none focus:border-slate-400"
+            />
+            <button onClick={searchByInvoiceNo} disabled={searchLoading} className="flex items-center gap-1.5 rounded-sm bg-slate-700 px-3 py-1.5 text-[11px] font-black text-white hover:bg-slate-600">
+              {searchLoading ? "..." : "بحث"}
+            </button>
+            {searchedInvoice && <button onClick={() => setSearchedInvoice(null)} className="text-slate-400 hover:text-slate-200"><X className="h-4 w-4" /></button>}
+          </div>
+          {/* Searched invoice highlight */}
+          {searchedInvoice && (
+            <div className="rounded-sm border border-blue-400 bg-blue-50 p-3 text-[12px] font-bold text-blue-900 flex items-center gap-4 flex-wrap">
+              <span className="font-mono font-black">{searchedInvoice.invoice_no}</span>
+              <span>{searchedInvoice.customer_name || "زبون نقدي"}</span>
+              <span className="font-mono text-emerald-700">{formatMoney(searchedInvoice.total)}</span>
+              <span className="text-slate-500">{searchedInvoice.created_at ? formatArabicDateTime(new Date(searchedInvoice.created_at)) : ""}</span>
+              <div className="flex gap-1 mr-auto">
+                <button onClick={() => openEditInvoice(searchedInvoice)} className="flex h-7 w-7 items-center justify-center rounded text-blue-600 hover:bg-blue-100" title="تعديل"><Pencil className="h-4 w-4" /></button>
+                <button onClick={() => handleVoidInvoice(searchedInvoice)} className="flex h-7 w-7 items-center justify-center rounded text-rose-600 hover:bg-rose-100" title="إلغاء"><Trash2 className="h-4 w-4" /></button>
+              </div>
+            </div>
+          )}
           {/* Filters */}
           <div className="flex items-center gap-3 flex-wrap">
             <div className="flex items-center gap-1.5">
@@ -2495,11 +3026,77 @@ export default function POSPage() {
                   headerClass: "text-right px-3 font-black uppercase tracking-widest text-slate-500",
                   cellClass: "px-3 text-[11px] font-bold text-slate-500 font-mono whitespace-nowrap",
                   render: (inv) => formatArabicDateTime(new Date(inv.created_at))
+                },
+                {
+                  id: "actions", header: "", width: 90,
+                  headerClass: "px-3",
+                  cellClass: "px-3",
+                  render: (inv) => (
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => openEditInvoice(inv)}
+                        className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-blue-50 hover:text-blue-600"
+                        title="تعديل"
+                      ><Pencil className="h-3.5 w-3.5" /></button>
+                      <button
+                        onClick={() => handleVoidInvoice(inv)}
+                        className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                        title="إلغاء"
+                      ><Trash2 className="h-3.5 w-3.5" /></button>
+                    </div>
+                  )
                 }
               ]}
             />
           </div>
         </div>
+        {/* Edit Invoice sub-modal */}
+        {editInvoice && (
+          <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+            <div className="w-[700px] max-h-[80vh] rounded-2xl bg-white shadow-2xl flex flex-col overflow-hidden">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
+                <h2 className="text-[15px] font-black text-slate-900">تعديل فاتورة {editInvoice.invoice_no}</h2>
+                <button onClick={() => setEditInvoice(null)}><X className="h-5 w-5 text-slate-400" /></button>
+              </div>
+              <div className="flex-1 overflow-auto p-4">
+                <table className="w-full text-[12px] border-collapse">
+                  <thead className="bg-slate-50 sticky top-0">
+                    <tr>
+                      {["الصنف", "الكمية", "السعر", "الخصم%", "الإجمالي"].map(h => (
+                        <th key={h} className="px-3 py-2 text-right font-black text-slate-500 border-b border-slate-200">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {editLines.map((line, i) => (
+                      <tr key={i} className="border-b border-slate-100">
+                        <td className="px-3 py-2 font-bold text-slate-800">{line.item_name || line.name || `#${line.item_id}`}</td>
+                        <td className="px-3 py-2">
+                          <input type="number" min="0.001" step="0.001" value={line._qty} onChange={e => setEditLines(ls => ls.map((l,j) => j===i ? {...l, _qty: e.target.value} : l))} className="w-20 rounded border border-slate-300 px-2 py-1 text-[12px] font-black outline-none focus:border-blue-500" />
+                        </td>
+                        <td className="px-3 py-2">
+                          <input type="number" min="0" step="0.01" value={line._price} onChange={e => setEditLines(ls => ls.map((l,j) => j===i ? {...l, _price: e.target.value} : l))} className="w-24 rounded border border-slate-300 px-2 py-1 text-[12px] font-black outline-none focus:border-blue-500" />
+                        </td>
+                        <td className="px-3 py-2">
+                          <input type="number" min="0" max="100" value={line._discount} onChange={e => setEditLines(ls => ls.map((l,j) => j===i ? {...l, _discount: e.target.value} : l))} className="w-16 rounded border border-slate-300 px-2 py-1 text-[12px] font-black outline-none focus:border-blue-500" />
+                        </td>
+                        <td className="px-3 py-2 font-black font-mono text-emerald-700">
+                          {formatMoney(Number(line._qty) * Number(line._price) * (1 - Number(line._discount||0)/100))}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex gap-3 px-6 py-4 border-t border-slate-200 shrink-0">
+                <button onClick={() => setEditInvoice(null)} className="flex-1 rounded-xl border border-slate-300 py-2.5 text-[13px] font-black text-slate-700 hover:bg-slate-50">إلغاء</button>
+                <button onClick={saveEditInvoice} disabled={editSaving} className="flex-1 rounded-xl bg-blue-600 py-2.5 text-[13px] font-black text-white hover:bg-blue-700 disabled:opacity-40">
+                  {editSaving ? "جاري الحفظ..." : "حفظ التعديلات"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* ── Detailed item search ── */}
@@ -2594,28 +3191,56 @@ export default function POSPage() {
               placeholder="الاسم بالكامل..."
               className="w-full rounded-sm border border-slate-300 px-3 py-2 text-[13px] outline-none focus:border-slate-800" />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="mb-1 block text-[11px] font-bold text-slate-600">رقم الهاتف الأساسي *</label>
-              <input value={customerDraft.phone} onChange={(e) => setCustomerDraft((s) => ({ ...s, phone: e.target.value }))}
-                placeholder="01..."
-                className="w-full rounded-sm border border-slate-300 px-3 py-2 text-[13px] outline-none focus:border-slate-800" />
-            </div>
-            <div>
-              <label className="mb-1 block text-[11px] font-bold text-slate-600">هاتف بديل (اختياري)</label>
-              <input value={customerDraft.phone2} onChange={(e) => setCustomerDraft((s) => ({ ...s, phone2: e.target.value }))}
-                placeholder="01..."
-                className="w-full rounded-sm border border-slate-300 px-3 py-2 text-[13px] outline-none focus:border-slate-800" />
-            </div>
-          </div>
           <div>
-            <label className="mb-1 block text-[11px] font-bold text-slate-600">العنوان (اختياري)</label>
-            <input value={customerDraft.address} onChange={(e) => setCustomerDraft((s) => ({ ...s, address: e.target.value }))}
-              placeholder="المنطقة، الشارع..."
+            <label className="mb-1 block text-[11px] font-bold text-slate-600">رقم الهاتف الأساسي</label>
+            <input value={customerDraft.phone} onChange={(e) => setCustomerDraft((s) => ({ ...s, phone: e.target.value }))}
+              placeholder="01..."
               className="w-full rounded-sm border border-slate-300 px-3 py-2 text-[13px] outline-none focus:border-slate-800" />
           </div>
+          {/* Additional Phones */}
           <div>
-            <label className="mb-1 block text-[11px] font-bold text-slate-600">ملاحظات (اختياري)</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[11px] font-bold text-slate-600">أرقام هواتف إضافية</label>
+              <button type="button" onClick={() => setCustomerDraft(s => ({ ...s, additionalPhones: [...s.additionalPhones, ""] }))}
+                className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 hover:text-emerald-700">
+                <Plus className="h-3 w-3" /> إضافة رقم
+              </button>
+            </div>
+            {customerDraft.additionalPhones.map((p, i) => (
+              <div key={i} className="flex items-center gap-2 mb-1.5">
+                <input value={p} onChange={(e) => setCustomerDraft(s => ({ ...s, additionalPhones: s.additionalPhones.map((ph, idx) => idx === i ? e.target.value : ph) }))}
+                  placeholder="رقم هاتف إضافي..."
+                  className="flex-1 rounded-sm border border-slate-300 px-3 py-1.5 text-[12px] outline-none focus:border-slate-800" />
+                {customerDraft.additionalPhones.length > 1 && (
+                  <button type="button" onClick={() => setCustomerDraft(s => ({ ...s, additionalPhones: s.additionalPhones.filter((_, idx) => idx !== i) }))}
+                    className="text-rose-500 hover:text-rose-700"><X className="h-4 w-4" /></button>
+                )}
+              </div>
+            ))}
+          </div>
+          {/* Addresses */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[11px] font-bold text-slate-600">العناوين</label>
+              <button type="button" onClick={() => setCustomerDraft(s => ({ ...s, addresses: [...s.addresses, ""] }))}
+                className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 hover:text-emerald-700">
+                <Plus className="h-3 w-3" /> إضافة عنوان
+              </button>
+            </div>
+            {customerDraft.addresses.map((a, i) => (
+              <div key={i} className="flex items-center gap-2 mb-1.5">
+                <input value={a} onChange={(e) => setCustomerDraft(s => ({ ...s, addresses: s.addresses.map((ad, idx) => idx === i ? e.target.value : ad) }))}
+                  placeholder="العنوان..."
+                  className="flex-1 rounded-sm border border-slate-300 px-3 py-1.5 text-[12px] outline-none focus:border-slate-800" />
+                {customerDraft.addresses.length > 1 && (
+                  <button type="button" onClick={() => setCustomerDraft(s => ({ ...s, addresses: s.addresses.filter((_, idx) => idx !== i) }))}
+                    className="text-rose-500 hover:text-rose-700"><X className="h-4 w-4" /></button>
+                )}
+              </div>
+            ))}
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-bold text-slate-600">ملاحظات</label>
             <textarea value={customerDraft.notes} onChange={(e) => setCustomerDraft((s) => ({ ...s, notes: e.target.value }))}
               placeholder="أي ملاحظات..."
               className="w-full rounded-sm border border-slate-300 px-3 py-2 text-[13px] outline-none focus:border-slate-800" rows={2} />
@@ -2722,7 +3347,40 @@ export default function POSPage() {
         }}
         settings={storeSettings}
         operationLabel="فاتورة مبيعات نقدية"
+        onConfirmPrint={lastSavedInvoice ? undefined : () => saveInvoice(true)}
+        confirmLabel="حفظ وطباعة"
+        onSaveOnly={lastSavedInvoice ? undefined : () => saveInvoice(false)}
+        saveOnlyLabel="حفظ فقط"
+        isSaving={isSaving}
       />
+
+      {/* Set Default View Modal */}
+      <Modal open={showSetDefaultModal} onClose={() => setShowSetDefaultModal(false)} title="حفظ تفضيل العرض">
+        <div className="flex flex-col gap-4 mt-2">
+          <p className="text-[13px] font-bold text-slate-700">هل تريد حفظ <strong>{pendingViewMode === "list" ? "عرض القائمة" : "عرض الشبكة"}</strong> كعرض افتراضي لنقطة البيع؟</p>
+          <div className="flex gap-2">
+            <button onClick={() => setShowSetDefaultModal(false)} className="flex-1 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-[13px] font-black text-slate-600 hover:bg-slate-100 transition-colors">لا، لاحقاً</button>
+            <button
+              onClick={() => {
+                api.put("/api/settings", { ...storeSettings, default_pos_view: pendingViewMode })
+                  .then(() => {
+                    setStoreSettings(s => ({ ...s, default_pos_view: pendingViewMode }));
+                    setSaveMessage("تم حفظ تفضيل العرض");
+                    setTimeout(() => setSaveMessage(""), 3000);
+                  })
+                  .catch((e) => {
+                    setSaveMessage(e.response?.data?.message || "فشل الحفظ");
+                    setTimeout(() => setSaveMessage(""), 4000);
+                  });
+                setShowSetDefaultModal(false);
+              }}
+              className="flex-[2] flex items-center justify-center gap-2 rounded-lg bg-slate-800 px-4 py-2.5 text-[13px] font-black text-white hover:bg-slate-700 transition-colors"
+            >
+              نعم، احفظه كافتراضي
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

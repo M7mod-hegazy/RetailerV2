@@ -331,4 +331,55 @@ function voidInvoice(invoiceId, reason, userId) {
   })();
 }
 
-module.exports = { createInvoice, getInvoiceWithLines, recalculateInvoiceStatus, voidInvoice };
+function editInvoice(invoiceId, payload) {
+  const db = getDb();
+  return db.transaction(() => {
+    const invoice = db.prepare("SELECT * FROM invoices WHERE id = ?").get(invoiceId);
+    if (!invoice) { const e = new Error("Invoice not found"); e.status = 404; throw e; }
+    if (invoice.status === 'cancelled') { const e = new Error("Cannot edit cancelled invoice"); e.status = 400; throw e; }
+
+    const oldLines = db.prepare("SELECT * FROM invoice_lines WHERE invoice_id = ?").all(invoiceId);
+    const oldTotal = Number(invoice.total);
+
+    // Reverse old stock
+    for (const line of oldLines) {
+      adjustStock({ item_id: line.item_id, warehouse_id: 1, quantityDelta: Number(line.quantity), movement_type: "void_sale", reference_type: "invoice", reference_id: invoiceId });
+    }
+
+    // Delete old lines
+    db.prepare("DELETE FROM invoice_lines WHERE invoice_id = ?").run(invoiceId);
+
+    // Insert new lines
+    const newLines = payload.lines || [];
+    let subtotal = 0;
+    for (const line of newLines) {
+      const lineTotal = Number(line.quantity) * Number(line.unit_price) * (1 - Number(line.discount || 0) / 100);
+      subtotal += lineTotal;
+      db.prepare("INSERT INTO invoice_lines (invoice_id, item_id, quantity, unit_price, discount, line_total) VALUES (?, ?, ?, ?, ?, ?)").run(invoiceId, line.item_id, line.quantity, line.unit_price, line.discount || 0, lineTotal);
+      adjustStock({ item_id: line.item_id, warehouse_id: 1, quantityDelta: -Number(line.quantity), movement_type: "sale", reference_type: "invoice", reference_id: invoiceId });
+    }
+
+    const discount = Number(payload.discount ?? invoice.discount ?? 0);
+    const increase = Number(payload.increase ?? invoice.increase ?? 0);
+    const newTotal = Math.max(0, subtotal - discount + increase);
+    const delta = newTotal - oldTotal;
+
+    // Update invoice header
+    db.prepare("UPDATE invoices SET subtotal = ?, discount = ?, increase = ?, total = ? WHERE id = ?").run(subtotal, discount, increase, newTotal, invoiceId);
+
+    // Adjust financials by delta
+    if (delta !== 0) {
+      if (invoice.payment_type === 'cash') {
+        const tId = db.prepare("SELECT default_treasury_id FROM settings WHERE id = 1").get()?.default_treasury_id;
+        if (tId) db.prepare("UPDATE treasuries SET balance = balance + ? WHERE id = ?").run(delta, tId);
+      } else if (invoice.payment_type === 'credit' && invoice.customer_id) {
+        db.prepare("UPDATE customers SET opening_balance = opening_balance + ? WHERE id = ?").run(delta, invoice.customer_id);
+        db.prepare("UPDATE ajal_debts SET original_amount = original_amount + ? WHERE invoice_id = ? AND status = 'open'").run(delta, invoiceId);
+      }
+    }
+
+    return db.prepare("SELECT * FROM invoices WHERE id = ?").get(invoiceId);
+  })();
+}
+
+module.exports = { createInvoice, getInvoiceWithLines, recalculateInvoiceStatus, voidInvoice, editInvoice };

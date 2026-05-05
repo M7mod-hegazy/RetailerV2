@@ -3,10 +3,12 @@ const { getDb } = require("../config/database");
 
 const router = express.Router();
 
-router.get("/", (_req, res) => {
-  const rows = getDb()
-    .prepare("SELECT * FROM item_categories ORDER BY CAST(COALESCE(sku_prefix, '0') AS INTEGER) ASC, id ASC")
-    .all();
+router.get("/", (req, res) => {
+  const showArchived = req.query.archived === 'true';
+  const query = showArchived
+    ? "SELECT * FROM item_categories WHERE is_active = 0 ORDER BY CAST(COALESCE(sku_prefix, '0') AS INTEGER) ASC, id ASC"
+    : "SELECT * FROM item_categories WHERE is_active = 1 OR is_active IS NULL ORDER BY CAST(COALESCE(sku_prefix, '0') AS INTEGER) ASC, id ASC";
+  const rows = getDb().prepare(query).all();
   res.json({ success: true, data: rows });
 });
 
@@ -38,14 +40,21 @@ router.put("/:id", (req, res) => {
 });
 
 router.delete("/:id", (req, res) => {
-  const countRow = getDb().prepare("SELECT COUNT(*) AS c FROM items WHERE category_id = ?").get(req.params.id);
+  const db = getDb();
+  const countRow = db.prepare("SELECT COUNT(*) AS c FROM items WHERE category_id = ?").get(req.params.id);
+  
   if (Number(countRow?.c || 0) > 0) {
-    return res.status(409).json({
-      success: false,
-      message: "لا يمكن حذف الفئة لأنها تحتوي على أصناف. احذف الأصناف أو انقلها أولاً.",
+    // Soft delete - mark as inactive
+    db.prepare("UPDATE item_categories SET is_active = 0 WHERE id = ?").run(req.params.id);
+    return res.json({ 
+      success: true, 
+      archived: true,
+      message: "تم أرشفة الفئة لأنها تحتوي على أصناف" 
     });
   }
-  getDb().prepare("DELETE FROM item_categories WHERE id = ?").run(req.params.id);
+  
+  // Hard delete if no items
+  db.prepare("DELETE FROM item_categories WHERE id = ?").run(req.params.id);
   res.json({ success: true });
 });
 

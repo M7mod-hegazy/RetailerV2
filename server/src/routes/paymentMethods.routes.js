@@ -113,7 +113,7 @@ router.get("/transactions", (req, res) => {
           'pos_invoice' AS doc_type,
           i.total AS amount,
           'in' AS direction,
-          c.name AS party,
+          COALESCE(c.name, 'زبون نقدي') AS party,
           i.payment_type AS description,
           i.created_at,
           pm.name AS method_name,

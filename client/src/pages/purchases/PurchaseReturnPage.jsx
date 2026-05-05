@@ -13,6 +13,8 @@ import useDebounce from "../../hooks/useDebounce";
 import SearchInput from "../../components/ui/SearchInput";
 import { adaptForServer } from "../../utils/search";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
+import TodayInvoicesButton from "../../components/pos/TodayInvoicesButton";
+import GeneralPurchaseReturnModal from "../../components/returns/GeneralPurchaseReturnModal";
 
 const REASON_LABELS = {
   defective: "تلف / عيب",
@@ -36,6 +38,7 @@ export default function PurchaseReturnPage() {
   const [activeReturn, setActiveReturn] = useState(null);
   const [modalDetailOpen, setModalDetailOpen] = useState(false);
   const [quickReturnOpen, setQuickReturnOpen] = useState(false);
+  const [generalReturnOpen, setGeneralReturnOpen] = useState(false);
 
   // Filters
   const [searchTerm, setSearchTerm] = useState("");
@@ -105,12 +108,21 @@ export default function PurchaseReturnPage() {
           <h1 className="text-[24px] font-black text-slate-800 tracking-tight">مرتجعات المشتريات</h1>
           <p className="text-[13px] font-bold text-slate-400 mt-0.5">متابعة الأصناف المرتجعة للموردين والحركات المالية المرتبطة</p>
         </div>
-        <button
-          onClick={() => setQuickReturnOpen(true)}
-          className="flex items-center gap-2 rounded-lg bg-amber-600 px-5 py-2.5 text-[13px] font-black text-white shadow-lg hover:bg-amber-500 transition-all active:scale-95"
-        >
-          <Plus className="h-4 w-4" /> إنشاء مرتجع جديد
-        </button>
+        <div className="flex items-center gap-2">
+          <TodayInvoicesButton variant="compact" />
+          <button
+            onClick={() => setGeneralReturnOpen(true)}
+            className="flex items-center gap-2 rounded-lg bg-rose-600 px-5 py-2.5 text-[13px] font-black text-white shadow-lg hover:bg-rose-500 transition-all active:scale-95"
+          >
+            <Plus className="h-4 w-4" /> مرتجع عام
+          </button>
+          <button
+            onClick={() => setQuickReturnOpen(true)}
+            className="flex items-center gap-2 rounded-lg bg-amber-600 px-5 py-2.5 text-[13px] font-black text-white shadow-lg hover:bg-amber-500 transition-all active:scale-95"
+          >
+            <Plus className="h-4 w-4" /> إنشاء مرتجع جديد
+          </button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -333,6 +345,13 @@ export default function PurchaseReturnPage() {
         mode="purchase"
         open={quickReturnOpen}
         onClose={() => setQuickReturnOpen(false)}
+        onSuccess={loadData}
+      />
+
+      {/* General Purchase Return Modal */}
+      <GeneralPurchaseReturnModal
+        open={generalReturnOpen}
+        onClose={() => setGeneralReturnOpen(false)}
         onSuccess={loadData}
       />
     </div>

@@ -17,8 +17,12 @@ router.use((_req, _res, next) => {
   }
 });
 
-router.get("/", (_req, res) => {
-  const rows = getDb().prepare("SELECT * FROM banks ORDER BY name ASC").all();
+router.get("/", (req, res) => {
+  const showArchived = req.query.archived === 'true';
+  const query = showArchived
+    ? "SELECT * FROM banks WHERE is_active = 0 ORDER BY name ASC"
+    : "SELECT * FROM banks WHERE is_active = 1 OR is_active IS NULL ORDER BY name ASC";
+  const rows = getDb().prepare(query).all();
   res.json({ success: true, data: rows });
 });
 
@@ -39,10 +43,27 @@ router.put("/:id", (req, res) => {
 
 router.delete("/:id", (req, res) => {
   try {
-    getDb().prepare("DELETE FROM banks WHERE id = ?").run(req.params.id);
+    const db = getDb();
+    
+    // Check for related records
+    const txCount = db.prepare("SELECT COUNT(*) AS c FROM bank_transactions WHERE bank_id = ?").get(req.params.id);
+    const paymentMethodCount = db.prepare("SELECT COUNT(*) AS c FROM payment_methods WHERE target_id = ? AND type = 'bank'").get(req.params.id);
+    
+    const hasRecords = 
+      Number(txCount?.c || 0) > 0 ||
+      Number(paymentMethodCount?.c || 0) > 0;
+    
+    if (hasRecords) {
+      // Soft delete - mark as inactive
+      db.prepare("UPDATE banks SET is_active = 0 WHERE id = ?").run(req.params.id);
+      return res.json({ success: true, archived: true, message: "تم أرشفة البنك لأنه مرتبط بعمليات مالية" });
+    }
+    
+    // Hard delete if no records
+    db.prepare("DELETE FROM banks WHERE id = ?").run(req.params.id);
     res.json({ success: true });
   } catch (err) {
-    if (err.message?.includes("FOREIGN KEY")) return res.status(409).json({ success: false, message: "لا يمكن الحذف لأن هذا البنك مرتبط بعمليات أخرى" });
+    if (err.message?.includes("FOREIGN KEY")) return res.status(409).json({ success: false, message: "لا يمكن حذف البنك لأنه مرتبط ببيانات أخرى" });
     res.status(500).json({ success: false, message: "تعذر الحذف" });
   }
 });

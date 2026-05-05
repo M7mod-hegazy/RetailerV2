@@ -17,6 +17,7 @@ const DOC_TYPES = [
   "payment_receipt",
   "daily_treasury",
   "payment_methods_report",
+  "reports_generic",
 ];
 
 function ensureTable(db) {

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Users, Search, Plus, FileText, Settings, X, Phone, AlertTriangle, SlidersHorizontal, MessageSquare, ChevronLeft } from "lucide-react";
+import TodayInvoicesButton from "../../components/pos/TodayInvoicesButton";
 import api from "../../services/api";
 import toast from "react-hot-toast";
 import StatementModal from "../../components/accounts/StatementModal";
@@ -40,7 +41,7 @@ export default function CustomerAccountsPage() {
   const [showNote, setShowNote] = useState(false);
 
   // Forms
-  const [createForm, setCreateForm] = useState({ name: "", phone: "", code: "", opening_balance: 0, credit_limit: 0 });
+  const [createForm, setCreateForm] = useState({ name: "", phone: "", additionalPhones: [""], addresses: [""], notes: "", code: "", opening_balance: 0, credit_limit: 0 });
   const [payForm, setPayForm] = useState({ amount: "", method_id: "", notes: "" });
   const [adjForm, setAdjForm] = useState({ amount: "", direction: "subtract", reason: "" });
   const [noteForm, setNoteForm] = useState({ note: "" });
@@ -102,10 +103,12 @@ export default function CustomerAccountsPage() {
     if (!createForm.name.trim()) return toast.error("الاسم مطلوب");
     setSaving(true);
     try {
-      const r = await api.post("/api/customers", createForm);
+      const additionalPhones = createForm.additionalPhones.filter(p => p.trim()).join("|");
+      const addresses = createForm.addresses.filter(a => a.trim()).join("|");
+      const r = await api.post("/api/customers", { ...createForm, additional_phones: additionalPhones || null, addresses: addresses || null });
       toast.success("تم إضافة العميل");
       setShowCreate(false);
-      setCreateForm({ name: "", phone: "", code: "", opening_balance: 0, credit_limit: 0 });
+      setCreateForm({ name: "", phone: "", additionalPhones: [""], addresses: [""], notes: "", code: "", opening_balance: 0, credit_limit: 0 });
       await loadCustomers();
       setSelected(r.data.data);
     } catch (e) {
@@ -190,10 +193,13 @@ export default function CustomerAccountsPage() {
               </div>
               <h1 className="text-[15px] font-black text-slate-900">حسابات العملاء</h1>
             </div>
-            <button onClick={() => setShowCreate(true)}
-              className="flex h-8 items-center gap-1.5 rounded-lg bg-blue-600 px-3 text-[11px] font-black text-white hover:bg-blue-700 transition-colors shadow-md shadow-blue-200">
-              <Plus className="h-3.5 w-3.5" /> عميل جديد
-            </button>
+            <div className="flex items-center gap-2">
+              <TodayInvoicesButton variant="compact" />
+              <button onClick={() => setShowCreate(true)}
+                className="flex h-8 items-center gap-1.5 rounded-lg bg-blue-600 px-3 text-[11px] font-black text-white hover:bg-blue-700 transition-colors shadow-md shadow-blue-200">
+                <Plus className="h-3.5 w-3.5" /> عميل جديد
+              </button>
+            </div>
           </div>
           <div className="relative">
             <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -485,19 +491,65 @@ export default function CustomerAccountsPage() {
                   className="w-full h-10 rounded-xl border border-slate-200 px-4 text-[13px] outline-none focus:border-blue-500 font-bold"
                   placeholder="اسم العميل" />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[12px] font-black text-slate-600 mb-1.5 block">رقم الهاتف</label>
-                  <input value={createForm.phone} onChange={e => setCreateForm(f => ({ ...f, phone: e.target.value }))}
-                    className="w-full h-10 rounded-xl border border-slate-200 px-4 text-[13px] outline-none focus:border-blue-500 font-bold"
-                    placeholder="01xxxxxxxxx" />
+              <div>
+                <label className="text-[12px] font-black text-slate-600 mb-1.5 block">رقم الهاتف الأساسي</label>
+                <input value={createForm.phone} onChange={e => setCreateForm(f => ({ ...f, phone: e.target.value }))}
+                  className="w-full h-10 rounded-xl border border-slate-200 px-4 text-[13px] outline-none focus:border-blue-500 font-bold"
+                  placeholder="01xxxxxxxxx" />
+              </div>
+              {/* Additional Phones */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[12px] font-black text-slate-600">أرقام هواتف إضافية</label>
+                  <button type="button" onClick={() => setCreateForm(f => ({ ...f, additionalPhones: [...f.additionalPhones, ""] }))}
+                    className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 hover:text-emerald-700">
+                    <Plus className="h-3 w-3" /> إضافة رقم
+                  </button>
                 </div>
-                <div>
-                  <label className="text-[12px] font-black text-slate-600 mb-1.5 block">كود العميل</label>
-                  <input value={createForm.code} onChange={e => setCreateForm(f => ({ ...f, code: e.target.value }))}
-                    className="w-full h-10 rounded-xl border border-slate-200 px-4 text-[13px] outline-none focus:border-blue-500 font-bold font-mono"
-                    placeholder="CUST-001" />
+                {createForm.additionalPhones.map((p, i) => (
+                  <div key={i} className="flex items-center gap-2 mb-1.5">
+                    <input value={p} onChange={e => setCreateForm(f => ({ ...f, additionalPhones: f.additionalPhones.map((ph, idx) => idx === i ? e.target.value : ph) }))}
+                      placeholder="رقم هاتف إضافي..."
+                      className="flex-1 h-9 rounded-lg border border-slate-200 px-3 text-[12px] outline-none focus:border-blue-500" />
+                    {createForm.additionalPhones.length > 1 && (
+                      <button type="button" onClick={() => setCreateForm(f => ({ ...f, additionalPhones: f.additionalPhones.filter((_, idx) => idx !== i) }))}
+                        className="text-rose-500 hover:text-rose-700"><X className="h-4 w-4" /></button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {/* Addresses */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[12px] font-black text-slate-600">العناوين</label>
+                  <button type="button" onClick={() => setCreateForm(f => ({ ...f, addresses: [...f.addresses, ""] }))}
+                    className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 hover:text-emerald-700">
+                    <Plus className="h-3 w-3" /> إضافة عنوان
+                  </button>
                 </div>
+                {createForm.addresses.map((a, i) => (
+                  <div key={i} className="flex items-center gap-2 mb-1.5">
+                    <input value={a} onChange={e => setCreateForm(f => ({ ...f, addresses: f.addresses.map((ad, idx) => idx === i ? e.target.value : ad) }))}
+                      placeholder="العنوان..."
+                      className="flex-1 h-9 rounded-lg border border-slate-200 px-3 text-[12px] outline-none focus:border-blue-500" />
+                    {createForm.addresses.length > 1 && (
+                      <button type="button" onClick={() => setCreateForm(f => ({ ...f, addresses: f.addresses.filter((_, idx) => idx !== i) }))}
+                        className="text-rose-500 hover:text-rose-700"><X className="h-4 w-4" /></button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div>
+                <label className="text-[12px] font-black text-slate-600 mb-1.5 block">ملاحظات</label>
+                <textarea value={createForm.notes} onChange={e => setCreateForm(f => ({ ...f, notes: e.target.value }))}
+                  className="w-full rounded-xl border border-slate-200 px-4 py-2 text-[13px] outline-none focus:border-blue-500 font-bold resize-none"
+                  rows={2} placeholder="أي ملاحظات إضافية..." />
+              </div>
+              <div>
+                <label className="text-[12px] font-black text-slate-600 mb-1.5 block">كود العميل</label>
+                <input value={createForm.code} onChange={e => setCreateForm(f => ({ ...f, code: e.target.value }))}
+                  className="w-full h-10 rounded-xl border border-slate-200 px-4 text-[13px] outline-none focus:border-blue-500 font-bold font-mono"
+                  placeholder="CUST-001" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>

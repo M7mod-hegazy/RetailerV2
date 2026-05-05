@@ -3,8 +3,12 @@ const { getDb } = require("../config/database");
 
 const router = express.Router();
 
-router.get("/", (_req, res) => {
-  const rows = getDb().prepare("SELECT * FROM suppliers ORDER BY id DESC").all();
+router.get("/", (req, res) => {
+  const showArchived = req.query.archived === 'true';
+  const query = showArchived 
+    ? "SELECT * FROM suppliers WHERE is_active = 0 ORDER BY id DESC"
+    : "SELECT * FROM suppliers WHERE is_active = 1 OR is_active IS NULL ORDER BY id DESC";
+  const rows = getDb().prepare(query).all();
   res.json({ success: true, data: rows });
 });
 
@@ -54,10 +58,27 @@ router.put("/:id", (req, res) => {
 
 router.delete("/:id", (req, res) => {
   try {
-    getDb().prepare("DELETE FROM suppliers WHERE id = ?").run(req.params.id);
+    const db = getDb();
+    
+    // Check for related records (purchases)
+    const purchaseCount = db.prepare("SELECT COUNT(*) AS c FROM purchases WHERE supplier_id = ?").get(req.params.id);
+    const purchaseOrderCount = db.prepare("SELECT COUNT(*) AS c FROM purchase_orders WHERE supplier_id = ?").get(req.params.id);
+    
+    const hasTransactions = 
+      Number(purchaseCount?.c || 0) > 0 ||
+      Number(purchaseOrderCount?.c || 0) > 0;
+    
+    if (hasTransactions) {
+      // Soft delete - mark as inactive
+      db.prepare("UPDATE suppliers SET is_active = 0 WHERE id = ?").run(req.params.id);
+      return res.json({ success: true, archived: true, message: "تم أرشفة المورد لأنه مرتبط بفواتير مشتريات" });
+    }
+    
+    // Hard delete if no transactions
+    db.prepare("DELETE FROM suppliers WHERE id = ?").run(req.params.id);
     res.json({ success: true });
   } catch (err) {
-    if (err.message?.includes("FOREIGN KEY")) return res.status(409).json({ success: false, message: "لا يمكن حذف المورد لأنه مرتبط بفواتير مشتريات" });
+    if (err.message?.includes("FOREIGN KEY")) return res.status(409).json({ success: false, message: "لا يمكن حذف المورد لأنه مرتبط ببيانات أخرى" });
     res.status(500).json({ success: false, message: "تعذر الحذف" });
   }
 });

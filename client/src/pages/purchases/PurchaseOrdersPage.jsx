@@ -13,6 +13,7 @@ import toast from "react-hot-toast";
 import useDebounce from "../../hooks/useDebounce";
 import SearchInput from "../../components/ui/SearchInput";
 import { adaptForServer } from "../../utils/search";
+import TodayInvoicesButton from "../../components/pos/TodayInvoicesButton";
 
 const STATUS_MAP = {
   pending:            { label: "قيد الانتظار",   cls: "bg-amber-50 text-amber-700 border-amber-100" },
@@ -169,9 +170,12 @@ export default function PurchaseOrdersPage() {
           <h1 className="text-[24px] font-black text-slate-800">أوامر الشراء</h1>
           <p className="text-[13px] font-bold text-slate-400 mt-0.5">تخطيط وجدولة وتتبع توريدات الأصناف من الموردين</p>
         </div>
-        <Link to="/purchases/orders/new" className="flex items-center gap-2 rounded-lg bg-slate-800 px-5 py-2.5 text-[13px] font-black text-white shadow-lg hover:bg-slate-700 transition-all active:scale-95">
-          <Plus className="h-4 w-4" /> طلب توريد جديد
-        </Link>
+        <div className="flex items-center gap-2">
+          <TodayInvoicesButton variant="pill" />
+          <Link to="/purchases/orders/new" className="flex items-center gap-2 rounded-lg bg-slate-800 px-5 py-2.5 text-[13px] font-black text-white shadow-lg hover:bg-slate-700 transition-all active:scale-95">
+            <Plus className="h-4 w-4" /> طلب توريد جديد
+          </Link>
+        </div>
       </div>
 
       {/* Stats */}

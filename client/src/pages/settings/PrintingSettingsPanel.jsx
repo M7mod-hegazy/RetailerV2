@@ -60,6 +60,7 @@ const DOC_TYPES = [
   { key: "payment_receipt",       label: "إيصال دفع",             icon: "PAY" },
   { key: "daily_treasury",        label: "تقرير الخزينة",         icon: "DT"  },
   { key: "payment_methods_report",label: "تقرير وسائل الدفع",    icon: "PM"  },
+  { key: "reports_generic",       label: "قوالب تقارير (عام)",    icon: "REP" },
 ];
 
 // Valid paper sizes per doc type + system default (user can override)
@@ -77,6 +78,7 @@ export const DOC_PAPER_CONFIG = {
   payment_receipt:        { sizes: ["58mm","80mm","A5"],          defaultSize: "80mm" },
   daily_treasury:         { sizes: ["A5","A4"],                   defaultSize: "A4"   },
   payment_methods_report: { sizes: ["A5","A4"],                   defaultSize: "A4"   },
+  reports_generic:        { sizes: ["A5","A4"],                   defaultSize: "A4"   },
 };
 
 // Resolve the effective paper size for a docType given saved per-doc settings

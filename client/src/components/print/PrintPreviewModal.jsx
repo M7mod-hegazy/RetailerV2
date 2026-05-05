@@ -1,8 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import Modal from "../ui/Modal";
-import InvoiceA4 from "./InvoiceA4";
-import Receipt80mm from "./Receipt80mm";
-import Receipt58mm from "./Receipt58mm";
+import { PrintThermalDoc, PrintA4Doc } from "./PrintDoc";
 import { Printer } from "lucide-react";
 import api from "../../services/api";
 import { DOC_PAPER_CONFIG, resolveDocPaperSize } from "../../pages/settings/PrintingSettingsPanel";
@@ -25,6 +23,9 @@ const ALL_TEMPLATES = [
  *   operationLabel string   – document type label; appears as receipt_footer
  *   onConfirmPrint function – if provided replaces "طباعة" with a confirm-save-and-print button
  *   confirmLabel   string   – label for that button (default "تأكيد وطباعة")
+ *   onSaveOnly     function – if provided shows "حفظ فقط" button alongside save-and-print
+ *   saveOnlyLabel  string   – label for save-only button (default "حفظ فقط")
+ *   isSaving       boolean  – shows loading state on save buttons
  */
 export default function PrintPreviewModal({
   open,
@@ -36,6 +37,9 @@ export default function PrintPreviewModal({
   docType,
   onConfirmPrint,
   confirmLabel = "تأكيد وطباعة",
+  onSaveOnly,
+  saveOnlyLabel = "حفظ فقط",
+  isSaving = false,
 }) {
   const [template, setTemplate] = useState(null); // null = not yet resolved
   const [viewZoom, setViewZoom] = useState(0.55);
@@ -130,10 +134,13 @@ export default function PrintPreviewModal({
 
   const renderDoc = () => {
     if (renderContent) return renderContent(combinedSettings);
-    if (activeTemplate === "58mm") return <Receipt58mm invoice={invoice} settings={combinedSettings} />;
-    if (activeTemplate === "80mm") return <Receipt80mm invoice={invoice} settings={combinedSettings} />;
-    return <InvoiceA4 invoice={invoice} settings={combinedSettings} />;
+    if (activeTemplate === "58mm") return <PrintThermalDoc invoice={invoice} settings={{ ...combinedSettings, receipt_width: "58mm" }} />;
+    if (activeTemplate === "80mm") return <PrintThermalDoc invoice={invoice} settings={{ ...combinedSettings, receipt_width: "80mm" }} />;
+    if (activeTemplate === "A5")   return <PrintA4Doc invoice={invoice} settings={combinedSettings} size="A5" />;
+    return <PrintA4Doc invoice={invoice} settings={combinedSettings} size="A4" />;
   };
+
+  const printContentRef = useRef(null);
 
   const handlePrint = () => {
     if (onConfirmPrint) {
@@ -141,22 +148,65 @@ export default function PrintPreviewModal({
       onClose();
       return;
     }
-    window.print();
+
+    // Capture the rendered preview DOM
+    const sourceNode = printContentRef.current;
+    if (!sourceNode) {
+      window.print();
+      return;
+    }
+
+    const contentHtml = sourceNode.innerHTML;
+
+    // Build print-specific styles based on template
+    const pageSize =
+      activeTemplate === "58mm" ? "58mm auto"
+        : activeTemplate === "80mm" ? "80mm auto"
+        : activeTemplate === "A5" ? "148mm 210mm"
+        : "210mm 297mm";
+
+    const iframe = document.createElement("iframe");
+    iframe.setAttribute("title", "print-frame");
+    iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;";
+    document.body.appendChild(iframe);
+
+    const idoc = iframe.contentWindow.document;
+    idoc.open();
+    idoc.write(`<!DOCTYPE html>
+<html dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <title>${operationLabel || "طباعة"}</title>
+  <style>
+    @page { size: ${pageSize}; margin: 8mm; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 0;
+      font-family: "Tajawal", "Noto Sans Arabic", system-ui, sans-serif;
+      direction: rtl; text-align: right;
+      color: #0f172a; background: #fff;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 6px 8px; }
+    img { max-width: 100%; height: auto; }
+  </style>
+</head>
+<body>${contentHtml}</body>
+</html>`);
+    idoc.close();
+
+    iframe.contentWindow.focus();
+    requestAnimationFrame(() => {
+      iframe.contentWindow.print();
+      setTimeout(() => { if (iframe.parentNode) iframe.parentNode.removeChild(iframe); }, 2000);
+    });
   };
 
   return (
     <>
       {/* Hidden layer rendered only when window.print() is called */}
       <div className="hidden print:flex w-full justify-center">
-        {renderContent ? (
-          <div className="w-full">{renderDoc()}</div>
-        ) : activeTemplate === "A5" ? (
-          <div className="scale-[0.7] origin-top max-w-[148mm]">
-            <InvoiceA4 invoice={invoice} settings={combinedSettings} />
-          </div>
-        ) : (
-          renderDoc()
-        )}
+        <div className="w-full">{renderDoc()}</div>
       </div>
 
       <Modal open={open} onClose={onClose} title="إعدادات ومعاينة الطباعة" maxWidth="max-w-6xl">
@@ -195,14 +245,35 @@ export default function PrintPreviewModal({
             </div>
 
             <div className="mt-auto pt-4 border-t border-slate-100 flex flex-col gap-2">
-              {onConfirmPrint ? (
+              {onConfirmPrint && onSaveOnly ? (
+                // Both save buttons available
+                <>
+                  <button
+                    onClick={handlePrint}
+                    disabled={isSaving}
+                    className="w-full flex justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white p-3.5 rounded-[12px] text-[13px] font-bold transition-all shadow-[0_4px_12px_rgba(16,185,129,0.25)] active:scale-95"
+                  >
+                    <Printer className="h-4 w-4" /> {isSaving ? "جارٍ الحفظ..." : confirmLabel}
+                  </button>
+                  <button
+                    onClick={() => { onSaveOnly(); onClose(); }}
+                    disabled={isSaving}
+                    className="w-full flex justify-center gap-2 bg-slate-800 hover:bg-slate-900 disabled:bg-slate-400 text-white p-3 rounded-[12px] text-[13px] font-bold transition-all active:scale-95"
+                  >
+                    {isSaving ? "جارٍ الحفظ..." : saveOnlyLabel}
+                  </button>
+                </>
+              ) : onConfirmPrint ? (
+                // Only save-and-print button
                 <button
                   onClick={handlePrint}
-                  className="w-full flex justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white p-3.5 rounded-[12px] text-[13px] font-bold transition-all shadow-[0_4px_12px_rgba(79,70,229,0.25)] active:scale-95"
+                  disabled={isSaving}
+                  className="w-full flex justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white p-3.5 rounded-[12px] text-[13px] font-bold transition-all shadow-[0_4px_12px_rgba(79,70,229,0.25)] active:scale-95"
                 >
-                  <Printer className="h-4 w-4" /> {confirmLabel}
+                  <Printer className="h-4 w-4" /> {isSaving ? "جارٍ الحفظ..." : confirmLabel}
                 </button>
               ) : (
+                // Simple print button (no save)
                 <button
                   onClick={handlePrint}
                   className="w-full flex justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white p-3.5 rounded-[12px] text-[13px] font-bold transition-all shadow-[0_4px_12px_rgba(79,70,229,0.25)] active:scale-95"
@@ -245,6 +316,7 @@ export default function PrintPreviewModal({
               }}
             >
               <div
+                ref={printContentRef}
                 style={{
                   width: activeTemplate === "58mm" ? "58mm"
                        : activeTemplate === "80mm" ? "80mm"

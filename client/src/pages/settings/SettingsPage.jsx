@@ -101,16 +101,35 @@ export default function SettingsPage() {
   const fetchSettings = async () => {
     try {
       const response = await api.get("/api/settings");
-      const mapped = {};
-      response.data?.data?.forEach((item) => {
-        let val = item.setting_value;
-        if (val === "true") val = true;
-        if (val === "false") val = false;
-        if (!isNaN(val) && val !== "" && typeof val === "string") val = Number(val);
-        mapped[item.setting_key] = val;
-      });
-      setSettings(mapped);
-    } catch {
+      const data = response.data?.data;
+      if (data && typeof data === "object" && !Array.isArray(data)) {
+        // Server returns a single settings row object
+        const mapped = {};
+        Object.entries(data).forEach(([key, val]) => {
+          if (key === "id" || key === "created_at" || key === "updated_at") return;
+          let parsed = val;
+          if (parsed === "true") parsed = true;
+          else if (parsed === "false") parsed = false;
+          else if (typeof parsed === "string" && !isNaN(Number(parsed)) && parsed !== "") parsed = Number(parsed);
+          mapped[key] = parsed;
+        });
+        setSettings(mapped);
+        settingsRef.current = mapped;
+      } else if (Array.isArray(data)) {
+        // Legacy key-value array format
+        const mapped = {};
+        data.forEach((item) => {
+          let val = item.setting_value;
+          if (val === "true") val = true;
+          if (val === "false") val = false;
+          if (!isNaN(val) && val !== "" && typeof val === "string") val = Number(val);
+          mapped[item.setting_key] = val;
+        });
+        setSettings(mapped);
+        settingsRef.current = mapped;
+      }
+    } catch (err) {
+      console.error("Failed to load settings:", err);
       toast.error(isRTL ? "تعذر تحميل الإعدادات" : "Failed to load settings");
     } finally {
       setLoading(false);
@@ -132,7 +151,10 @@ export default function SettingsPage() {
     try {
       const payload = Object.entries(snap).map(([k, v]) => ({ setting_key: k, setting_value: String(v) }));
       await api.post("/api/settings/bulk", { settings: payload });
-    } catch { /* silent */ }
+    } catch (err) {
+      console.error("Silent save failed:", err);
+      throw err;
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -250,6 +272,48 @@ export default function SettingsPage() {
                       <div className="text-[11px] leading-relaxed font-bold opacity-90 mt-1 text-orange-700">
                         التغيير هنا يتطلب إعادة تحميل وقد يتم فرضه على بقية الموظفين. استخدم الجلوبات في القائمة العلوية لتغيير واجهتك المحلية فقط.
                       </div>
+                    </div>
+                  </div>
+                </FieldGroup>
+
+                <FieldGroup title="نقطة البيع" hint="إعدادات واجهة نقطة البيع">
+                  <div className="mb-4 flex items-center gap-4">
+                    <label className="text-[13px] font-bold text-slate-700">عرض نقطة البيع الافتراضي:</label>
+                    <div className="flex rounded-lg border border-slate-200 overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const updated = { ...settings, default_pos_view: "detailed" };
+                          setSettings(updated);
+                          settingsRef.current = updated;
+                          try {
+                            await silentSave(updated);
+                            toast.success("تم حفظ عرض الشبكة كافتراضي");
+                          } catch {
+                            toast.error("فشل الحفظ - تحقق من الاتصال");
+                          }
+                        }}
+                        className={`px-4 py-2 text-[12px] font-black transition-all ${(settings.default_pos_view || "detailed") === "detailed" ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                      >
+                        شبكة / تفصيلي
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const updated = { ...settings, default_pos_view: "list" };
+                          setSettings(updated);
+                          settingsRef.current = updated;
+                          try {
+                            await silentSave(updated);
+                            toast.success("تم حفظ عرض القائمة كافتراضي");
+                          } catch {
+                            toast.error("فشل الحفظ - تحقق من الاتصال");
+                          }
+                        }}
+                        className={`px-4 py-2 text-[12px] font-black transition-all ${settings.default_pos_view === "list" ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                      >
+                        قائمة
+                      </button>
                     </div>
                   </div>
                 </FieldGroup>

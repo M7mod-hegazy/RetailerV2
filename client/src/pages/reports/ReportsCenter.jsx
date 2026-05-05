@@ -1,58 +1,46 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowUpDown, BarChart3, CalendarDays, Play, Search, Sparkles, Star } from "lucide-react";
+import { ArrowUpDown, BarChart3, CalendarDays, Play, Search, Sparkles, Star, FileText, FileSpreadsheet, FileImage, Printer, TrendingUp, Package, Wallet, Receipt, Shield, ClipboardList } from "lucide-react";
 import PageWrapper from "../../components/ui/PageWrapper";
+import { REPORT_CATALOG, REPORT_CATEGORIES } from "./reportCatalog";
 
 const STORAGE_KEYS = {
   favorites: "reports-center-favorites",
   recents: "reports-center-recents",
 };
 
-const CATEGORIES = [
-  { id: "sales", label: "مبيعات", color: "var(--primary)", bg: "var(--primary-50)" },
-  { id: "inventory", label: "مخزون", color: "#3B82F6", bg: "var(--info-bg)" },
-  { id: "finance", label: "مالية", color: "#F59E0B", bg: "var(--warning-bg)" },
-  { id: "customers", label: "عملاء", color: "#8B5CF6", bg: "rgba(139, 92, 246, 0.12)" },
-  { id: "cashier", label: "كاشير", color: "#EF4444", bg: "rgba(239, 68, 68, 0.12)" },
-  { id: "audit", label: "تدقيق", color: "var(--text-secondary)", bg: "var(--bg-overlay)" },
-];
+const CATEGORIES = REPORT_CATEGORIES.map((c) => {
+  // Keep existing per-category color semantics but avoid hard-coding labels twice.
+  const byId = {
+    sales: { color: "#059669", bg: "rgba(5,150,105,0.10)", icon: TrendingUp },
+    purchases: { color: "#2563EB", bg: "rgba(37,99,235,0.10)", icon: Package },
+    inventory: { color: "#7C3AED", bg: "rgba(124,58,237,0.10)", icon: Package },
+    accounts: { color: "#D97706", bg: "rgba(217,119,6,0.10)", icon: Wallet },
+    treasury: { color: "#0891B2", bg: "rgba(8,145,178,0.10)", icon: Receipt },
+    tax: { color: "#DC2626", bg: "rgba(220,38,38,0.10)", icon: FileText },
+    audit: { color: "#475569", bg: "rgba(71,85,105,0.10)", icon: Shield },
+  };
+  return { ...c, ...(byId[c.id] || { color: "var(--text-secondary)", bg: "var(--bg-overlay)", icon: ClipboardList }) };
+});
 
-const REPORTS = [
-  { id: "R01", cat: "sales", title: "الملخص اليومي للمبيعات", desc: "إيرادات وخصومات وعدد فواتير حسب اليوم.", slug: "daily-sales", supportsDates: true },
-  { id: "R02", cat: "sales", title: "المبيعات التفصيلية", desc: "كل الفواتير مع بيانات العميل وطريقة الدفع.", slug: "detailed-sales", supportsDates: true },
-  { id: "R03", cat: "sales", title: "مبيعات حسب الصنف", desc: "الأصناف الأكثر بيعا حسب الكمية والإيراد.", slug: "sales-by-item", supportsDates: true },
-  { id: "R04", cat: "sales", title: "مبيعات حسب الفئة", desc: "توزيع المبيعات على التصنيفات.", slug: "sales-by-category", supportsDates: true },
-  { id: "R05", cat: "sales", title: "مبيعات حسب الكاشير", desc: "أداء المستخدمين حسب المبيعات وعدد الفواتير.", slug: "sales-by-cashier", supportsDates: true },
-  { id: "R06", cat: "sales", title: "مبيعات حسب طريقة الدفع", desc: "تجميع الفواتير حسب طريقة السداد.", slug: "sales-by-payment", supportsDates: true },
-  { id: "R07", cat: "sales", title: "خريطة حرارة المبيعات", desc: "توزيع الذروة حسب اليوم والساعة.", slug: "sales-heatmap", supportsDates: true },
-  { id: "R08", cat: "audit", title: "تقرير الاستثناءات", desc: "الفواتير ذات الخصومات أو الحالات غير المعتادة.", slug: "exceptions", supportsDates: true },
-  { id: "R09", cat: "sales", title: "مقارنة فترتين", desc: "مقارنة مختصرة لملخص المبيعات.", slug: "period-comparison", supportsDates: true },
-  { id: "R10", cat: "inventory", title: "الأصناف الراكدة", desc: "أصناف لم تسجل مبيعات خلال الفترة.", slug: "slow-moving", supportsDates: true },
-  { id: "R11", cat: "inventory", title: "مستوى المخزون الحالي", desc: "الأرصدة الحالية وحدود إعادة الطلب.", slug: "stock-levels", supportsDates: false },
-  { id: "R12", cat: "inventory", title: "حركة المخزون التفصيلية", desc: "تفاصيل حركات المخزون.", slug: "stock-movements", supportsDates: true },
-  { id: "R13", cat: "inventory", title: "تقييم المخزون", desc: "قيمة المخزون الحالية حسب التكلفة.", slug: "stock-valuation", supportsDates: false },
-  { id: "R14", cat: "inventory", title: "ورقة جرد المخزون", desc: "رصيد النظام الحالي لكل صنف.", slug: "count-sheet", supportsDates: false },
-  { id: "R15", cat: "inventory", title: "تقرير إعادة الطلب", desc: "الأصناف منخفضة المخزون.", slug: "reorder", supportsDates: false },
-  { id: "R16", cat: "inventory", title: "تقرير انتهاء الصلاحية", desc: "يظهر البيانات عند توفر تواريخ الصلاحية.", slug: "expiry", supportsDates: false },
-  { id: "R17", cat: "finance", title: "الملخص المالي اليومي", desc: "إجماليات مبيعات حسب التاريخ.", slug: "daily-financial", supportsDates: true },
-  { id: "R18", cat: "customers", title: "ذمم العملاء", desc: "الأرصدة المستحقة على العملاء.", slug: "ar-aging", supportsDates: false },
-  { id: "R19", cat: "finance", title: "ذمم الموردين", desc: "الأرصدة المستحقة للموردين.", slug: "ap-aging", supportsDates: false },
-  { id: "R20", cat: "finance", title: "ملخص الأرباح والخسائر", desc: "إيرادات وتكاليف ومصروفات وصافي الربح.", slug: "profit-loss", supportsDates: true },
-  { id: "R21", cat: "finance", title: "التدفق النقدي", desc: "واردات وصادرات نقدية.", slug: "cash-flow", supportsDates: true },
-  { id: "R22", cat: "finance", title: "الخزينة والحسابات البنكية", desc: "أرصدة الخزائن والبنوك.", slug: "treasury", supportsDates: false },
-  { id: "R23", cat: "finance", title: "تقرير ضريبة القيمة المضافة", desc: "المبيعات الخاضعة حسب نسبة الضريبة.", slug: "vat", supportsDates: true },
-  { id: "R24", cat: "customers", title: "كشف حساب العميل", desc: "حركة الفواتير حسب العميل.", slug: "customer-statement", supportsDates: true },
-  { id: "R25", cat: "customers", title: "أفضل العملاء", desc: "العملاء الأعلى إنفاقا.", slug: "top-customers", supportsDates: true },
-  { id: "R26", cat: "customers", title: "تحليل تقادم الذمم", desc: "تقادم الأرصدة المدينة.", slug: "customer-aging", supportsDates: false },
-  { id: "R27", cat: "cashier", title: "تاريخ الورديات", desc: "إجماليات الورديات وفروق الصندوق.", slug: "shift-history", supportsDates: false },
-  { id: "R28", cat: "audit", title: "سجل التدقيق", desc: "آخر الأنشطة المسجلة في النظام.", slug: "audit-log", supportsDates: false },
-];
+// Export format icons
+const FORMAT_ICONS = {
+  pdf: { icon: FileImage, color: "#DC2626", label: "PDF" },
+  excel: { icon: FileSpreadsheet, color: "#16A34A", label: "Excel" },
+  word: { icon: FileText, color: "#2563EB", label: "Word" },
+  print: { icon: Printer, color: "#475569", label: "طباعة" },
+};
+
+const REPORTS = REPORT_CATALOG;
 
 function formatDate(date) {
   return date.toISOString().slice(0, 10);
 }
 
 function ReportCard({ report, category, selected, favorited, onSelect, onToggleFav, onQuickRun }) {
+  const exportFormats = report.exportFormats || ["pdf", "excel", "print"];
+  const CategoryIcon = category.icon || ClipboardList;
+  
   return (
     <div
       role="button"
@@ -77,19 +65,30 @@ function ReportCard({ report, category, selected, favorited, onSelect, onToggleF
         gap: "9px",
         boxShadow: selected ? "var(--shadow-elevated)" : "var(--shadow-card)",
         transition: "180ms ease",
+        cursor: "pointer",
       }}
+      className="group"
     >
       <div className="flex items-start justify-between gap-3">
-        <span style={{ fontSize: "10px", fontWeight: 700, letterSpacing: "0.06em", color: category.color, background: category.bg, borderRadius: "999px", padding: "3px 8px" }}>
-          {report.id}
-        </span>
+        <div className="flex items-center gap-2">
+          <div 
+            className="flex h-7 w-7 items-center justify-center rounded-lg transition-transform group-hover:scale-110"
+            style={{ backgroundColor: category.bg, color: category.color }}
+          >
+            <CategoryIcon size={14} />
+          </div>
+          <span style={{ fontSize: "10px", fontWeight: 700, letterSpacing: "0.06em", color: category.color, background: category.bg, borderRadius: "999px", padding: "3px 8px" }}>
+            {report.id}
+          </span>
+        </div>
         <button
           type="button"
           onClick={(event) => {
             event.stopPropagation();
             onToggleFav(report.id);
           }}
-          style={{ background: "none", border: "none", cursor: "pointer", color: favorited ? "#F59E0B" : "var(--border-strong)" }}
+          style={{ background: "none", border: "none", cursor: "pointer", color: favorited ? "#F59E0B" : "var(--border-strong)", transition: "transform 150ms" }}
+          className="hover:scale-110"
           aria-label={favorited ? "إزالة من المفضلة" : "إضافة للمفضلة"}
         >
           <Star size={15} fill={favorited ? "currentColor" : "none"} />
@@ -101,8 +100,28 @@ function ReportCard({ report, category, selected, favorited, onSelect, onToggleF
         <p style={{ fontSize: "12px", color: "var(--text-muted)", margin: "6px 0 0", lineHeight: 1.5 }}>{report.desc}</p>
       </div>
 
+      {/* Export formats row */}
+      <div className="flex items-center gap-1.5">
+        {exportFormats.map((fmt) => {
+          const fmtConfig = FORMAT_ICONS[fmt];
+          if (!fmtConfig) return null;
+          const FmtIcon = fmtConfig.icon;
+          return (
+            <div
+              key={fmt}
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 transition-all hover:scale-105"
+              style={{ background: `${fmtConfig.color}10`, color: fmtConfig.color }}
+              title={fmtConfig.label}
+            >
+              <FmtIcon size={10} />
+              <span className="text-[9px] font-bold">{fmtConfig.label}</span>
+            </div>
+          );
+        })}
+      </div>
+
       <div className="flex items-center justify-between gap-2">
-        <span style={{ width: "fit-content", borderRadius: "999px", padding: "3px 8px", fontSize: "10px", fontWeight: 700, background: category.bg, color: category.color }}>
+        <span style={{ width: "fit-content", borderRadius: "999px", padding: "3px 8px", fontSize: "10px", fontWeight: 700, background: report.supportsDates ? "rgba(5,150,105,0.10)" : "rgba(71,85,105,0.10)", color: report.supportsDates ? "#059669" : "#475569" }}>
           {report.supportsDates ? "يدعم فترة زمنية" : "تشغيل مباشر"}
         </span>
         <button
@@ -111,7 +130,8 @@ function ReportCard({ report, category, selected, favorited, onSelect, onToggleF
             event.stopPropagation();
             onQuickRun(report);
           }}
-          style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "11px", fontWeight: 600, color: category.color, background: category.bg, border: `1px solid ${category.color}30`, borderRadius: "8px", padding: "5px 10px", cursor: "pointer" }}
+          style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "11px", fontWeight: 600, color: category.color, background: category.bg, border: `1px solid ${category.color}30`, borderRadius: "8px", padding: "5px 10px", cursor: "pointer", transition: "all 150ms" }}
+          className="hover:scale-105 active:scale-95"
         >
           <Play size={11} />
           تشغيل سريع
@@ -234,7 +254,7 @@ export default function ReportsCenter() {
             </div>
           </div>
           
-          <div className="flex items-center gap-4 text-[11px] font-semibold text-text-secondary tracking-[0.05em] uppercase">
+            <div className="flex items-center gap-4 text-[11px] font-semibold text-text-secondary tracking-[0.05em] uppercase">
             <div className="flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-border-strong"></span>
               إجمالي: {REPORTS.length}

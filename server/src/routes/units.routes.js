@@ -3,8 +3,12 @@ const { getDb } = require("../config/database");
 
 const router = express.Router();
 
-router.get("/", (_req, res) => {
-  const rows = getDb().prepare("SELECT * FROM units ORDER BY name ASC").all();
+router.get("/", (req, res) => {
+  const showArchived = req.query.archived === 'true';
+  const query = showArchived
+    ? "SELECT * FROM units WHERE is_active = 0 ORDER BY name ASC"
+    : "SELECT * FROM units WHERE is_active = 1 OR is_active IS NULL ORDER BY name ASC";
+  const rows = getDb().prepare(query).all();
   res.json({ success: true, data: rows });
 });
 
@@ -28,10 +32,22 @@ router.put("/:id", (req, res) => {
 
 router.delete("/:id", (req, res) => {
   try {
-    getDb().prepare("DELETE FROM units WHERE id = ?").run(req.params.id);
+    const db = getDb();
+    
+    // Check for related items
+    const itemCount = db.prepare("SELECT COUNT(*) AS c FROM items WHERE unit_id = ?").get(req.params.id);
+    
+    if (Number(itemCount?.c || 0) > 0) {
+      // Soft delete - mark as inactive
+      db.prepare("UPDATE units SET is_active = 0 WHERE id = ?").run(req.params.id);
+      return res.json({ success: true, archived: true, message: "تم أرشفة الوحدة لأنها مرتبطة بأصناف" });
+    }
+    
+    // Hard delete if no items
+    db.prepare("DELETE FROM units WHERE id = ?").run(req.params.id);
     res.json({ success: true });
   } catch (err) {
-    if (err.message?.includes("FOREIGN KEY")) return res.status(409).json({ success: false, message: "لا يمكن حذف الوحدة لأنها مرتبطة بأصناف" });
+    if (err.message?.includes("FOREIGN KEY")) return res.status(409).json({ success: false, message: "لا يمكن حذف الوحدة لأنها مرتبطة ببيانات أخرى" });
     res.status(500).json({ success: false, message: "تعذر الحذف" });
   }
 });

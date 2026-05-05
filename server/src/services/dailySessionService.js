@@ -110,6 +110,33 @@ function cashBreakdown(db, dateText, session) {
   const sessionId = session?.id || null;
   ensurePurchaseReturnSettlementSchema(db);
 
+  // Installment invoices: cash received is the sum of payment_allocations
+  // If no allocations, cash received is 0 (not the full invoice total)
+  const posInstallmentCash = scalar(db, `
+    SELECT COALESCE(SUM(pa.amount), 0) AS total
+    FROM invoices i
+    LEFT JOIN payment_allocations pa ON pa.invoice_id = i.id
+    WHERE date(i.created_at) = ? AND i.payment_type = 'installments' AND i.status != 'cancelled'
+  `, [date]);
+  const posInstallmentCount = countScalar(db, `
+    SELECT COUNT(*) AS count
+    FROM invoices
+    WHERE date(created_at) = ? AND payment_type = 'installments' AND status != 'cancelled'
+  `, [date]);
+
+  // Multi-payment invoices: cash portion from payments table
+  const posMultiCash = scalar(db, `
+    SELECT COALESCE(SUM(p.amount), 0) AS total
+    FROM payments p
+    JOIN invoices i ON p.notes = 'Invoice ' || i.invoice_no
+    WHERE date(i.created_at) = ? AND i.payment_type = 'multi' AND p.method = 'cash' AND i.status != 'cancelled'
+  `, [date]);
+  const posMultiCount = countScalar(db, `
+    SELECT COUNT(*) AS count
+    FROM invoices
+    WHERE date(created_at) = ? AND payment_type = 'multi' AND status != 'cancelled'
+  `, [date]);
+
   const posCashSales = scalar(db, `
     SELECT COALESCE(SUM(total), 0) AS total
     FROM invoices
@@ -136,10 +163,37 @@ function cashBreakdown(db, dateText, session) {
     WHERE date(created_at) = ? AND status != 'cancelled'
   `, [date]);
 
+  // Cash from all POS sales (cash + installment payments + multi-payment cash portion)
+  const posTotalCashReceived = posCashSales + posInstallmentCash + posMultiCash;
+
   const purchasesTotal = scalar(db, `
     SELECT COALESCE(SUM(total), 0) AS total
     FROM purchases
     WHERE date(created_at) = ? AND COALESCE(status, '') != 'voided'
+  `, [date]);
+
+  // Note: All purchases are treated as credit (payable) in the current system.
+  // They create ajal_debts for suppliers, so cash_out for purchases is via supplier_payments.
+  // purchases_cash remains 0 unless a cash purchase feature is added.
+  const purchasesCash = 0;
+
+  // Credit sales (installments/multi with non-cash portion) - reduces customer debt
+  const posCreditSales = scalar(db, `
+    SELECT COALESCE(SUM(total), 0) AS total
+    FROM invoices
+    WHERE date(created_at) = ? AND payment_type IN ('installments', 'credit') AND status != 'cancelled'
+  `, [date]);
+  const posCreditSalesCount = countScalar(db, `
+    SELECT COUNT(*) AS count
+    FROM invoices
+    WHERE date(created_at) = ? AND payment_type IN ('installments', 'credit') AND status != 'cancelled'
+  `, [date]);
+
+  // Sales returns that increased customer debt (account refund, not cash)
+  const salesReturnsAccount = scalar(db, `
+    SELECT COALESCE(SUM(total), 0) AS total
+    FROM sales_returns
+    WHERE date(created_at) = ? AND COALESCE(refund_method, 'cash_back') != 'cash_back'
   `, [date]);
   const purchaseReturnsCash = scalar(db, `
     SELECT COALESCE(SUM(total), 0) AS total
@@ -240,17 +294,26 @@ function cashBreakdown(db, dateText, session) {
 
   const customerCashCollections = customerPayments + customerAjalPayments;
   const supplierCashPayments = supplierPayments + supplierAjalPayments;
-  const cashIn = posCashSales + customerCashCollections + revenuesCash + purchaseReturnsCash;
+  // Cash in = all cash received from sales (including installment/multi cash portions) + collections + revenues + purchase returns
+  const cashIn = posTotalCashReceived + customerCashCollections + revenuesCash + purchaseReturnsCash;
   const cashOut = expensesCash + supplierCashPayments + salesReturnsCash + withdrawals;
 
   return {
     pos_cash_sales: posCashSales,
     pos_cash_sales_count: posCashSalesCount,
+    pos_installment_cash: posInstallmentCash,
+    pos_installment_count: posInstallmentCount,
+    pos_multi_cash: posMultiCash,
+    pos_multi_count: posMultiCount,
+    pos_total_cash_received: posTotalCashReceived,
     pos_bank_sales: posBankSales,
     pos_all_sales: posAllSales,
     pos_all_sales_count: posAllSalesCount,
-    purchases_cash: 0,
+    purchases_cash: purchasesCash,
     purchases_payable_total: purchasesTotal,
+    pos_credit_sales: posCreditSales,
+    pos_credit_sales_count: posCreditSalesCount,
+    sales_returns_account: salesReturnsAccount,
     purchase_returns_cash: purchaseReturnsCash,
     purchase_returns_payable_total: purchaseReturnsAccount,
     expenses_cash: expensesCash,

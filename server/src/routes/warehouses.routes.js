@@ -3,8 +3,12 @@ const { getDb } = require("../config/database");
 
 const router = express.Router();
 
-router.get("/", (_req, res) => {
-  const rows = getDb().prepare("SELECT * FROM warehouses ORDER BY name ASC").all();
+router.get("/", (req, res) => {
+  const showArchived = req.query.archived === 'true';
+  const query = showArchived
+    ? "SELECT * FROM warehouses WHERE is_active = 0 ORDER BY name ASC"
+    : "SELECT * FROM warehouses WHERE is_active = 1 OR is_active IS NULL ORDER BY name ASC";
+  const rows = getDb().prepare(query).all();
   res.json({ success: true, data: rows });
 });
 
@@ -37,10 +41,27 @@ router.put("/:id", (req, res) => {
 
 router.delete("/:id", (req, res) => {
   try {
-    getDb().prepare("DELETE FROM warehouses WHERE id = ?").run(req.params.id);
+    const db = getDb();
+    
+    // Check for related records
+    const stockCount = db.prepare("SELECT COUNT(*) AS c FROM stock_movements WHERE warehouse_id = ?").get(req.params.id);
+    const itemCount = db.prepare("SELECT COUNT(*) AS c FROM item_stock WHERE warehouse_id = ?").get(req.params.id);
+    
+    const hasRecords = 
+      Number(stockCount?.c || 0) > 0 ||
+      Number(itemCount?.c || 0) > 0;
+    
+    if (hasRecords) {
+      // Soft delete - mark as inactive
+      db.prepare("UPDATE warehouses SET is_active = 0 WHERE id = ?").run(req.params.id);
+      return res.json({ success: true, archived: true, message: "تم أرشفة المستودع لأنه مرتبط بحركات مخزنية" });
+    }
+    
+    // Hard delete if no records
+    db.prepare("DELETE FROM warehouses WHERE id = ?").run(req.params.id);
     res.json({ success: true });
   } catch (err) {
-    if (err.message?.includes("FOREIGN KEY")) return res.status(409).json({ success: false, message: "لا يمكن حذف المستودع لأنه مرتبط بحركات مخزنية" });
+    if (err.message?.includes("FOREIGN KEY")) return res.status(409).json({ success: false, message: "لا يمكن حذف المستودع لأنه مرتبط ببيانات أخرى" });
     res.status(500).json({ success: false, message: "تعذر الحذف" });
   }
 });

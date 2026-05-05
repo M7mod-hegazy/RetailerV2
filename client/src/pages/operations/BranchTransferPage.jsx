@@ -11,6 +11,7 @@ import toast from "react-hot-toast";
 import useDebounce from "../../hooks/useDebounce";
 import { adaptForServer } from "../../utils/search";
 import { useNavigate } from "react-router-dom";
+import TodayInvoicesButton from "../../components/pos/TodayInvoicesButton";
 
 function formatDate(d) {
   return new Intl.DateTimeFormat("ar-EG", { dateStyle: "medium" }).format(new Date(d));
@@ -77,6 +78,7 @@ export default function BranchTransferPage() {
           <p className="text-[13px] font-bold text-slate-400 mt-0.5">حركات البضاعة بين الفروع — لا تؤثر على الأرباح</p>
         </div>
         <div className="flex items-center gap-3">
+          <TodayInvoicesButton variant="ghost" />
           <button
             onClick={() => navigate("/operations/branch-transfer/new?type=receive")}
             className="flex items-center gap-2 rounded-lg bg-emerald-600 px-5 py-2.5 text-[13px] font-black text-white shadow-lg hover:bg-emerald-500 transition-all active:scale-95"

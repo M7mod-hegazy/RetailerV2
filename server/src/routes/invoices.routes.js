@@ -1,6 +1,7 @@
 const express = require("express");
-const { createInvoice, getInvoiceWithLines } = require("../services/invoiceService");
+const { createInvoice, getInvoiceWithLines, editInvoice } = require("../services/invoiceService");
 const { createReturn, getReturns, getReturnDetails } = require("../services/returnService");
+const { adjustStock } = require("../services/stockService");
 const { getDb } = require("../config/database");
 
 const router = express.Router();
@@ -99,6 +100,83 @@ router.get("/returns/:id", (req, res, next) => {
     } catch (e) { next(e); }
 });
 
+router.post("/general-return", (req, res, next) => {
+  try {
+    const db = getDb();
+    const { lines, customer_id, refund_method, notes, reason } = req.body;
+    if (!lines || !lines.length) { const e = new Error("يجب إضافة أصناف"); e.status = 400; throw e; }
+
+    const result = db.transaction(() => {
+      const docNo = "GR-" + Date.now();
+      let total = 0;
+      for (const line of lines) {
+        total += Number(line.quantity) * Number(line.unit_price);
+      }
+
+      const ret = db.prepare(`
+        INSERT INTO sales_returns (doc_no, invoice_id, customer_id, total, refund_method, reason, notes, created_at)
+        VALUES (?, NULL, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+      `).run(docNo, customer_id || null, total, refund_method || 'cash_back', reason || 'other', notes || null);
+
+      for (const line of lines) {
+        const lineTotal = Number(line.quantity) * Number(line.unit_price);
+        db.prepare("INSERT INTO sales_return_lines (sales_return_id, invoice_line_id, item_id, quantity, unit_price, line_total) VALUES (?, NULL, ?, ?, ?, ?)").run(ret.lastInsertRowid, line.item_id, line.quantity, line.unit_price, lineTotal);
+        adjustStock({ item_id: line.item_id, warehouse_id: line.warehouse_id || 1, quantityDelta: Number(line.quantity), movement_type: "sales_return", reference_type: "sales_return", reference_id: ret.lastInsertRowid });
+      }
+
+      if (refund_method === 'cash_back' || !refund_method) {
+        const tId = db.prepare("SELECT default_treasury_id FROM settings WHERE id = 1").get()?.default_treasury_id;
+        if (tId) db.prepare("UPDATE treasuries SET balance = balance - ? WHERE id = ?").run(total, tId);
+      } else if (refund_method === 'credit_note' && customer_id) {
+        db.prepare("UPDATE customers SET opening_balance = opening_balance - ? WHERE id = ?").run(total, customer_id);
+      }
+
+      return { id: ret.lastInsertRowid, doc_no: docNo, total };
+    })();
+
+    res.json({ success: true, data: result });
+  } catch (e) { next(e); }
+});
+
+router.post("/general-purchase-return", (req, res, next) => {
+  try {
+    const db = getDb();
+    const { lines, supplier_id, refund_method, notes, reason } = req.body;
+    if (!lines || !lines.length) { const e = new Error("يجب إضافة أصناف"); e.status = 400; throw e; }
+
+    const result = db.transaction(() => {
+      const docNo = "GPR-" + Date.now();
+      let total = 0;
+      for (const line of lines) {
+        total += Number(line.quantity) * Number(line.unit_price);
+      }
+
+      const ret = db.prepare(`
+        INSERT INTO purchase_returns (doc_no, purchase_id, supplier_id, total, refund_method, reason, notes, created_at)
+        VALUES (?, NULL, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+      `).run(docNo, supplier_id || null, total, refund_method || 'cash_back', reason || 'other', notes || null);
+
+      for (const line of lines) {
+        const lineTotal = Number(line.quantity) * Number(line.unit_price);
+        db.prepare("INSERT INTO purchase_return_lines (purchase_return_id, purchase_line_id, item_id, quantity, unit_cost, unit_price, line_total) VALUES (?, NULL, ?, ?, ?, ?, ?)").run(ret.lastInsertRowid, line.item_id, line.quantity, line.unit_price, line.unit_price, lineTotal);
+        // Stock goes out on purchase return
+        adjustStock({ item_id: line.item_id, warehouse_id: line.warehouse_id || 1, quantityDelta: -Number(line.quantity), movement_type: "purchase_return", reference_type: "purchase_return", reference_id: ret.lastInsertRowid });
+      }
+
+      if (refund_method === 'cash_back' || !refund_method) {
+        const tId = db.prepare("SELECT default_treasury_id FROM settings WHERE id = 1").get()?.default_treasury_id;
+        if (tId) db.prepare("UPDATE treasuries SET balance = balance + ? WHERE id = ?").run(total, tId);
+      } else if (refund_method === 'credit_note' && supplier_id) {
+        db.prepare("UPDATE suppliers SET opening_balance = opening_balance - ? WHERE id = ?").run(total, supplier_id);
+      }
+
+      return { id: ret.lastInsertRowid, doc_no: docNo, total };
+    })();
+
+    res.json({ success: true, data: result });
+  } catch (e) { next(e); }
+});
+
 router.get("/:id", (req, res, next) => {
   try {
     const invoice = getInvoiceWithLines(Number(req.params.id));
@@ -111,6 +189,13 @@ router.get("/:id", (req, res, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+router.put("/:id", (req, res, next) => {
+  try {
+    const result = editInvoice(Number(req.params.id), req.body);
+    res.json({ success: true, data: result });
+  } catch (e) { next(e); }
 });
 
 router.post("/", (req, res) => {

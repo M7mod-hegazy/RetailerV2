@@ -146,7 +146,7 @@ function MethodsTab() {
       </div>
 
       <div className="mt-6">
-        <div className="text-[11px] font-black text-slate-500 uppercase tracking-wider mb-3">Ø¥Ø­ØµØ§Ø¦ÙŠØ§Øª Ø§Ù„Ø§Ø³ØªØ®Ø¯Ø§Ù…</div>
+        <div className="text-[11px] font-black text-slate-500 uppercase tracking-wider mb-3">إحصائيات الاستخدام</div>
         <div className="grid grid-cols-3 gap-3">
           {methods.map((m) => (
             <div key={m.id} className="bg-white rounded-xl border border-slate-200 p-4">
@@ -154,8 +154,8 @@ function MethodsTab() {
                 <span className="text-xl">{m.icon || "card"}</span>
                 <span className="text-[12px] font-black text-slate-700">{m.name}</span>
               </div>
-              <div className="text-[10px] text-slate-400 font-bold">Ù…Ø¹Ø§Ù…Ù„Ø§Øª Ø§Ù„Ø´Ù‡Ø±: <span className="text-slate-700">{m.monthly_count || 0}</span></div>
-              <div className="text-[10px] text-slate-400 font-bold">Ø¥Ø¬Ù…Ø§Ù„ÙŠ: <span className="text-emerald-700 font-black">{fmt(m.monthly_total || 0)} Ø¬.Ù…</span></div>
+              <div className="text-[10px] text-slate-400 font-bold">معاملات الشهر: <span className="text-slate-700">{m.monthly_count || 0}</span></div>
+              <div className="text-[10px] text-slate-400 font-bold">إجمالي: <span className="text-emerald-700 font-black">{fmt(m.monthly_total || 0)} ج.م</span></div>
             </div>
           ))}
         </div>

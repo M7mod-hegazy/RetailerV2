@@ -6,7 +6,11 @@ const router = express.Router();
 router.get("/", (req, res, next) => {
   try {
     const db = getDb();
-    const data = db.prepare("SELECT * FROM branches ORDER BY name").all();
+    const showArchived = req.query.archived === 'true';
+    const query = showArchived
+      ? "SELECT * FROM branches WHERE is_active = 0 ORDER BY name"
+      : "SELECT * FROM branches WHERE is_active = 1 OR is_active IS NULL ORDER BY name";
+    const data = db.prepare(query).all();
     res.json({ success: true, data });
   } catch (err) {
     next(err);
@@ -52,6 +56,22 @@ router.delete("/:id", (req, res, next) => {
   try {
     const db = getDb();
     const id = Number(req.params.id);
+    
+    // Check for related records
+    const transferCount = db.prepare("SELECT COUNT(*) AS c FROM branch_transfers WHERE from_branch_id = ? OR to_branch_id = ?").get(id, id);
+    const userCount = db.prepare("SELECT COUNT(*) AS c FROM users WHERE branch_id = ?").get(id);
+    
+    const hasRecords = 
+      Number(transferCount?.c || 0) > 0 ||
+      Number(userCount?.c || 0) > 0;
+    
+    if (hasRecords) {
+      // Soft delete - mark as inactive
+      db.prepare("UPDATE branches SET is_active = 0 WHERE id = ?").run(id);
+      return res.json({ success: true, archived: true, message: "تم أرشفة الفرع لأنه مرتبط بعمليات أخرى" });
+    }
+    
+    // Hard delete if no records
     db.prepare("DELETE FROM branches WHERE id = ?").run(id);
     res.json({ success: true });
   } catch (err) {

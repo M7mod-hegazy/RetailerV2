@@ -3,8 +3,12 @@ const { getDb } = require("../config/database");
 
 const router = express.Router();
 
-router.get("/", (_req, res) => {
-  const rows = getDb().prepare("SELECT * FROM employees ORDER BY id DESC").all();
+router.get("/", (req, res) => {
+  const showArchived = req.query.archived === 'true';
+  const query = showArchived
+    ? "SELECT * FROM employees WHERE is_active = 0 ORDER BY id DESC"
+    : "SELECT * FROM employees WHERE is_active = 1 OR is_active IS NULL ORDER BY id DESC";
+  const rows = getDb().prepare(query).all();
   res.json({ success: true, data: rows });
 });
 
@@ -44,10 +48,27 @@ router.put("/:id", (req, res, next) => {
 
 router.delete("/:id", (req, res) => {
   try {
-    getDb().prepare("DELETE FROM employees WHERE id = ?").run(req.params.id);
+    const db = getDb();
+    
+    // Check for related records
+    const adjustmentCount = db.prepare("SELECT COUNT(*) AS c FROM employee_adjustments WHERE employee_id = ?").get(req.params.id);
+    const shiftCount = db.prepare("SELECT COUNT(*) AS c FROM shifts WHERE employee_id = ?").get(req.params.id);
+    
+    const hasRecords = 
+      Number(adjustmentCount?.c || 0) > 0 ||
+      Number(shiftCount?.c || 0) > 0;
+    
+    if (hasRecords) {
+      // Soft delete - mark as inactive
+      db.prepare("UPDATE employees SET is_active = 0 WHERE id = ?").run(req.params.id);
+      return res.json({ success: true, archived: true, message: "تم أرشفة الموظف لأنه مرتبط بعمليات أخرى" });
+    }
+    
+    // Hard delete if no records
+    db.prepare("DELETE FROM employees WHERE id = ?").run(req.params.id);
     res.json({ success: true });
   } catch (err) {
-    if (err.message?.includes("FOREIGN KEY")) return res.status(409).json({ success: false, message: "لا يمكن حذف الموظف لأنه مرتبط بعمليات أخرى" });
+    if (err.message?.includes("FOREIGN KEY")) return res.status(409).json({ success: false, message: "لا يمكن حذف الموظف لأنه مرتبط ببيانات أخرى" });
     res.status(500).json({ success: false, message: "تعذر الحذف" });
   }
 });

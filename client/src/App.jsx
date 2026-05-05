@@ -69,6 +69,7 @@ const BankOperationsPage = lazy(() => import("./pages/operations/BankOperationsP
 const ExpenseCategoriesPage = lazy(() => import("./pages/definitions/ExpenseCategoriesPage"));
 const CustomerAccountsPage = lazy(() => import("./pages/accounts/CustomerAccountsPage"));
 const SupplierAccountsPage = lazy(() => import("./pages/accounts/SupplierAccountsPage"));
+const InstallmentsPage = lazy(() => import("./pages/operations/InstallmentsPage"));
 
 function AuthGuard({ children }) {
   const token = useAuthStore((s) => s.token);
@@ -162,7 +163,7 @@ export default function App() {
                     <Route path="operations/cheques" element={<ChequesPage />} />
                     <Route path="operations/payment-transactions" element={<Navigate to="/operations/payment-methods" replace />} />
                     <Route path="operations/treasury-transfer" element={<Navigate to="/expenses" replace />} />
-                    <Route path="operations/installments" element={<Navigate to="/accounts/customers" replace />} />
+                    <Route path="operations/installments" element={<InstallmentsPage />} />
                     <Route path="operations/bank-operations" element={<BankOperationsPage />} />
                     <Route path="operations/bulk-price-update" element={<BulkPriceUpdatePage />} />
                     <Route path="operations/employee-adjustments" element={<EmployeeAdjustmentsPage />} />

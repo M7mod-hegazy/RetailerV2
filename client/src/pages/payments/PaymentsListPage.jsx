@@ -18,6 +18,7 @@ import {
   Briefcase
 } from "lucide-react";
 import { Link } from "react-router-dom";
+import TodayInvoicesButton from "../../components/pos/TodayInvoicesButton";
 
 function formatMoney(v) {
   return Number(v || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2 });
@@ -88,12 +89,15 @@ export default function PaymentsListPage() {
           <h1 className="text-[24px] font-black text-slate-800">سجل المقبوضات والمدفوعات</h1>
           <p className="text-[13px] font-bold text-slate-400">متابعة كافة الحركات المالية الصادرة والواردة وتوزيعاتها</p>
         </div>
-        <Link 
-          to="/payments/new" 
-          className="flex items-center gap-2 rounded-sm bg-slate-800 px-6 py-2.5 text-[14px] font-black text-white shadow-lg transition-all hover:bg-slate-700 hover:shadow-xl active:scale-95"
-        >
-          <Plus className="h-4 w-4" /> إضافة حركة مالية
-        </Link>
+        <div className="flex items-center gap-2">
+          <TodayInvoicesButton variant="ghost" />
+          <Link
+            to="/payments/new"
+            className="flex items-center gap-2 rounded-sm bg-slate-800 px-6 py-2.5 text-[14px] font-black text-white shadow-lg transition-all hover:bg-slate-700 hover:shadow-xl active:scale-95"
+          >
+            <Plus className="h-4 w-4" /> إضافة حركة مالية
+          </Link>
+        </div>
       </div>
 
       {/* Stats Grid */}

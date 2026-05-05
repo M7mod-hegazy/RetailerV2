@@ -278,6 +278,7 @@ export default function DailyTreasuryPage() {
       await api.post("/api/daily-sessions/yesterday/force-close");
       toast.success("تم إغلاق يوم أمس بالقوة");
       setYesterdayAlert(null);
+      loadSummary(); // Refresh today's opening balance
     } catch (e) {
       toast.error(e.response?.data?.message || "خطأ");
     } finally {
@@ -296,6 +297,8 @@ export default function DailyTreasuryPage() {
   const cashOut = Number(summary?.cash_out || 0);
   const cashInRows = [
     { label: "نقد من مبيعات POS", value: summary?.pos_cash_sales, tab: "pos" },
+    { label: "نقد من أقساط (دفعة أولى أو لاحقة)", value: summary?.pos_installment_cash, tab: "pos" },
+    { label: "نقد من دفع متعدد", value: summary?.pos_multi_cash, tab: "pos" },
     { label: "نقد تم تحصيله من العملاء", value: summary?.customer_cash_collections ?? (Number(summary?.customer_payments || 0) + Number(summary?.ajal_payments || 0)), tab: "customer_cash_collections" },
     { label: "إيرادات نقدية", value: summary?.revenues_cash, tab: "revenues" },
     { label: "نقد مسترد من مرتجعات الشراء", value: summary?.purchase_returns_cash, tab: "purchase_returns" },
@@ -307,6 +310,8 @@ export default function DailyTreasuryPage() {
     { label: "مسحوبات من الخزنة", value: summary?.withdrawals, tab: "withdrawals" },
   ];
   const nonCashRows = [
+    { label: "مبيعات آجلة قللت دين العملاء", value: summary?.pos_credit_sales, tab: "pos" },
+    { label: "مرتجعات مبيعات زادت دين العملاء", value: summary?.sales_returns_account, tab: "sales_returns" },
     { label: "مشتريات آجلة زادت دين الموردين", value: summary?.purchases_payable_total, tab: "purchases" },
     { label: "مرتجعات شراء خصمت من دين الموردين", value: summary?.purchase_returns_payable_total, tab: "purchase_returns" },
     { label: "مدفوعات/تحصيلات بنك أو كارت", value: summary?.non_cash_movements_total ?? summary?.pos_bank_sales, tab: "all" },
@@ -422,56 +427,55 @@ export default function DailyTreasuryPage() {
       </div>
 
       {/* Cinematic Hero Header */}
-      <header className="relative z-10 w-full pt-12 pb-8 px-6 shrink-0">
+      <header className="relative z-10 w-full pt-6 pb-4 px-6 shrink-0">
         <motion.div 
           initial="hidden"
           animate="show"
           variants={staggerContainer}
-          className="max-w-[1400px] mx-auto flex flex-col md:flex-row md:items-end justify-between gap-6"
+          className="max-w-[1400px] mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4"
         >
           <div className="flex flex-col items-start justify-center">
-            <motion.div variants={fadeInUp} className="flex items-center gap-3 text-slate-400 mb-6">
-              <div className="h-px w-8 bg-slate-300"></div>
+            <motion.div variants={fadeInUp} className="flex items-center gap-2 text-slate-400 mb-2">
               <Wallet className="h-4 w-4" />
-              <span className="text-[11px] font-black uppercase tracking-[0.2em] font-mono">المالية // تسوية ومراجعة الحركات</span>
+              <span className="text-[10px] font-black uppercase tracking-[0.15em] font-mono">المالية // تسوية ومراجعة الحركات</span>
             </motion.div>
             
-            <motion.h1 variants={fadeInUp} className="max-w-4xl text-5xl md:text-6xl font-black text-zinc-950 tracking-tighter leading-[1.1]">
+            <motion.h1 variants={fadeInUp} className="text-3xl md:text-4xl font-black text-zinc-950 tracking-tighter">
               الخزينة اليومية
             </motion.h1>
           </div>
 
-          <motion.div variants={fadeInUp} className="flex flex-wrap items-center gap-3 bg-white/80 backdrop-blur-md p-3 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100/50">
+          <motion.div variants={fadeInUp} className="flex flex-wrap items-center gap-2 bg-white/80 backdrop-blur-md p-2 rounded-2xl shadow-sm border border-slate-100/50">
             <div className="relative">
               <input
                 type="date"
                 value={date}
                 max={todayStr()}
                 onChange={(e) => { setDate(e.target.value); setActiveTab("all"); }}
-                className="h-12 rounded-2xl border border-slate-200 bg-white/50 px-4 text-[13px] font-bold text-slate-700 outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 transition-all cursor-pointer"
+                className="h-10 rounded-xl border border-slate-200 bg-white/50 px-3 text-[12px] font-bold text-slate-700 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10 transition-all cursor-pointer"
               />
             </div>
 
             <motion.button
-              whileHover={{ y: -2 }}
+              whileHover={{ y: -1 }}
               whileTap={{ scale: 0.98 }}
               onClick={() => { setDate(todayStr()); setActiveTab("all"); setGlobalAmountSearch(""); }}
-              className={`flex h-12 items-center gap-2 rounded-2xl px-4 text-[13px] font-black transition-colors ${
-                isToday ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/20" : "bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
+              className={`flex h-10 items-center gap-1.5 rounded-xl px-3 text-[12px] font-black transition-colors ${
+                isToday ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/20" : "bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
               }`}
             >
-              <Calendar className="h-4 w-4" /> اليوم
+              <Calendar className="h-3.5 w-3.5" /> اليوم
             </motion.button>
             
-            <div className={`flex items-center gap-2 h-12 px-4 rounded-2xl border ${isClosed ? "bg-rose-50 border-rose-100 text-rose-700" : "bg-emerald-50 border-emerald-100 text-emerald-700"}`}>
+            <div className={`flex items-center gap-1.5 h-10 px-3 rounded-xl border ${isClosed ? "bg-rose-50 border-rose-100 text-rose-700" : "bg-emerald-50 border-emerald-100 text-emerald-700"}`}>
               {isClosed ? <Lock className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
               <span className="text-[13px] font-black">{isClosed ? "مغلق" : "مفتوح"}</span>
             </div>
 
-            <label className="flex items-center gap-2 h-12 cursor-pointer rounded-2xl border border-slate-200 px-4 text-[13px] font-black text-slate-600 hover:bg-slate-50 transition-colors select-none">
+            <label className="flex items-center gap-1.5 h-10 cursor-pointer rounded-xl border border-slate-200 px-3 text-[11px] font-black text-slate-600 hover:bg-slate-50 transition-colors select-none">
               <input
                 type="checkbox"
-                className="accent-emerald-600 h-4 w-4 rounded"
+                className="accent-emerald-600 h-3.5 w-3.5 rounded"
                 checked={compareYesterday}
                 onChange={(e) => setCompareYesterday(e.target.checked)}
               />
@@ -479,42 +483,42 @@ export default function DailyTreasuryPage() {
             </label>
 
             <motion.button
-              whileHover={{ y: -2 }}
+              whileHover={{ y: -1 }}
               whileTap={{ scale: 0.98 }}
               onClick={() => { setHistoryOpen(true); loadPastSessions(); }}
-              className="flex h-12 items-center gap-2 rounded-2xl bg-slate-900 px-5 text-[13px] font-black text-white hover:bg-slate-800 transition-colors shadow-lg shadow-slate-900/10"
+              className="flex h-10 items-center gap-1.5 rounded-xl bg-slate-900 px-3 text-[11px] font-black text-white hover:bg-slate-800 transition-colors shadow-md shadow-slate-900/10"
             >
-              <History className="h-4 w-4 text-emerald-400" /> الأيام السابقة
+              <History className="h-3.5 w-3.5 text-emerald-400" /> الأيام السابقة
             </motion.button>
             
             <motion.button
-              whileHover={{ y: -2 }}
+              whileHover={{ y: -1 }}
               whileTap={{ scale: 0.98 }}
               onClick={loadSummary}
-              className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 transition-colors shadow-sm"
+              className="flex h-10 w-10 items-center justify-center rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 transition-colors shadow-sm"
             >
-              <RefreshCw className="h-4 w-4" />
+              <RefreshCw className="h-3.5 w-3.5" />
             </motion.button>
             
             <motion.button
-              whileHover={{ y: -2 }}
+              whileHover={{ y: -1 }}
               whileTap={{ scale: 0.98 }}
               onClick={handlePrint}
-              className="flex h-12 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 text-[13px] font-black text-slate-700 hover:bg-slate-50 transition-colors shadow-sm"
+              className="flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-[11px] font-black text-slate-700 hover:bg-slate-50 transition-colors shadow-sm"
             >
-              <Printer className="h-4 w-4" /> طباعة تقرير
+              <Printer className="h-3.5 w-3.5" /> طباعة
             </motion.button>
           </motion.div>
         </motion.div>
       </header>
 
       {/* Main Grid Layout (AIDA: Interest & Action) */}
-      <main className="relative z-10 flex-1 w-full max-w-[1400px] mx-auto px-8 pb-8">
+      <main className="relative z-10 flex-1 w-full max-w-[1400px] mx-auto px-6 pb-24">
         <motion.div 
           initial="hidden"
           animate="show"
           variants={staggerContainer}
-          className="flex flex-col gap-4"
+          className="flex flex-col gap-3"
         >
           {/* Smart Alerts Banner */}
           <AnimatePresence>
@@ -562,30 +566,42 @@ export default function DailyTreasuryPage() {
             </div>
           ) : (
             <>
-              {/* Read-only notice for historical days */}
-              {!isToday && (
+              {/* Read-only notice for historical days or closed today */}
+              {(isClosed || !isToday) && (
                 <motion.div variants={fadeInUp} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-blue-50 border border-blue-100 px-6 py-4">
                   <div className="flex items-center gap-3">
                     <Lock className="h-5 w-5 text-blue-500" />
-                    <span className="text-[13px] font-black text-blue-800">عرض يوم {date} للقراءة والمراجعة. لا يتم السماح بإدخال حركات على يوم مغلق.</span>
+                    <span className="text-[13px] font-black text-blue-800">
+                      {isToday && isClosed 
+                        ? "اليومية مغلقة. يمكنك إعادة فتحها إذا أُغلقت بالخطأ."
+                        : `عرض يوم ${date} للقراءة والمراجعة.`}
+                    </span>
                   </div>
-                  {isClosed && (
-                    <div className="flex items-center gap-2">
-                      <input
-                        value={reopenReason}
-                        onChange={(e) => setReopenReason(e.target.value)}
-                        placeholder="سبب إعادة الفتح"
-                        className="h-9 w-48 rounded-xl border border-blue-200 bg-white px-3 text-[11px] font-bold outline-none focus:border-blue-500"
-                      />
-                      <button
-                        onClick={reopenDay}
-                        disabled={reopening || !reopenReason.trim()}
-                        className="flex h-9 items-center gap-1.5 rounded-xl bg-blue-700 px-3 text-[11px] font-black text-white hover:bg-blue-800 disabled:opacity-40"
-                      >
-                        <RotateCcw className="h-3.5 w-3.5" /> إعادة فتح آخر يوم
-                      </button>
-                    </div>
-                  )}
+                  {/* Show reopen button for closed today OR for latest closed historical day */}
+                  {isClosed && (() => {
+                    // Check if this is the latest closed day (no later session exists)
+                    const hasLaterSession = pastSessions.some(s => s.date > date);
+                    const canReopen = isToday || !hasLaterSession;
+                    return canReopen ? (
+                      <div className="flex items-center gap-2">
+                        <input
+                          value={reopenReason}
+                          onChange={(e) => setReopenReason(e.target.value)}
+                          placeholder="سبب إعادة الفتح"
+                          className="h-9 w-48 rounded-xl border border-blue-200 bg-white px-3 text-[11px] font-bold outline-none focus:border-blue-500"
+                        />
+                        <button
+                          onClick={reopenDay}
+                          disabled={reopening || !reopenReason.trim()}
+                          className="flex h-9 items-center gap-1.5 rounded-xl bg-blue-700 px-3 text-[11px] font-black text-white hover:bg-blue-800 disabled:opacity-40"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" /> إعادة فتح
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="text-[11px] font-bold text-blue-600">لا يمكن إعادة فتح هذا اليوم لأن هناك أيام أحدث موجودة.</span>
+                    );
+                  })()}
                 </motion.div>
               )}
 
@@ -687,9 +703,9 @@ export default function DailyTreasuryPage() {
                 ))}
               </motion.div>
 
-              <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+              <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
                 {/* Right Area: Transactions (8 columns) */}
-                <motion.div variants={fadeInUp} className="xl:col-span-8 flex flex-col gap-4">
+                <motion.div variants={fadeInUp} className="xl:col-span-8 flex flex-col gap-3">
                   
                   {/* Search Bar */}
                   <div className="relative group w-full">
@@ -708,7 +724,7 @@ export default function DailyTreasuryPage() {
                   </div>
 
                   {/* Transaction Explorer */}
-                  <div className="rounded-2xl bg-white/80 backdrop-blur-xl border border-slate-200/60 shadow-sm flex flex-col overflow-hidden" style={{ minHeight: 350 }}>
+                  <div className="rounded-2xl bg-white/80 backdrop-blur-xl border border-slate-200/60 shadow-sm flex flex-col overflow-hidden flex-1">
                     {/* Tab bar */}
                     <div className="flex items-center gap-1.5 border-b border-slate-100/80 px-3 py-2 overflow-x-auto scrollbar-hide">
                       {TABS.map((t) => (
@@ -835,126 +851,126 @@ export default function DailyTreasuryPage() {
                 </motion.div>
 
                 {/* Left Area: Equation & Close Day (4 columns) */}
-                <motion.div variants={fadeInUp} className="xl:col-span-4 flex flex-col gap-6 sticky top-6">
+                <motion.div variants={fadeInUp} className="xl:col-span-4 flex flex-col gap-4 sticky top-4">
                   
                   {/* Equation Card */}
-                  <div className="rounded-[2.5rem] bg-white/80 backdrop-blur-xl border border-slate-200/60 shadow-[0_20px_40px_-15px_rgba(0,0,0,0.05)] flex flex-col overflow-hidden">
-                    <div className="px-8 py-5 border-b border-slate-100/80 flex items-center gap-3 bg-slate-50/50">
-                      <div className="h-8 w-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center ring-1 ring-inset ring-indigo-100">
+                  <div className="rounded-2xl bg-white/80 backdrop-blur-xl border border-slate-200/60 shadow-sm flex flex-col overflow-hidden">
+                    <div className="px-5 py-3 border-b border-slate-100/80 flex items-center gap-3 bg-slate-50/50">
+                      <div className="h-7 w-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center ring-1 ring-inset ring-indigo-100">
                         <Calculator className="h-4 w-4" />
                       </div>
-                      <h3 className="text-[15px] font-black text-zinc-900 tracking-tight">معادلة الخزينة</h3>
+                      <h3 className="text-[14px] font-black text-zinc-900 tracking-tight">معادلة الخزينة</h3>
                     </div>
-                    <div className="p-8 space-y-5">
-                      <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
-                        <div className="flex items-center gap-2.5">
-                          <Lock className="h-3.5 w-3.5 text-slate-300" />
-                          <span className="text-[13px] text-slate-700 font-black">الرصيد الافتتاحي</span>
+                    <div className="p-4 space-y-3">
+                      <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <Lock className="h-3 w-3 text-slate-300" />
+                          <span className="text-[12px] text-slate-700 font-black">الرصيد الافتتاحي</span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="font-black text-[13px] font-mono text-zinc-900">{fmt(summary?.opening_balance)}</span>
+                          <span className="font-black text-[12px] font-mono text-zinc-900">{fmt(summary?.opening_balance)}</span>
                           {!isClosed && (
                             <button
                               type="button"
                               onClick={(e) => { e.stopPropagation(); setOpeningDraft(String(summary?.opening_balance || 0)); setOpeningEditOpen(true); }}
-                              className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"
+                              className="flex h-6 w-6 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"
                               title="تعديل الرصيد الافتتاحي"
                             >
-                              <Edit3 className="h-3.5 w-3.5" />
+                              <Edit3 className="h-3 w-3" />
                             </button>
                           )}
                         </div>
                       </div>
 
-                      <div className="space-y-2">
+                      <div className="space-y-1">
                         <div className="flex items-center justify-between px-1">
-                          <span className="text-[11px] font-black text-emerald-700">الداخل النقدي</span>
-                          <span className="text-[11px] font-black font-mono text-emerald-700">+ {fmt(cashIn)}</span>
+                          <span className="text-[10px] font-black text-emerald-700">الداخل النقدي</span>
+                          <span className="text-[10px] font-black font-mono text-emerald-700">+ {fmt(cashIn)}</span>
                         </div>
                         {cashInRows.map(({ label, value, tab }) => (
                           <button
                             type="button"
                             key={label}
                             onClick={() => { if (tab) { setActiveTab(tab); setGlobalAmountSearch(""); } }}
-                            className="flex w-full items-center justify-between rounded-2xl px-3 py-2.5 text-right transition-colors hover:bg-emerald-50/60"
+                            className="flex w-full items-center justify-between rounded-xl px-2 py-1.5 text-right transition-colors hover:bg-emerald-50/60"
                           >
-                            <div className="flex items-center gap-2.5">
-                              <div className="h-1.5 w-1.5 rounded-full bg-emerald-300" />
-                              <span className="text-[13px] text-slate-600 font-bold">+ {label}</span>
+                            <div className="flex items-center gap-2">
+                              <div className="h-1 w-1 rounded-full bg-emerald-300" />
+                              <span className="text-[11px] text-slate-600 font-bold">+ {label}</span>
                             </div>
-                            <span className="font-black text-[13px] font-mono text-emerald-700">{fmt(value)}</span>
+                            <span className="font-black text-[11px] font-mono text-emerald-700">{fmt(value)}</span>
                           </button>
                         ))}
                       </div>
 
-                      <div className="space-y-2">
+                      <div className="space-y-1">
                         <div className="flex items-center justify-between px-1">
-                          <span className="text-[11px] font-black text-rose-700">الخارج النقدي</span>
-                          <span className="text-[11px] font-black font-mono text-rose-700">- {fmt(cashOut)}</span>
+                          <span className="text-[10px] font-black text-rose-700">الخارج النقدي</span>
+                          <span className="text-[10px] font-black font-mono text-rose-700">- {fmt(cashOut)}</span>
                         </div>
                         {cashOutRows.map(({ label, value, tab }) => (
                           <button
                             type="button"
                             key={label}
                             onClick={() => { if (tab) { setActiveTab(tab); setGlobalAmountSearch(""); } }}
-                            className="flex w-full items-center justify-between rounded-2xl px-3 py-2.5 text-right transition-colors hover:bg-rose-50/60"
+                            className="flex w-full items-center justify-between rounded-xl px-2 py-1.5 text-right transition-colors hover:bg-rose-50/60"
                           >
-                            <div className="flex items-center gap-2.5">
-                              <div className="h-1.5 w-1.5 rounded-full bg-rose-300" />
-                              <span className="text-[13px] text-slate-600 font-bold">- {label}</span>
+                            <div className="flex items-center gap-2">
+                              <div className="h-1 w-1 rounded-full bg-rose-300" />
+                              <span className="text-[11px] text-slate-600 font-bold">- {label}</span>
                             </div>
-                            <span className="font-black text-[13px] font-mono text-rose-700">{fmt(value)}</span>
+                            <span className="font-black text-[11px] font-mono text-rose-700">{fmt(value)}</span>
                           </button>
                         ))}
                       </div>
 
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
-                        <div className="mb-2 text-[11px] font-black text-slate-600">حركات حسابية لا تغيّر الخزنة</div>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-2">
+                        <div className="mb-1 text-[10px] font-black text-slate-600">حركات حسابية لا تغيّر الخزنة</div>
                         {nonCashRows.map(({ label, value, tab }) => (
                           <button
                             type="button"
                             key={label}
                             onClick={() => { if (tab) { setActiveTab(tab); setGlobalAmountSearch(""); } }}
-                            className="flex w-full items-center justify-between rounded-xl px-2 py-2 text-right transition-colors hover:bg-white"
+                            className="flex w-full items-center justify-between rounded-lg px-2 py-1 text-right transition-colors hover:bg-white"
                           >
-                            <div className="flex items-center gap-2">
-                              <Lock className="h-3.5 w-3.5 text-slate-300" />
-                              <span className="text-[12px] font-bold text-slate-500">{label}</span>
+                            <div className="flex items-center gap-1.5">
+                              <Lock className="h-3 w-3 text-slate-300" />
+                              <span className="text-[10px] font-bold text-slate-500">{label}</span>
                             </div>
-                            <span className="font-black text-[12px] font-mono text-slate-600">{fmt(value)}</span>
+                            <span className="font-black text-[10px] font-mono text-slate-600">{fmt(value)}</span>
                           </button>
                         ))}
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2 border-t border-slate-100 pt-3 mt-3">
-                        <div className="rounded-2xl bg-emerald-50 border border-emerald-100 p-3">
-                          <div className="text-[10px] font-black text-emerald-600">إجمالي الداخل النقدي</div>
-                          <div className="mt-1 text-[15px] font-black font-mono text-emerald-800">{fmt(cashIn)}</div>
+                      <div className="grid grid-cols-2 gap-2 border-t border-slate-100 pt-2 mt-2">
+                        <div className="rounded-xl bg-emerald-50 border border-emerald-100 p-2">
+                          <div className="text-[9px] font-black text-emerald-600">إجمالي الداخل</div>
+                          <div className="mt-0.5 text-[13px] font-black font-mono text-emerald-800">{fmt(cashIn)}</div>
                         </div>
-                        <div className="rounded-2xl bg-rose-50 border border-rose-100 p-3">
-                          <div className="text-[10px] font-black text-rose-600">إجمالي الخارج النقدي</div>
-                          <div className="mt-1 text-[15px] font-black font-mono text-rose-800">{fmt(cashOut)}</div>
+                        <div className="rounded-xl bg-rose-50 border border-rose-100 p-2">
+                          <div className="text-[9px] font-black text-rose-600">إجمالي الخارج</div>
+                          <div className="mt-0.5 text-[13px] font-black font-mono text-rose-800">{fmt(cashOut)}</div>
                         </div>
                       </div>
-                      <div className="border-t border-slate-200/80 pt-4 mt-4 flex items-center justify-between px-2">
-                        <span className="text-[13px] font-black text-slate-500 uppercase tracking-widest">المتوقع في الخزينة</span>
-                        <span className="text-[22px] font-black font-mono text-emerald-600">{fmt(expected)} <span className="text-[12px] text-slate-400">ج.م</span></span>
+                      <div className="border-t border-slate-200/80 pt-3 mt-2 flex items-center justify-between px-1">
+                        <span className="text-[11px] font-black text-slate-500 uppercase tracking-widest">المتوقع في الخزنة</span>
+                        <span className="text-[18px] font-black font-mono text-emerald-600">{fmt(expected)} <span className="text-[10px] text-slate-400">ج.م</span></span>
                       </div>
                       
                       {sess.actual_cash != null && (
                         <motion.div 
                           initial={{ opacity: 0, scale: 0.95 }}
                           animate={{ opacity: 1, scale: 1 }}
-                          className={`flex flex-col rounded-2xl p-4 mt-4 border ${discrepancy >= 0 ? "bg-emerald-50/50 border-emerald-100" : "bg-rose-50/50 border-rose-100"}`}
+                          className={`flex flex-col rounded-xl p-3 mt-2 border ${discrepancy >= 0 ? "bg-emerald-50/50 border-emerald-100" : "bg-rose-50/50 border-rose-100"}`}
                         >
                           <div className="flex items-center justify-between mb-1">
-                            <span className="font-black text-[12px] text-slate-600">الرصيد الفعلي المدخل</span>
-                            <span className={`font-black text-[18px] font-mono ${discrepancy >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
+                            <span className="font-black text-[11px] text-slate-600">الرصيد الفعلي</span>
+                            <span className={`font-black text-[16px] font-mono ${discrepancy >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
                               {fmt(sess.actual_cash)}
                             </span>
                           </div>
-                          <div className={`font-black text-[11px] ${discrepancy >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
-                            الفرق الجردي: {discrepancy >= 0 ? "+" : ""}{fmt(discrepancy)} ج.م
+                          <div className={`font-black text-[10px] ${discrepancy >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                            الفرق: {discrepancy >= 0 ? "+" : ""}{fmt(discrepancy)} ج.م
                           </div>
                         </motion.div>
                       )}
@@ -963,37 +979,35 @@ export default function DailyTreasuryPage() {
 
                   {/* Day Close Section */}
                   {isToday && !isClosed && (
-                    <div className="rounded-[2.5rem] bg-white/80 backdrop-blur-xl border border-slate-200/60 shadow-[0_20px_40px_-15px_rgba(0,0,0,0.05)] flex flex-col overflow-hidden">
-                      <div className="px-8 py-5 border-b border-slate-100/80 flex items-center gap-3 bg-slate-50/50">
-                        <div className="h-8 w-8 rounded-xl bg-slate-800 text-white flex items-center justify-center">
+                    <div className="rounded-2xl bg-white/80 backdrop-blur-xl border border-slate-200/60 shadow-sm flex flex-col overflow-hidden">
+                      <div className="px-5 py-3 border-b border-slate-100/80 flex items-center gap-3 bg-slate-50/50">
+                        <div className="h-7 w-7 rounded-lg bg-slate-800 text-white flex items-center justify-center">
                           <Lock className="h-4 w-4" />
                         </div>
-                        <h3 className="text-[15px] font-black text-zinc-900 tracking-tight">إغلاق الجلسة</h3>
+                        <h3 className="text-[14px] font-black text-zinc-900 tracking-tight">إغلاق الجلسة</h3>
                       </div>
-                      <div className="p-8 flex flex-col gap-6">
-                        <div className="space-y-4">
-                          <div className="flex flex-col gap-2 relative group">
-                            <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">
+                      <div className="p-4 flex flex-col gap-4">
+                        <div className="space-y-3">
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">
                               الرصيد الفعلي (ج.م)
                             </label>
                             <div className="flex gap-2">
-                              <div className="relative flex-1">
-                                <input
-                                  type="number"
-                                  value={actualCash}
-                                  onChange={(e) => setActualCash(e.target.value)}
-                                  className="w-full h-14 bg-white rounded-2xl px-4 text-[18px] font-black text-zinc-900 outline-none transition-all placeholder:text-slate-300 border border-slate-200 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 text-center font-mono"
-                                  placeholder="0.00"
-                                />
-                              </div>
-                              <SmartTooltip content="فتح آلة عد العملات النقدية">
+                              <input
+                                type="number"
+                                value={actualCash}
+                                onChange={(e) => setActualCash(e.target.value)}
+                                className="flex-1 h-12 bg-white rounded-xl px-4 text-[16px] font-black text-zinc-900 outline-none transition-all placeholder:text-slate-300 border border-slate-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10 text-center font-mono"
+                                placeholder="0.00"
+                              />
+                              <SmartTooltip content="فتح آلة عد العملات">
                                 <motion.button
                                   whileHover={{ y: -1 }}
                                   whileTap={{ scale: 0.95 }}
                                   onClick={() => setMoneyOpen(true)}
-                                  className="h-14 w-14 flex shrink-0 items-center justify-center rounded-2xl border border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors shadow-sm"
+                                  className="h-12 w-12 flex shrink-0 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors shadow-sm"
                                 >
-                                  <Coins className="h-5 w-5" />
+                                  <Coins className="h-4 w-4" />
                                 </motion.button>
                               </SmartTooltip>
                             </div>
@@ -1003,32 +1017,32 @@ export default function DailyTreasuryPage() {
                             <motion.div 
                               initial={{ opacity: 0, y: -10 }}
                               animate={{ opacity: 1, y: 0 }}
-                              className={`text-center rounded-2xl py-3 px-4 text-[13px] font-black border ${Number(actualCash) - expected >= 0 ? "bg-emerald-50 border-emerald-100 text-emerald-700" : "bg-rose-50 border-rose-100 text-rose-700"}`}
+                              className={`text-center rounded-xl py-2 px-3 text-[12px] font-black border ${Number(actualCash) - expected >= 0 ? "bg-emerald-50 border-emerald-100 text-emerald-700" : "bg-rose-50 border-rose-100 text-rose-700"}`}
                             >
                               الفرق: {Number(actualCash) - expected >= 0 ? "+" : ""}{fmt(Number(actualCash) - expected)} ج.م
                             </motion.div>
                           )}
 
                           {actualCash && (
-                            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                              <div className="mb-2 flex items-center gap-2 text-[11px] font-black text-slate-700">
-                                <Sparkles className="h-3.5 w-3.5 text-amber-500" /> مساعد العجز والزيادة
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                              <div className="mb-1 flex items-center gap-2 text-[10px] font-black text-slate-700">
+                                <Sparkles className="h-3 w-3 text-amber-500" /> مساعد العجز والزيادة
                               </div>
-                              <div className="space-y-1">
+                              <div className="space-y-0.5">
                                 {discrepancySuggestions.map((tip, idx) => (
-                                  <div key={idx} className="text-[11px] font-bold text-slate-500 leading-5">• {tip}</div>
+                                  <div key={idx} className="text-[10px] font-bold text-slate-500 leading-4">• {tip}</div>
                                 ))}
                               </div>
                             </div>
                           )}
                           
-                          <div className="flex flex-col gap-2">
-                            <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">ملاحظات الإغلاق</label>
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">ملاحظات الإغلاق</label>
                             <textarea
                               value={closeNotes}
                               onChange={(e) => setCloseNotes(e.target.value)}
-                              className="w-full h-20 rounded-2xl bg-white border border-slate-200 px-4 py-3 text-[13px] font-bold text-zinc-800 outline-none resize-none focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 placeholder:text-slate-300 transition-all"
-                              placeholder="أضف أي ملاحظات تبرر العجز أو الزيادة..."
+                              className="w-full h-16 rounded-xl bg-white border border-slate-200 px-3 py-2 text-[12px] font-bold text-zinc-800 outline-none resize-none focus:border-zinc-400 focus:ring-2 focus:ring-zinc-900/5 placeholder:text-slate-300 transition-all"
+                              placeholder="أضف ملاحظات تبرر العجز أو الزيادة..."
                             />
                           </div>
                         </div>
@@ -1038,7 +1052,7 @@ export default function DailyTreasuryPage() {
                           whileTap={{ scale: 0.98 }}
                           onClick={() => setCloseConfirmOpen(true)}
                           disabled={!actualCash || closing}
-                          className="w-full rounded-2xl bg-zinc-950 py-4 text-[15px] font-black text-white hover:bg-zinc-800 disabled:opacity-40 transition-all shadow-xl shadow-zinc-950/20"
+                          className="w-full rounded-xl bg-zinc-950 py-3 text-[13px] font-black text-white hover:bg-zinc-800 disabled:opacity-40 transition-all shadow-lg shadow-zinc-950/20"
                         >
                           {closing ? "جاري الإغلاق والتشفير..." : "إغلاق اليومية واعتماد الأرصدة"}
                         </motion.button>

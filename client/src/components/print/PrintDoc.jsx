@@ -35,7 +35,7 @@ export function PrintThermalDoc({ invoice = {}, settings: s = {} }) {
   const w        = (s.receipt_width || g(s, "receipt_width")) === "58mm" ? "58mm" : "80mm";
   const customBlocks = getCustomBlocks(s);
 
-  const subtotal      = lines.reduce((sum, l) => sum + (Number(l.unit_price) * Number(l.quantity)), 0);
+  const subtotal      = lines.reduce((sum, l) => sum + ((Number(l.unit_price) || Number(l.unit_cost) || 0) * Number(l.quantity)), 0);
   const totalDiscount = lines.reduce((sum, l) => sum + (Number(l.discount_amount) || 0), 0);
   const taxAmount     = g(s, "show_tax") !== false ? (subtotal - totalDiscount) * (taxRate / 100) : 0;
   const grandTotal    = subtotal - totalDiscount + taxAmount;
@@ -109,7 +109,7 @@ export function PrintThermalDoc({ invoice = {}, settings: s = {} }) {
         </thead>
         <tbody>
           {lines.map((line, i) => {
-            const lineTotal = (Number(line.unit_price) * Number(line.quantity)) - (Number(line.discount_amount) || 0);
+            const lineTotal = ((Number(line.unit_price) || Number(line.unit_cost) || 0) * Number(line.quantity)) - (Number(line.discount_amount) || 0);
             return (
               <tr key={i}>
                 {g(s, "show_item_code") !== false && (
@@ -117,7 +117,7 @@ export function PrintThermalDoc({ invoice = {}, settings: s = {} }) {
                     {line.sku || line.barcode || line.product_code || ""}
                   </td>
                 )}
-                <td style={{ textAlign: "right", padding: "2px 0" }}>{line.product_name}</td>
+                <td style={{ textAlign: "right", padding: "2px 0" }}>{line.product_name || line.item_name || line.name || ""}</td>
                 <td style={{ textAlign: "center" }}>{line.quantity}</td>
                 <td style={{ textAlign: "left" }}>{lineTotal.toFixed(2)}</td>
               </tr>
@@ -203,7 +203,7 @@ export function PrintA4Doc({ invoice = {}, settings: s = {}, size = "A4" }) {
   const customBlocks = getCustomBlocks(s);
   const showCode = g(s, "show_item_code") !== false;
 
-  const subtotal      = lines.reduce((sum, l) => sum + (Number(l.unit_price) * Number(l.quantity)), 0);
+  const subtotal      = lines.reduce((sum, l) => sum + ((Number(l.unit_price) || Number(l.unit_cost) || 0) * Number(l.quantity)), 0);
   const totalDiscount = lines.reduce((sum, l) => sum + (Number(l.discount_amount) || 0), 0);
   const taxAmount     = g(s, "show_tax") !== false ? (subtotal - totalDiscount) * (taxRate / 100) : 0;
   const grandTotal    = subtotal - totalDiscount + taxAmount;
@@ -274,7 +274,7 @@ export function PrintA4Doc({ invoice = {}, settings: s = {}, size = "A4" }) {
         </thead>
         <tbody>
           {lines.map((line, i) => {
-            const lineTotal = (Number(line.unit_price) * Number(line.quantity)) - (Number(line.discount_amount) || 0);
+            const lineTotal = ((Number(line.unit_price) || Number(line.unit_cost) || 0) * Number(line.quantity)) - (Number(line.discount_amount) || 0);
             return (
               <tr key={i} style={{ background: i % 2 === 0 ? "#f8fafc" : "#fff" }}>
                 <td style={{ padding: "3px 6px", color: "#94a3b8" }}>{i + 1}</td>
@@ -283,9 +283,9 @@ export function PrintA4Doc({ invoice = {}, settings: s = {}, size = "A4" }) {
                     {line.sku || line.barcode || line.product_code || ""}
                   </td>
                 )}
-                <td style={{ padding: "3px 6px", fontWeight: "600" }}>{line.product_name}</td>
+                <td style={{ padding: "3px 6px", fontWeight: "600" }}>{line.product_name || line.item_name || line.name || ""}</td>
                 <td style={{ textAlign: "center", padding: "3px 6px" }}>{line.quantity}</td>
-                <td style={{ textAlign: "center", padding: "3px 6px" }}>{Number(line.unit_price).toFixed(2)}</td>
+                <td style={{ textAlign: "center", padding: "3px 6px" }}>{(Number(line.unit_price) || Number(line.unit_cost) || 0).toFixed(2)}</td>
                 <td style={{ textAlign: "left", padding: "3px 6px", fontWeight: "700" }}>{lineTotal.toFixed(2)}</td>
               </tr>
             );
