@@ -65,34 +65,11 @@ function getSession(db, dateText, createIfMissing = false) {
 }
 
 function assertCanWriteForDate(db, dateValue) {
+  // Session blocker removed: treasury is now a live reporting window.
+  // Writes are allowed on any date. Past-date protection is enforced at the route level per feature.
   const targetDate = normalizeDate(dateValue);
   ensureDailySessionSchema(db);
-
-  const blocker = db.prepare(`
-    SELECT *
-    FROM daily_sessions
-    WHERE status = 'open' AND date < ?
-    ORDER BY date ASC
-    LIMIT 1
-  `).get(targetDate);
-  if (blocker) {
-    const err = new Error(`يجب إغلاق يوم ${blocker.date} قبل تسجيل حركات جديدة.`);
-    err.status = 423;
-    err.code = "DAILY_SESSION_BLOCKED";
-    err.data = { blocker_date: blocker.date, requested_date: targetDate, blocker };
-    throw err;
-  }
-
-  const session = ensureSessionForDate(db, targetDate);
-  if (session.status === "closed") {
-    const err = new Error(`اليومية ${targetDate} مغلقة. أعد فتحها من شاشة الخزينة اليومية قبل إضافة أي حركة.`);
-    err.status = 423;
-    err.code = "DAILY_SESSION_CLOSED";
-    err.data = { blocker_date: targetDate, requested_date: targetDate, blocker: session };
-    throw err;
-  }
-
-  return session;
+  return ensureSessionForDate(db, targetDate);
 }
 
 function scalar(db, sql, params = []) {
@@ -336,13 +313,98 @@ function cashBreakdown(db, dateText, session) {
   };
 }
 
+function liveOpeningBalance(db, dateText) {
+  const date = normalizeDate(dateText);
+
+  const posCash = scalar(db, `
+    SELECT COALESCE(SUM(total),0) AS total FROM invoices
+    WHERE date(created_at) < ? AND payment_type = 'cash' AND status != 'cancelled'
+  `, [date]);
+
+  const posInstallmentCash = scalar(db, `
+    SELECT COALESCE(SUM(pa.amount),0) AS total
+    FROM payment_allocations pa
+    JOIN invoices i ON i.id = pa.invoice_id
+    WHERE date(i.created_at) < ? AND i.payment_type = 'installments' AND i.status != 'cancelled'
+  `, [date]);
+
+  const posMultiCash = scalar(db, `
+    SELECT COALESCE(SUM(p.amount),0) AS total
+    FROM payments p
+    JOIN invoices i ON p.notes = 'Invoice ' || i.invoice_no
+    WHERE date(i.created_at) < ? AND i.payment_type = 'multi' AND p.method = 'cash' AND i.status != 'cancelled'
+  `, [date]);
+
+  const customerPayments = scalar(db, `
+    SELECT COALESCE(SUM(amount),0) AS total FROM payments
+    WHERE date(created_at) < ? AND party_type = 'customer' AND method = 'cash'
+  `, [date]);
+
+  const customerAjalPayments = scalar(db, `
+    SELECT COALESCE(SUM(ap.amount),0) AS total
+    FROM ajal_payments ap
+    LEFT JOIN payment_methods pm ON pm.id = ap.payment_method_id
+    LEFT JOIN ajal_debts d ON d.id = ap.debt_id
+    WHERE date(COALESCE(ap.payment_date, ap.created_at)) < ?
+      AND COALESCE(d.party_type,'customer') = 'customer'
+      AND COALESCE(pm.type, pm.category, pm.name, 'cash') = 'cash'
+  `, [date]);
+
+  const revenuesCash = scalar(db, `
+    SELECT COALESCE(SUM(amount),0) AS total FROM revenues
+    WHERE date(created_at) < ? AND COALESCE(payment_method,'cash') = 'cash'
+  `, [date]);
+
+  const purchaseReturnsCash = scalar(db, `
+    SELECT COALESCE(SUM(total),0) AS total FROM purchase_returns
+    WHERE date(created_at) < ? AND COALESCE(settlement_type,'account') = 'cash'
+  `, [date]);
+
+  const expensesCash = scalar(db, `
+    SELECT COALESCE(SUM(amount),0) AS total FROM expenses
+    WHERE date(created_at) < ? AND COALESCE(payment_method,'cash') = 'cash'
+  `, [date]);
+
+  const supplierPayments = scalar(db, `
+    SELECT COALESCE(SUM(amount),0) AS total FROM payments
+    WHERE date(created_at) < ? AND party_type = 'supplier' AND method = 'cash'
+  `, [date]);
+
+  const supplierAjalPayments = scalar(db, `
+    SELECT COALESCE(SUM(ap.amount),0) AS total
+    FROM ajal_payments ap
+    LEFT JOIN payment_methods pm ON pm.id = ap.payment_method_id
+    LEFT JOIN ajal_debts d ON d.id = ap.debt_id
+    WHERE date(COALESCE(ap.payment_date, ap.created_at)) < ?
+      AND COALESCE(d.party_type,'customer') = 'supplier'
+      AND COALESCE(pm.type, pm.category, pm.name, 'cash') = 'cash'
+  `, [date]);
+
+  const salesReturnsCash = scalar(db, `
+    SELECT COALESCE(SUM(total),0) AS total FROM sales_returns
+    WHERE date(created_at) < ? AND COALESCE(refund_method,'cash_back') = 'cash_back'
+  `, [date]);
+
+  const withdrawals = scalar(db, `
+    SELECT COALESCE(SUM(dw.amount),0) AS total
+    FROM daily_withdrawals dw
+    JOIN daily_sessions ds ON ds.id = dw.session_id
+    WHERE date(ds.date) < ?
+  `, [date]);
+
+  const prevCashIn = posCash + posInstallmentCash + posMultiCash + customerPayments + customerAjalPayments + revenuesCash + purchaseReturnsCash;
+  const prevCashOut = expensesCash + supplierPayments + supplierAjalPayments + salesReturnsCash + withdrawals;
+  return prevCashIn - prevCashOut;
+}
+
 function calculateDailySummary(db, dateText, options = {}) {
   const date = normalizeDate(dateText);
   const session = getSession(db, date, Boolean(options.createIfMissing));
   if (!session) return null;
 
   const breakdown = cashBreakdown(db, date, session);
-  const expectedCash = Number(session.opening_balance || 0) + breakdown.cash_in - breakdown.cash_out;
+  const prevBalance = liveOpeningBalance(db, date);
+  const expectedCash = prevBalance + breakdown.cash_in - breakdown.cash_out;
   const actual = session.actual_cash == null ? null : Number(session.actual_cash);
   const discrepancy = actual == null ? null : actual - expectedCash;
 
@@ -352,7 +414,8 @@ function calculateDailySummary(db, dateText, options = {}) {
 
   return {
     session,
-    opening_balance: Number(session.opening_balance || 0),
+    opening_balance: prevBalance,
+    previous_balance: prevBalance,
     ...breakdown,
     expected_cash: expectedCash,
     actual_cash: actual,

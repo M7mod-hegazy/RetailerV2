@@ -71,6 +71,7 @@ export default function DailyTreasuryPage() {
   const [txSearch, setTxSearch] = useState("");
   const [txSort, setTxSort] = useState("time_desc");
   const [globalAmountSearch, setGlobalAmountSearch] = useState("");
+  const [showCancelled, setShowCancelled] = useState(false);
 
   // Close day
   const [actualCash, setActualCash] = useState("");
@@ -112,11 +113,15 @@ export default function DailyTreasuryPage() {
   const [compareYesterday, setCompareYesterday] = useState(false);
   const [printOpen, setPrintOpen] = useState(false);
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
-  const [openingEditOpen, setOpeningEditOpen] = useState(false);
-  const [openingDraft, setOpeningDraft] = useState("");
-  const [openingReason, setOpeningReason] = useState("");
   const [reopenReason, setReopenReason] = useState("");
   const [reopening, setReopening] = useState(false);
+
+  // Calculator
+  const [calcOpen, setCalcOpen] = useState(false);
+  const [calcDisplay, setCalcDisplay] = useState("0");
+  const [calcPrev, setCalcPrev] = useState(null);
+  const [calcOp, setCalcOp] = useState(null);
+  const [calcNew, setCalcNew] = useState(true);
 
   const isToday = date === todayStr();
   const isClosed = summary?.session?.status === "closed";
@@ -158,7 +163,7 @@ export default function DailyTreasuryPage() {
       const dateParam = isToday ? "" : `&date=${date}`;
       const typeParam = activeTab === "all" ? "" : activeTab;
       const r = await api.get(
-        `/api/daily-sessions/today/transactions?type=${typeParam}&search=${encodeURIComponent(searchParam)}${dateParam}`
+        `/api/daily-sessions/today/transactions?type=${typeParam}&search=${encodeURIComponent(searchParam)}${dateParam}&show_cancelled=${showCancelled ? 1 : 0}`
       );
       let rows = r.data.data || [];
       if (txSort === "amount_asc") rows = [...rows].sort((a, b) => a.amount - b.amount);
@@ -171,7 +176,7 @@ export default function DailyTreasuryPage() {
     } finally {
       setTxLoading(false);
     }
-  }, [activeTab, txSearch, txSort, globalAmountSearch, date, isToday]);
+  }, [activeTab, txSearch, txSort, globalAmountSearch, date, isToday, showCancelled]);
 
   async function loadYesterdayAlert() {
     try {
@@ -355,21 +360,6 @@ export default function DailyTreasuryPage() {
     }
   }
 
-  async function saveOpeningBalance() {
-    if (openingDraft === "") return;
-    try {
-      await api.patch(`/api/daily-sessions/${date}/opening-balance`, {
-        opening_balance: Number(openingDraft),
-        reason: openingReason,
-      });
-      toast.success("تم تعديل الرصيد الافتتاحي");
-      setOpeningEditOpen(false);
-      setOpeningReason("");
-      loadSummary();
-    } catch (e) {
-      toast.error(e.response?.data?.message || "تعذر تعديل الرصيد الافتتاحي");
-    }
-  }
 
   async function reopenDay() {
     setReopening(true);
@@ -390,6 +380,76 @@ export default function DailyTreasuryPage() {
     loadSummary();
     loadTransactions();
     loadYesterdayAlert();
+  }
+
+  // Calculator functions
+  function calcInput(val) {
+    if (calcNew) {
+      setCalcDisplay(val);
+      setCalcNew(false);
+    } else {
+      setCalcDisplay(calcDisplay === "0" ? val : calcDisplay + val);
+    }
+  }
+
+  function calcDecimal() {
+    if (calcNew) {
+      setCalcDisplay("0.");
+      setCalcNew(false);
+    } else if (!calcDisplay.includes(".")) {
+      setCalcDisplay(calcDisplay + ".");
+    }
+  }
+
+  function calcClear() {
+    setCalcDisplay("0");
+    setCalcPrev(null);
+    setCalcOp(null);
+    setCalcNew(true);
+  }
+
+  function calcOperator(op) {
+    const current = parseFloat(calcDisplay);
+    if (calcPrev !== null && calcOp && !calcNew) {
+      const result = calcCompute(calcPrev, current, calcOp);
+      setCalcDisplay(String(result));
+      setCalcPrev(result);
+    } else {
+      setCalcPrev(current);
+    }
+    setCalcOp(op);
+    setCalcNew(true);
+  }
+
+  function calcCompute(a, b, op) {
+    switch (op) {
+      case "+": return a + b;
+      case "-": return a - b;
+      case "×": return a * b;
+      case "÷": return b !== 0 ? a / b : 0;
+      default: return b;
+    }
+  }
+
+  function calcEquals() {
+    if (calcPrev === null || !calcOp) return;
+    const current = parseFloat(calcDisplay);
+    const result = calcCompute(calcPrev, current, calcOp);
+    setCalcDisplay(String(result));
+    setCalcPrev(null);
+    setCalcOp(null);
+    setCalcNew(true);
+  }
+
+  function calcPercent() {
+    const current = parseFloat(calcDisplay);
+    setCalcDisplay(String(current / 100));
+    setCalcNew(true);
+  }
+
+  function calcNegate() {
+    const current = parseFloat(calcDisplay);
+    setCalcDisplay(String(-current));
   }
 
   // Animation variants
@@ -521,37 +581,6 @@ export default function DailyTreasuryPage() {
           className="flex flex-col gap-3"
         >
           {/* Smart Alerts Banner */}
-          <AnimatePresence>
-            {yesterdayAlert?.unclosed && (
-              <motion.div 
-                initial={{ opacity: 0, height: 0, mb: 0 }}
-                animate={{ opacity: 1, height: 'auto', mb: 24 }}
-                exit={{ opacity: 0, height: 0, mb: 0 }}
-                className="flex items-center justify-between gap-4 rounded-3xl border border-amber-200 bg-amber-50/80 backdrop-blur-md px-6 py-4 shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center justify-center h-10 w-10 rounded-2xl bg-amber-100 text-amber-600 shrink-0">
-                    <AlertCircle className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-[14px] font-black text-amber-900">تنبيه إغلاق جلسة سابقة</h3>
-                    <span className="text-[12px] font-bold text-amber-700">
-                      يوم أمس ({yesterdayAlert.session?.date}) لم يُغلق بعد. يجب إغلاق الجلسة السابقة لضمان صحة الأرصدة.
-                    </span>
-                  </div>
-                </div>
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={handleForceCloseYesterday}
-                  disabled={closingYesterday}
-                  className="rounded-2xl bg-amber-600 px-6 py-3 text-[13px] font-black text-white hover:bg-amber-700 disabled:opacity-50 shadow-lg shadow-amber-600/20 transition-all shrink-0"
-                >
-                  {closingYesterday ? "جاري الإغلاق..." : "إغلاق يوم أمس"}
-                </motion.button>
-              </motion.div>
-            )}
-          </AnimatePresence>
 
           {loading ? (
             <div className="flex items-center justify-center h-64">
@@ -607,7 +636,7 @@ export default function DailyTreasuryPage() {
 
               {/* Quick Actions (If open and today) */}
               {isToday && !isClosed && (
-                <motion.div variants={fadeInUp} className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <motion.div variants={fadeInUp} className="grid grid-cols-1 md:grid-cols-5 gap-4">
                   <motion.button
                     whileHover={{ y: -2 }}
                     whileTap={{ scale: 0.98 }}
@@ -643,6 +672,30 @@ export default function DailyTreasuryPage() {
                   >
                     <div className="bg-white/20 p-1.5 rounded-xl"><Banknote className="h-4 w-4" /></div>
                     تسجيل مسحوبات
+                  </motion.button>
+                  <motion.button
+                    whileHover={{ y: -2 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => setCalcOpen(true)}
+                    className="flex items-center justify-center gap-3 rounded-3xl bg-indigo-600 py-4 text-[14px] font-black text-white hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-600/20 border border-indigo-500"
+                  >
+                    <div className="bg-white/20 p-1.5 rounded-xl"><Calculator className="h-4 w-4" /></div>
+                    آلة حاسبة
+                  </motion.button>
+                </motion.div>
+              )}
+
+              {/* Calculator button for closed/historical days */}
+              {(isClosed || !isToday) && (
+                <motion.div variants={fadeInUp} className="flex justify-end">
+                  <motion.button
+                    whileHover={{ y: -2 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => setCalcOpen(true)}
+                    className="flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-[12px] font-black text-white hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-600/20"
+                  >
+                    <Calculator className="h-4 w-4" />
+                    آلة حاسبة
                   </motion.button>
                 </motion.div>
               )}
@@ -739,6 +792,12 @@ export default function DailyTreasuryPage() {
                         </button>
                       ))}
                       <div className="flex items-center gap-2 mr-auto shrink-0 pr-3">
+                        <button
+                          onClick={() => setShowCancelled(v => !v)}
+                          className={`h-8 px-3 rounded-lg text-[11px] font-black border transition-colors ${showCancelled ? "bg-rose-50 border-rose-300 text-rose-700" : "bg-slate-50 border-slate-200 text-slate-500 hover:border-slate-300"}`}
+                        >
+                          {showCancelled ? "إخفاء الملغيات" : "إظهار الملغيات"}
+                        </button>
                         <div className="relative">
                           <Filter className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400" />
                           <select
@@ -791,9 +850,14 @@ export default function DailyTreasuryPage() {
                                 >
                                   <td className="px-3 py-3 font-black text-slate-500 text-[11px] tracking-wider">{t.doc_no || `#${t.id}`}</td>
                                   <td className="px-3 py-3">
-                                    <span className={`inline-flex items-center justify-center rounded-lg border px-2 py-0.5 text-[9px] font-black ${DOC_TYPE_COLOR[t.doc_type] || "text-slate-600 bg-slate-100 border-slate-200"}`}>
-                                      {DOC_TYPE_LABEL[t.doc_type] || t.doc_type}
-                                    </span>
+                                    <div className="flex items-center gap-1">
+                                      <span className={`inline-flex items-center justify-center rounded-lg border px-2 py-0.5 text-[9px] font-black ${t.is_reversal ? "text-rose-700 bg-rose-50 border-rose-200" : (DOC_TYPE_COLOR[t.doc_type] || "text-slate-600 bg-slate-100 border-slate-200")}`}>
+                                        {t.is_reversal ? "فاتورة ملغاة" : (DOC_TYPE_LABEL[t.doc_type] || t.doc_type)}
+                                      </span>
+                                      {t.is_reversal && (
+                                        <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-rose-100 text-rose-700 border border-rose-200">ملغي</span>
+                                      )}
+                                    </div>
                                   </td>
                                   <td className="px-3 py-3">
                                     <div className="flex flex-col">
@@ -865,20 +929,10 @@ export default function DailyTreasuryPage() {
                       <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2">
                         <div className="flex items-center gap-2">
                           <Lock className="h-3 w-3 text-slate-300" />
-                          <span className="text-[12px] text-slate-700 font-black">الرصيد الافتتاحي</span>
+                          <span className="text-[12px] text-slate-700 font-black">رصيد سابق</span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="font-black text-[12px] font-mono text-zinc-900">{fmt(summary?.opening_balance)}</span>
-                          {!isClosed && (
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); setOpeningDraft(String(summary?.opening_balance || 0)); setOpeningEditOpen(true); }}
-                              className="flex h-6 w-6 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"
-                              title="تعديل الرصيد الافتتاحي"
-                            >
-                              <Edit3 className="h-3 w-3" />
-                            </button>
-                          )}
+                          <span className="font-black text-[12px] font-mono text-zinc-900">{fmt(summary?.previous_balance ?? summary?.opening_balance)}</span>
                         </div>
                       </div>
 
@@ -1413,46 +1467,77 @@ export default function DailyTreasuryPage() {
         )}
       </AnimatePresence>
 
-
-
+      {/* Calculator Modal */}
       <AnimatePresence>
-        {openingEditOpen && (
-          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" dir="rtl">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-slate-900/45 backdrop-blur-sm" onClick={() => setOpeningEditOpen(false)} />
-            <motion.div variants={modalVariants} initial="hidden" animate="show" exit="exit" className="relative w-full max-w-md rounded-[2rem] bg-white p-6 shadow-2xl border border-slate-100">
-              <div className="mb-5 flex items-center justify-between">
-                <div>
-                  <h3 className="text-[17px] font-black text-zinc-900">تعديل الرصيد الافتتاحي</h3>
-                  <p className="text-[11px] font-bold text-slate-400">مسموح فقط قبل إغلاق اليومية، ويحتاج سبب واضح للمراجعة.</p>
+        {calcOpen && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+              onClick={() => setCalcOpen(false)}
+            />
+            <motion.div
+              variants={modalVariants} initial="hidden" animate="show" exit="exit"
+              className="relative w-full max-w-[340px] rounded-[2rem] bg-white shadow-2xl border border-slate-100 overflow-hidden" dir="rtl"
+            >
+              {/* Display */}
+              <div className="bg-gradient-to-br from-slate-900 to-slate-800 p-6">
+                <div className="text-right">
+                  {calcPrev !== null && calcOp && (
+                    <div className="text-[12px] text-slate-400 font-mono mb-1">
+                      {fmt(calcPrev)} {calcOp}
+                    </div>
+                  )}
+                  <div className="text-[36px] font-black font-mono text-white tracking-tight truncate">
+                    {calcDisplay.length > 12 ? parseFloat(calcDisplay).toExponential(6) : calcDisplay}
+                  </div>
                 </div>
-                <button onClick={() => setOpeningEditOpen(false)} className="h-9 w-9 rounded-xl bg-slate-50 text-slate-400 hover:text-zinc-900"><X className="mx-auto h-4 w-4" /></button>
               </div>
-              <div className="space-y-3">
-                <input
-                  type="number"
-                  value={openingDraft}
-                  onChange={(e) => setOpeningDraft(e.target.value)}
-                  className="h-12 w-full rounded-xl border border-slate-200 px-4 text-center text-[18px] font-black font-mono outline-none focus:border-indigo-500"
-                  placeholder="0.00"
-                />
-                <textarea
-                  value={openingReason}
-                  onChange={(e) => setOpeningReason(e.target.value)}
-                  className="h-24 w-full resize-none rounded-xl border border-slate-200 p-3 text-[12px] font-bold outline-none focus:border-indigo-500"
-                  placeholder="سبب التعديل: مثال، تم نقل رصيد إغلاق أمس يدوياً..."
-                />
-                <button
-                  onClick={saveOpeningBalance}
-                  disabled={!openingDraft || openingReason.trim().length < 4}
-                  className="w-full rounded-xl bg-indigo-700 py-3 text-[13px] font-black text-white hover:bg-indigo-800 disabled:opacity-40"
-                >
-                  حفظ الرصيد الافتتاحي
-                </button>
+
+              {/* Buttons */}
+              <div className="p-4 bg-slate-50 grid grid-cols-4 gap-2">
+                {/* Row 1 */}
+                <button onClick={calcClear} className="h-14 rounded-2xl bg-slate-200 text-slate-700 text-[18px] font-black hover:bg-slate-300 transition-colors">AC</button>
+                <button onClick={calcNegate} className="h-14 rounded-2xl bg-slate-200 text-slate-700 text-[18px] font-black hover:bg-slate-300 transition-colors">±</button>
+                <button onClick={calcPercent} className="h-14 rounded-2xl bg-slate-200 text-slate-700 text-[18px] font-black hover:bg-slate-300 transition-colors">%</button>
+                <button onClick={() => calcOperator("÷")} className={`h-14 rounded-2xl text-[20px] font-black transition-colors ${calcOp === "÷" ? "bg-indigo-600 text-white" : "bg-indigo-100 text-indigo-700 hover:bg-indigo-200"}`}>÷</button>
+
+                {/* Row 2 */}
+                <button onClick={() => calcInput("7")} className="h-14 rounded-2xl bg-white text-slate-800 text-[20px] font-black hover:bg-slate-100 transition-colors border border-slate-200">7</button>
+                <button onClick={() => calcInput("8")} className="h-14 rounded-2xl bg-white text-slate-800 text-[20px] font-black hover:bg-slate-100 transition-colors border border-slate-200">8</button>
+                <button onClick={() => calcInput("9")} className="h-14 rounded-2xl bg-white text-slate-800 text-[20px] font-black hover:bg-slate-100 transition-colors border border-slate-200">9</button>
+                <button onClick={() => calcOperator("×")} className={`h-14 rounded-2xl text-[20px] font-black transition-colors ${calcOp === "×" ? "bg-indigo-600 text-white" : "bg-indigo-100 text-indigo-700 hover:bg-indigo-200"}`}>×</button>
+
+                {/* Row 3 */}
+                <button onClick={() => calcInput("4")} className="h-14 rounded-2xl bg-white text-slate-800 text-[20px] font-black hover:bg-slate-100 transition-colors border border-slate-200">4</button>
+                <button onClick={() => calcInput("5")} className="h-14 rounded-2xl bg-white text-slate-800 text-[20px] font-black hover:bg-slate-100 transition-colors border border-slate-200">5</button>
+                <button onClick={() => calcInput("6")} className="h-14 rounded-2xl bg-white text-slate-800 text-[20px] font-black hover:bg-slate-100 transition-colors border border-slate-200">6</button>
+                <button onClick={() => calcOperator("-")} className={`h-14 rounded-2xl text-[20px] font-black transition-colors ${calcOp === "-" ? "bg-indigo-600 text-white" : "bg-indigo-100 text-indigo-700 hover:bg-indigo-200"}`}>−</button>
+
+                {/* Row 4 */}
+                <button onClick={() => calcInput("1")} className="h-14 rounded-2xl bg-white text-slate-800 text-[20px] font-black hover:bg-slate-100 transition-colors border border-slate-200">1</button>
+                <button onClick={() => calcInput("2")} className="h-14 rounded-2xl bg-white text-slate-800 text-[20px] font-black hover:bg-slate-100 transition-colors border border-slate-200">2</button>
+                <button onClick={() => calcInput("3")} className="h-14 rounded-2xl bg-white text-slate-800 text-[20px] font-black hover:bg-slate-100 transition-colors border border-slate-200">3</button>
+                <button onClick={() => calcOperator("+")} className={`h-14 rounded-2xl text-[20px] font-black transition-colors ${calcOp === "+" ? "bg-indigo-600 text-white" : "bg-indigo-100 text-indigo-700 hover:bg-indigo-200"}`}>+</button>
+
+                {/* Row 5 */}
+                <button onClick={() => calcInput("0")} className="col-span-2 h-14 rounded-2xl bg-white text-slate-800 text-[20px] font-black hover:bg-slate-100 transition-colors border border-slate-200">0</button>
+                <button onClick={calcDecimal} className="h-14 rounded-2xl bg-white text-slate-800 text-[20px] font-black hover:bg-slate-100 transition-colors border border-slate-200">.</button>
+                <button onClick={calcEquals} className="h-14 rounded-2xl bg-emerald-600 text-white text-[20px] font-black hover:bg-emerald-700 transition-colors">=</button>
               </div>
+
+              {/* Close button */}
+              <button
+                onClick={() => setCalcOpen(false)}
+                className="absolute top-4 left-4 h-8 w-8 flex items-center justify-center rounded-full bg-white/10 text-white/70 hover:text-white hover:bg-white/20 transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
+
 
       <AnimatePresence>
         {closeConfirmOpen && (
@@ -1465,7 +1550,7 @@ export default function DailyTreasuryPage() {
               </div>
               <div className="grid grid-cols-2 gap-3 p-6">
                 {[
-                  ["الرصيد الافتتاحي", summary?.opening_balance],
+                  ["رصيد سابق", summary?.previous_balance ?? summary?.opening_balance],
                   ["إجمالي الداخل النقدي", cashIn],
                   ["إجمالي الخارج النقدي", cashOut],
                   ["المتوقع في الخزينة", expected],

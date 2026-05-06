@@ -303,8 +303,8 @@ function voidInvoice(invoiceId, reason, userId) {
     for (const line of lines) {
       adjustStock({
         item_id: line.item_id,
-        warehouse_id: 1, // defaulting to 1 as per createInvoice logic
-        quantityDelta: Number(line.quantity), // add back
+        warehouse_id: line.warehouse_id || 1,
+        quantityDelta: Number(line.quantity),
         movement_type: "void_sale",
         reference_type: "invoice",
         reference_id: invoiceId,
@@ -314,10 +314,29 @@ function voidInvoice(invoiceId, reason, userId) {
     // 3. Reverse financials
     if (invoice.payment_type === "credit" && invoice.customer_id) {
       db.prepare("UPDATE customers SET opening_balance = opening_balance - ? WHERE id = ?").run(invoice.total, invoice.customer_id);
+      try { db.prepare("UPDATE ajal_debts SET status = 'voided' WHERE invoice_id = ? AND source_type = 'invoice'").run(invoiceId); } catch (_) {}
+    } else if (invoice.payment_type === "bank_transfer") {
+      if (invoice.bank_id) {
+        db.prepare("UPDATE banks SET balance = balance - ? WHERE id = ?").run(invoice.total, invoice.bank_id);
+      }
+    } else if (invoice.payment_type === "multi") {
+      const allocations = db.prepare(`
+        SELECT pa.amount, p.method, p.treasury_id, p.bank_id
+        FROM payment_allocations pa
+        LEFT JOIN payments p ON p.id = pa.payment_id
+        WHERE pa.invoice_id = ?
+      `).all(invoiceId);
+      for (const alloc of allocations) {
+        if (alloc.method === "cash" && alloc.treasury_id) {
+          db.prepare("UPDATE treasuries SET balance = balance - ? WHERE id = ?").run(alloc.amount, alloc.treasury_id);
+        } else if (alloc.method === "bank" && alloc.bank_id) {
+          db.prepare("UPDATE banks SET balance = balance - ? WHERE id = ?").run(alloc.amount, alloc.bank_id);
+        }
+      }
     } else {
-        // Look up previous allocations or just try to reverse from default treasury.
-        // For simplicity since the payment array isn't fully robust yet, we'll log an audit trail.
-        // A complete reversal would query payment_allocations and reverse banks/treasuries directly.
+      // cash payment — reverse from treasury
+      const tId = invoice.treasury_id || db.prepare("SELECT default_treasury_id FROM settings WHERE id = 1").get()?.default_treasury_id;
+      if (tId) db.prepare("UPDATE treasuries SET balance = balance - ? WHERE id = ?").run(invoice.total, tId);
     }
 
     // 4. Audit Log
@@ -326,6 +345,83 @@ function voidInvoice(invoiceId, reason, userId) {
             userId || 1, 'invoice', invoiceId, 'void', JSON.stringify({ reason })
         );
     } catch(e) {} // skip if no audit log table
+
+    return getInvoiceWithLines(invoiceId);
+  })();
+}
+
+function cancelInvoice(invoiceId, reason, userId) {
+  if (!reason || !reason.trim()) {
+    const err = new Error("سبب الإلغاء مطلوب");
+    err.status = 400;
+    throw err;
+  }
+  const db = getDb();
+  return db.transaction(() => {
+    const invoice = db.prepare("SELECT * FROM invoices WHERE id = ?").get(invoiceId);
+    if (!invoice) { const e = new Error("الفاتورة غير موجودة"); e.status = 404; throw e; }
+    if (invoice.status === "cancelled") { const e = new Error("الفاتورة ملغاة بالفعل"); e.status = 400; throw e; }
+
+    const now = new Date().toISOString().replace("T", " ").slice(0, 19);
+    db.prepare("UPDATE invoices SET status = 'cancelled', cancelled_at = ?, cancelled_by = ?, cancel_reason = ? WHERE id = ?")
+      .run(now, userId || 1, reason.trim(), invoiceId);
+
+    const lines = db.prepare("SELECT * FROM invoice_lines WHERE invoice_id = ?").all(invoiceId);
+    for (const line of lines) {
+      adjustStock({
+        item_id: line.item_id,
+        warehouse_id: line.warehouse_id || 1,
+        quantityDelta: Number(line.quantity),
+        movement_type: "cancel_sale",
+        reference_type: "invoice",
+        reference_id: invoiceId,
+      });
+    }
+
+    if ((invoice.payment_type === "credit" || invoice.payment_type === "installments") && invoice.customer_id) {
+      const debt = db.prepare("SELECT * FROM ajal_debts WHERE invoice_id = ? AND source_type = 'invoice'").get(invoiceId);
+      if (debt) {
+        const remaining = Number(debt.original_amount) - Number(debt.paid_amount || 0);
+        if (remaining > 0)
+          db.prepare("UPDATE customers SET opening_balance = opening_balance - ? WHERE id = ?").run(remaining, invoice.customer_id);
+        db.prepare("UPDATE ajal_debts SET status = 'voided' WHERE id = ?").run(debt.id);
+      }
+    } else if (invoice.payment_type === "cash") {
+      const tId = invoice.treasury_id ||
+        db.prepare("SELECT default_treasury_id FROM settings WHERE id = 1").get()?.default_treasury_id;
+      if (tId) db.prepare("UPDATE treasuries SET balance = balance - ? WHERE id = ?").run(invoice.total, tId);
+    } else if (invoice.payment_type === "bank_transfer") {
+      if (invoice.bank_id) db.prepare("UPDATE banks SET balance = balance - ? WHERE id = ?").run(invoice.total, invoice.bank_id);
+    } else if (invoice.payment_type === "multi") {
+      const allocs = db.prepare(`
+        SELECT pa.amount, p.method, p.treasury_id, p.bank_id
+        FROM payment_allocations pa
+        LEFT JOIN payments p ON p.id = pa.payment_id
+        WHERE pa.invoice_id = ?
+      `).all(invoiceId);
+      for (const a of allocs) {
+        if (a.method === "cash" && a.treasury_id)
+          db.prepare("UPDATE treasuries SET balance = balance - ? WHERE id = ?").run(a.amount, a.treasury_id);
+        else if (a.method === "bank" && a.bank_id)
+          db.prepare("UPDATE banks SET balance = balance - ? WHERE id = ?").run(a.amount, a.bank_id);
+      }
+    }
+
+    try {
+      const pts = db.prepare("SELECT points FROM loyalty_transactions WHERE invoice_id = ? AND type = 'earn'").get(invoiceId);
+      if (pts && invoice.customer_id) {
+        db.prepare("UPDATE customers SET loyalty_points = MAX(0, loyalty_points - ?) WHERE id = ?").run(pts.points, invoice.customer_id);
+        db.prepare("INSERT INTO loyalty_transactions (customer_id, invoice_id, type, points, notes) VALUES (?, ?, 'redeem', ?, ?)").run(
+          invoice.customer_id, invoiceId, pts.points, `إلغاء فاتورة #${invoice.invoice_no}`
+        );
+      }
+    } catch (_) {}
+
+    try {
+      db.prepare("INSERT INTO audit_logs (user_id, resource, resource_id, action, details) VALUES (?, ?, ?, ?, ?)").run(
+        userId || 1, "invoice", invoiceId, "cancel", JSON.stringify({ reason })
+      );
+    } catch (_) {}
 
     return getInvoiceWithLines(invoiceId);
   })();
@@ -343,7 +439,7 @@ function editInvoice(invoiceId, payload) {
 
     // Reverse old stock
     for (const line of oldLines) {
-      adjustStock({ item_id: line.item_id, warehouse_id: 1, quantityDelta: Number(line.quantity), movement_type: "void_sale", reference_type: "invoice", reference_id: invoiceId });
+      adjustStock({ item_id: line.item_id, warehouse_id: line.warehouse_id || 1, quantityDelta: Number(line.quantity), movement_type: "void_sale", reference_type: "invoice", reference_id: invoiceId });
     }
 
     // Delete old lines
@@ -353,10 +449,12 @@ function editInvoice(invoiceId, payload) {
     const newLines = payload.lines || [];
     let subtotal = 0;
     for (const line of newLines) {
-      const lineTotal = Number(line.quantity) * Number(line.unit_price) * (1 - Number(line.discount || 0) / 100);
-      subtotal += lineTotal;
-      db.prepare("INSERT INTO invoice_lines (invoice_id, item_id, quantity, unit_price, discount, line_total) VALUES (?, ?, ?, ?, ?, ?)").run(invoiceId, line.item_id, line.quantity, line.unit_price, line.discount || 0, lineTotal);
-      adjustStock({ item_id: line.item_id, warehouse_id: 1, quantityDelta: -Number(line.quantity), movement_type: "sale", reference_type: "invoice", reference_id: invoiceId });
+      const lineDiscount = Number(line.discount || 0);
+      const lineSubtotal = Number(line.quantity) * Number(line.unit_price);
+      const lineTotal = Math.max(0, lineSubtotal - lineDiscount);
+      subtotal += lineSubtotal;
+      db.prepare("INSERT INTO invoice_lines (invoice_id, item_id, quantity, unit_price, discount, line_total) VALUES (?, ?, ?, ?, ?, ?)").run(invoiceId, line.item_id, line.quantity, line.unit_price, lineDiscount, lineTotal);
+      adjustStock({ item_id: line.item_id, warehouse_id: line.warehouse_id || 1, quantityDelta: -Number(line.quantity), movement_type: "sale", reference_type: "invoice", reference_id: invoiceId });
     }
 
     const discount = Number(payload.discount ?? invoice.discount ?? 0);
@@ -382,4 +480,38 @@ function editInvoice(invoiceId, payload) {
   })();
 }
 
-module.exports = { createInvoice, getInvoiceWithLines, recalculateInvoiceStatus, voidInvoice, editInvoice };
+function amendInvoice(invoiceId, payload, userId) {
+  if (!payload.reason || !payload.reason.trim()) {
+    const err = new Error("سبب التعديل مطلوب");
+    err.status = 400;
+    throw err;
+  }
+  const db = getDb();
+
+  const original = db.prepare("SELECT * FROM invoices WHERE id = ?").get(invoiceId);
+  if (!original) { const e = new Error("الفاتورة غير موجودة"); e.status = 404; throw e; }
+  if (original.status === "cancelled") { const e = new Error("لا يمكن تعديل فاتورة ملغاة"); e.status = 400; throw e; }
+  if (original.amended_by) { const e = new Error("هذه الفاتورة عُدِّلت بالفعل — انظر الفاتورة الجديدة"); e.status = 400; throw e; }
+
+  // Cancel the original invoice
+  cancelInvoice(invoiceId, `تعديل — ${payload.reason.trim()}`, userId);
+
+  // Create replacement invoice (createInvoice opens its own transaction — better-sqlite3 nests via savepoints)
+  const newPayload = { ...payload };
+  delete newPayload.reason;
+  const newInvoice = createInvoice(newPayload);
+
+  // Link original → new and new → original
+  db.prepare("UPDATE invoices SET amended_by = ? WHERE id = ?").run(newInvoice.id, invoiceId);
+  db.prepare("UPDATE invoices SET amendment_of = ? WHERE id = ?").run(invoiceId, newInvoice.id);
+
+  try {
+    db.prepare("INSERT INTO audit_logs (user_id, resource, resource_id, action, details) VALUES (?, ?, ?, ?, ?)").run(
+      userId || 1, "invoice", invoiceId, "amend", JSON.stringify({ new_invoice_id: newInvoice.id, reason: payload.reason })
+    );
+  } catch (_) {}
+
+  return { original: getInvoiceWithLines(invoiceId), new_invoice: newInvoice };
+}
+
+module.exports = { createInvoice, getInvoiceWithLines, recalculateInvoiceStatus, voidInvoice, editInvoice, cancelInvoice, amendInvoice };

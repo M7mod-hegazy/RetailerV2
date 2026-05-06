@@ -92,7 +92,7 @@ router.get("/today/summary", (req, res) => {
 router.get("/today/transactions", (req, res) => {
   try {
     const db = getDb();
-    const { type = "pos", page = 1, limit = 100, search = "", date: queryDate } = req.query;
+    const { type = "pos", page = 1, limit = 100, search = "", date: queryDate, show_cancelled = "0" } = req.query;
     const targetDate = normalizeDate(queryDate || localDate());
     const offset = (Number(page) - 1) * Number(limit);
     const like = `%${search}%`;
@@ -305,15 +305,47 @@ router.get("/today/transactions", (req, res) => {
       customer_cash_collections: ["customer_payments", "customer_ajal_payments"],
       supplier_cash_payments: ["supplier_payments", "supplier_ajal_payments"],
     };
+    // Cancellation reversals — appear on the cancellation date as negative entries
+    const cancellationReversalSql = `
+      SELECT i.id, i.invoice_no AS doc_no, -(i.total) AS amount, i.payment_type,
+             i.cancelled_at AS created_at, c.name AS party, 'cancelled' AS status,
+             i.cancel_reason AS description,
+             'cancelled_invoice' AS doc_type, 'reversal' AS cash_direction,
+             CASE
+               WHEN i.payment_type IN ('cash','multi','installments') THEN -(i.total)
+               ELSE 0
+             END AS cash_effect,
+             1 AS is_reversal
+      FROM invoices i
+      LEFT JOIN customers c ON c.id = i.customer_id
+      WHERE date(i.cancelled_at) = ?
+        AND i.payment_type IN ('cash','multi','installments','credit')
+        AND (? = '' OR i.invoice_no LIKE ? OR c.name LIKE ? OR i.cancel_reason LIKE ?)
+    `;
+
     const requestedTypes = type === "all"
       ? Object.keys(unionParts).filter((key) => !["customer_ajal_payments", "supplier_ajal_payments"].includes(key))
       : (aliases[type] || [type]);
-    const selectedTypes = requestedTypes.filter((key) => unionParts[key]);
+    let selectedTypes = requestedTypes.filter((key) => unionParts[key]);
 
-    if (!selectedTypes.length) return res.json({ success: true, data: [] });
+    if (!selectedTypes.length && show_cancelled !== "1") return res.json({ success: true, data: [] });
 
-    const sql = selectedTypes.map((key) => unionParts[key].sql).join("\nUNION ALL\n");
-    const params = selectedTypes.flatMap((key) => unionParts[key].params);
+    let sql = selectedTypes.map((key) => unionParts[key].sql).join("\nUNION ALL\n");
+    let params = selectedTypes.flatMap((key) => unionParts[key].params);
+
+    if (show_cancelled === "1" && (type === "all" || type === "pos")) {
+      const cancellationParams = [targetDate, search, like, like, like];
+      if (sql) {
+        sql = sql + "\nUNION ALL\n" + cancellationReversalSql;
+        params = [...params, ...cancellationParams];
+      } else {
+        sql = cancellationReversalSql;
+        params = cancellationParams;
+      }
+    }
+
+    if (!sql) return res.json({ success: true, data: [] });
+
     const rows = db.prepare(`
       SELECT *
       FROM (${sql})

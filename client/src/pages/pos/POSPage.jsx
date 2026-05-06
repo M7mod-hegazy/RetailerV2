@@ -50,6 +50,7 @@ import { usePageTour } from "../../hooks/usePageTour";
 import { usePosStore } from "../../stores/posStore";
 import { useAuthStore } from "../../stores/authStore";
 import { useSound } from "../../hooks/useSound";
+import { useNavigate, useLocation } from "react-router-dom";
 
 // --- Local Lookup Component ---
 const BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:5000";
@@ -385,6 +386,8 @@ function NavLockModal({ onProceed, onCancel }) {
 
 export default function POSPage() {
   usePageTour("pos_sales");
+  const navigate = useNavigate();
+  const location = useLocation();
   const user = useAuthStore((state) => state.user);
   const { playBeep } = useSound();
 
@@ -489,9 +492,6 @@ export default function POSPage() {
   const [invoiceSearchNo, setInvoiceSearchNo] = useState("");
   const [searchedInvoice, setSearchedInvoice] = useState(null);
   const [searchLoading, setSearchLoading] = useState(false);
-  const [editInvoice, setEditInvoice] = useState(null);
-  const [editLines, setEditLines] = useState([]);
-  const [editSaving, setEditSaving] = useState(false);
 
   // Staging area
   const [selectedItem, setSelectedItem] = useState(null);
@@ -596,6 +596,32 @@ export default function POSPage() {
     if (!warehouses.length) return;
     setStaging((s) => ({ ...s, warehouseId: s.warehouseId || String(warehouses[0].id) }));
   }, [warehouses]);
+
+  // Pre-fill cart when navigated from invoice amend flow
+  useEffect(() => {
+    const amendState = location.state;
+    if (!amendState?.amend_invoice_id || !amendState?.prefill) return;
+    const { prefill } = amendState;
+    clear();
+    if (prefill.customer_id) setCustomer({ id: prefill.customer_id, name: prefill.customer_name });
+    if (prefill.payment_type) setPaymentType(prefill.payment_type);
+    if (prefill.discount) setDiscount(prefill.discount);
+    if (prefill.increase) setIncrease(prefill.increase);
+    (prefill.lines || []).forEach(l => addLine({
+      item_id: l.item_id,
+      name: l.item_name,
+      quantity: l.quantity,
+      unit_price: l.unit_price,
+      discount: l.discount || 0,
+      warehouse_id: l.warehouse_id || 1,
+    }));
+    // Clear navigation state to prevent re-trigger
+    window.history.replaceState({}, document.title);
+  }, [location.state]);
+
+  // Store amend context for use during submit
+  const amendInvoiceId = location.state?.amend_invoice_id || null;
+  const amendReason = location.state?.amend_reason || null;
 
   useEffect(() => {
     if (!selectedItem) return;
@@ -1046,8 +1072,15 @@ export default function POSPage() {
         allow_loss_sale:    hasBelowCost || Boolean(opts.allowLoss),
         supervisor_override: Boolean(opts.supervisorOverride),
       };
-      const response = await api.post("/api/invoices", payload);
-      const savedInvoiceNo = response.data?.data?.invoice_no || invoiceNumber;
+      let response;
+      if (amendInvoiceId) {
+        response = await api.put(`/api/invoices/${amendInvoiceId}/amend`, { ...payload, reason: amendReason });
+        const newInvoiceId = response.data?.data?.new_invoice?.id;
+        if (newInvoiceId) { navigate(`/pos/invoices/${newInvoiceId}`); return; }
+      } else {
+        response = await api.post("/api/invoices", payload);
+      }
+      const savedInvoiceNo = response.data?.data?.invoice_no || response.data?.data?.new_invoice?.invoice_no || invoiceNumber;
       const receiptSnap = {
         invoice_no: savedInvoiceNo, date: new Date(), lines: [...lines],
         customer: customer ? { ...customer } : null, totals: { ...totals },
@@ -1102,32 +1135,6 @@ export default function POSPage() {
       setTimeout(() => setSaveMessage(""), 3000);
       loadReceipts();
     } catch (e) { setSaveMessage(e.response?.data?.message || "خطأ"); setTimeout(() => setSaveMessage(""), 4000); }
-  }
-
-  async function openEditInvoice(inv) {
-    try {
-      const r = await api.get(`/api/invoices/${inv.id}`);
-      const full = r.data.data || r.data;
-      setEditInvoice(full);
-      setEditLines((full.lines || full.invoice_lines || []).map(l => ({...l, _qty: l.quantity, _price: l.unit_price, _discount: l.discount || 0})));
-    } catch { setSaveMessage("خطأ في تحميل الفاتورة"); setTimeout(() => setSaveMessage(""), 3000); }
-  }
-
-  async function saveEditInvoice() {
-    if (!editInvoice) return;
-    setEditSaving(true);
-    try {
-      await api.put(`/api/invoices/${editInvoice.id}`, {
-        lines: editLines.map(l => ({ item_id: l.item_id, quantity: Number(l._qty), unit_price: Number(l._price), discount: Number(l._discount) })),
-        discount: editInvoice.discount,
-        increase: editInvoice.increase,
-      });
-      setSaveMessage("تم حفظ التعديلات");
-      setTimeout(() => setSaveMessage(""), 3000);
-      setEditInvoice(null);
-      loadReceipts();
-    } catch (e) { setSaveMessage(e.response?.data?.message || "خطأ"); setTimeout(() => setSaveMessage(""), 4000); }
-    finally { setEditSaving(false); }
   }
 
   async function createQuickCustomer() {
@@ -2125,7 +2132,7 @@ export default function POSPage() {
                 <span className="font-mono text-emerald-700">{formatMoney(searchedInvoice.total)}</span>
                 <span className="text-slate-500">{searchedInvoice.created_at ? formatArabicDateTime(new Date(searchedInvoice.created_at)) : ""}</span>
                 <div className="flex gap-1 mr-auto">
-                  <button onClick={() => openEditInvoice(searchedInvoice)} className="flex h-7 w-7 items-center justify-center rounded text-blue-600 hover:bg-blue-100" title="تعديل"><Pencil className="h-4 w-4" /></button>
+                  <button onClick={() => navigate(`/invoices/${searchedInvoice.id}`)} className="flex h-7 w-7 items-center justify-center rounded text-blue-600 hover:bg-blue-100" title="فتح الفاتورة"><Pencil className="h-4 w-4" /></button>
                   <button onClick={() => handleVoidInvoice(searchedInvoice)} className="flex h-7 w-7 items-center justify-center rounded text-rose-600 hover:bg-rose-100" title="إلغاء"><Trash2 className="h-4 w-4" /></button>
                 </div>
               </div>
@@ -2176,7 +2183,7 @@ export default function POSPage() {
                   { id: "created_at", header: "الوقت", width: 150, cellClass: "px-3 text-[11px] font-bold text-slate-500 font-mono whitespace-nowrap", render: (inv) => formatArabicDateTime(new Date(inv.created_at)) },
                   { id: "actions", header: "", width: 90, cellClass: "px-3", render: (inv) => (
                     <div className="flex gap-1">
-                      <button onClick={() => openEditInvoice(inv)} className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-blue-50 hover:text-blue-600" title="تعديل"><Pencil className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => navigate(`/invoices/${inv.id}`)} className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-blue-50 hover:text-blue-600" title="فتح الفاتورة"><Pencil className="h-3.5 w-3.5" /></button>
                       <button onClick={() => handleVoidInvoice(inv)} className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="إلغاء"><Trash2 className="h-3.5 w-3.5" /></button>
                     </div>
                   )}
@@ -3051,52 +3058,6 @@ export default function POSPage() {
           </div>
         </div>
         {/* Edit Invoice sub-modal */}
-        {editInvoice && (
-          <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 backdrop-blur-sm">
-            <div className="w-[700px] max-h-[80vh] rounded-2xl bg-white shadow-2xl flex flex-col overflow-hidden">
-              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
-                <h2 className="text-[15px] font-black text-slate-900">تعديل فاتورة {editInvoice.invoice_no}</h2>
-                <button onClick={() => setEditInvoice(null)}><X className="h-5 w-5 text-slate-400" /></button>
-              </div>
-              <div className="flex-1 overflow-auto p-4">
-                <table className="w-full text-[12px] border-collapse">
-                  <thead className="bg-slate-50 sticky top-0">
-                    <tr>
-                      {["الصنف", "الكمية", "السعر", "الخصم%", "الإجمالي"].map(h => (
-                        <th key={h} className="px-3 py-2 text-right font-black text-slate-500 border-b border-slate-200">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {editLines.map((line, i) => (
-                      <tr key={i} className="border-b border-slate-100">
-                        <td className="px-3 py-2 font-bold text-slate-800">{line.item_name || line.name || `#${line.item_id}`}</td>
-                        <td className="px-3 py-2">
-                          <input type="number" min="0.001" step="0.001" value={line._qty} onChange={e => setEditLines(ls => ls.map((l,j) => j===i ? {...l, _qty: e.target.value} : l))} className="w-20 rounded border border-slate-300 px-2 py-1 text-[12px] font-black outline-none focus:border-blue-500" />
-                        </td>
-                        <td className="px-3 py-2">
-                          <input type="number" min="0" step="0.01" value={line._price} onChange={e => setEditLines(ls => ls.map((l,j) => j===i ? {...l, _price: e.target.value} : l))} className="w-24 rounded border border-slate-300 px-2 py-1 text-[12px] font-black outline-none focus:border-blue-500" />
-                        </td>
-                        <td className="px-3 py-2">
-                          <input type="number" min="0" max="100" value={line._discount} onChange={e => setEditLines(ls => ls.map((l,j) => j===i ? {...l, _discount: e.target.value} : l))} className="w-16 rounded border border-slate-300 px-2 py-1 text-[12px] font-black outline-none focus:border-blue-500" />
-                        </td>
-                        <td className="px-3 py-2 font-black font-mono text-emerald-700">
-                          {formatMoney(Number(line._qty) * Number(line._price) * (1 - Number(line._discount||0)/100))}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="flex gap-3 px-6 py-4 border-t border-slate-200 shrink-0">
-                <button onClick={() => setEditInvoice(null)} className="flex-1 rounded-xl border border-slate-300 py-2.5 text-[13px] font-black text-slate-700 hover:bg-slate-50">إلغاء</button>
-                <button onClick={saveEditInvoice} disabled={editSaving} className="flex-1 rounded-xl bg-blue-600 py-2.5 text-[13px] font-black text-white hover:bg-blue-700 disabled:opacity-40">
-                  {editSaving ? "جاري الحفظ..." : "حفظ التعديلات"}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </Modal>
 
       {/* ── Detailed item search ── */}

@@ -1,5 +1,5 @@
 const express = require("express");
-const { createInvoice, getInvoiceWithLines, editInvoice } = require("../services/invoiceService");
+const { createInvoice, getInvoiceWithLines, editInvoice, cancelInvoice, amendInvoice } = require("../services/invoiceService");
 const { createReturn, getReturns, getReturnDetails } = require("../services/returnService");
 const { adjustStock } = require("../services/stockService");
 const { getDb } = require("../config/database");
@@ -224,6 +224,38 @@ router.post("/:id/void", (req, res, next) => {
     res.json({ success: true, data: voided });
   } catch (error) {
     next(error);
+  }
+});
+
+router.get("/cancel-reasons", (_req, res) => {
+  res.json({
+    success: true,
+    data: [
+      "خطأ في البيانات",
+      "طلب العميل الإلغاء",
+      "خطأ في السعر",
+      "خطأ في الكمية",
+      "تكرار الفاتورة",
+      "تعديل الفاتورة",
+    ],
+  });
+});
+
+router.delete("/:id", (req, res, next) => {
+  try {
+    const result = cancelInvoice(Number(req.params.id), req.body?.reason, req.user?.id);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put("/:id/amend", (req, res, next) => {
+  try {
+    const result = amendInvoice(Number(req.params.id), req.body, req.user?.id);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
   }
 });
 
