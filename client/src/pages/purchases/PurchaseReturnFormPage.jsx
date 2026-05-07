@@ -1,33 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import {
-  ArrowLeft,
-  Search,
-  ShoppingCart,
-  Trash2,
-  AlertCircle,
-  CheckCircle2,
-  FileText,
-  User,
-  Package,
-  History,
-  Info,
-  ImageIcon,
-  ZoomIn,
-  AlertTriangle,
-  Printer,
-} from "lucide-react";
+import { ArrowLeft, Search, Trash2, Plus, Minus, History, CheckCircle2, AlertCircle, RotateCcw } from "lucide-react";
+import { useNavigate, useLocation } from "react-router-dom";
 import api from "../../services/api";
-import { Link, useNavigate } from "react-router-dom";
-import DataGrid from "../../components/ui/DataGrid";
-import Modal from "../../components/ui/Modal";
-import PrintPreviewModal from "../../components/print/PrintPreviewModal";
-
-const BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:5000";
-function resolveImageUrl(u) {
-  if (!u) return null;
-  if (u.startsWith("http") || u.startsWith("data:")) return u;
-  return `${BASE_URL}${u.startsWith("/") ? "" : "/"}${u}`;
-}
 
 function formatMoney(v) {
   return Number(v || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2 });
@@ -35,26 +9,35 @@ function formatMoney(v) {
 
 export default function PurchaseReturnFormPage() {
   const navigate = useNavigate();
-  const [purchaseId, setPurchaseId] = useState("");
-  const [purchase, setPurchase] = useState(null);
-  const [returnLines, setReturnLines] = useState({}); // line_id -> quantity
-  const [loading, setLoading] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [message, setMessage] = useState({ text: "", type: "" });
+  const location = useLocation();
+  const editReturnId = location.state?.edit_return_id || null;
+  const isEditMode = !!editReturnId;
+
+  const [rightPanel, setRightPanel] = useState("products");
+  const [cart, setCart] = useState([]);
+  const [loadedPurchase, setLoadedPurchase] = useState(null);
+  const [supplier, setSupplier] = useState(null);
+  const [suppliers, setSuppliers] = useState([]);
+  const [settlementType, setSettlementType] = useState("account");
   const [warehouses, setWarehouses] = useState([]);
   const [selectedWarehouse, setSelectedWarehouse] = useState("");
   const [treasuries, setTreasuries] = useState([]);
   const [selectedTreasury, setSelectedTreasury] = useState("");
-  const [settlementType, setSettlementType] = useState("account");
-  const [items, setItems] = useState([]);
-  
-  const [printPreview, setPrintPreview] = useState(false);
-  const [warnModalOpen, setWarnModalOpen] = useState(false);
-  const [imageModalOpen, setImageModalOpen] = useState(false);
-  const [imagePreviewUrl, setImagePreviewUrl] = useState("");
+  const [productSearch, setProductSearch] = useState("");
+  const [productResults, setProductResults] = useState([]);
+  const [purchaseSearch, setPurchaseSearch] = useState("");
+  const [purchaseResults, setPurchaseResults] = useState([]);
+  const [purchaseSearchLoading, setPurchaseSearchLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [message, setMessage] = useState({ text: "", type: "" });
+  const [originalDocNo, setOriginalDocNo] = useState(null);
+  const [originalCreatedAt, setOriginalCreatedAt] = useState(null);
 
-  const inputRef = useRef(null);
+  const purchaseSearchRef = useRef(null);
 
+  const total = useMemo(() => cart.reduce((acc, l) => acc + (l.unit_cost * l.quantity), 0), [cart]);
+
+  // Load warehouses, treasuries, suppliers
   useEffect(() => {
     api.get("/api/warehouses").then(r => {
       const wh = r.data.data || [];
@@ -66,388 +49,411 @@ export default function PurchaseReturnFormPage() {
       setTreasuries(rows);
       if (rows.length) setSelectedTreasury(String(rows[0].id));
     }).catch(() => {});
-    api.get("/api/items").then(r => setItems(r.data.data || [])).catch(() => {});
+    api.get("/api/suppliers?limit=500").then(r => setSuppliers(r.data.data || [])).catch(() => {});
   }, []);
 
-  async function handleSearch() {
-    if (!purchaseId.trim()) return;
-    setLoading(true);
-    setMessage({ text: "", type: "" });
+  // Load existing return for edit mode
+  useEffect(() => {
+    if (!isEditMode) return;
+    api.get(`/api/purchases/returns/${editReturnId}`).then(r => {
+      const pr = r.data.data;
+      setOriginalDocNo(pr.doc_no);
+      setOriginalCreatedAt(pr.created_at);
+      setSettlementType(pr.settlement_type || "account");
+      if (pr.warehouse_id) setSelectedWarehouse(String(pr.warehouse_id));
+      if (pr.treasury_id) setSelectedTreasury(String(pr.treasury_id));
+      if (pr.supplier_id) setSupplier({ id: pr.supplier_id, name: pr.supplier_name || String(pr.supplier_id) });
+      setCart((pr.lines || []).map((l, idx) => ({
+        key: `edit-${l.id || idx}`,
+        purchase_line_id: l.purchase_line_id || null,
+        item_id: l.item_id,
+        item_name: l.item_name || l.item_name_ar,
+        unit_cost: Number(l.unit_cost || 0),
+        quantity: Number(l.quantity),
+        max_qty: Number(l.quantity),
+      })));
+      if (pr.purchase_id) {
+        api.get(`/api/purchases/${pr.purchase_id}`).then(p => setLoadedPurchase(p.data.data)).catch(() => {});
+      }
+    }).catch(() => {});
+  }, [isEditMode, editReturnId]);
+
+  // Product search debounce
+  useEffect(() => {
+    if (!productSearch.trim()) { setProductResults([]); return; }
+    const t = setTimeout(() => {
+      api.get(`/api/items?search=${encodeURIComponent(productSearch)}&limit=20`)
+        .then(r => setProductResults(r.data.data || [])).catch(() => {});
+    }, 250);
+    return () => clearTimeout(t);
+  }, [productSearch]);
+
+  async function handlePurchaseSearch() {
+    if (!purchaseSearch.trim()) return;
+    setPurchaseSearchLoading(true);
     try {
-      const response = await api.get(`/api/purchases/${purchaseId}`);
-      setPurchase(response.data.data);
-      setReturnLines({});
-      setSettlementType("account");
-    } catch (e) {
-      setMessage({ text: "رقم الفاتورة غير صحيح أو غير موجود", type: "error" });
-      setPurchase(null);
+      const byId = purchaseSearch.match(/^\d+$/)
+        ? await api.get(`/api/purchases/${purchaseSearch}`).then(r => r.data.data ? [r.data.data] : []).catch(() => [])
+        : [];
+      const bySearch = await api.get(`/api/purchases?search=${encodeURIComponent(purchaseSearch)}&limit=20`)
+        .then(r => r.data.data || []).catch(() => []);
+      const merged = [...byId, ...bySearch.filter(p => !byId.find(x => x.id === p.id))];
+      setPurchaseResults(merged.filter(p => p && p.status !== "cancelled" && p.status !== "voided" && !p.amended_by));
     } finally {
-      setLoading(false);
+      setPurchaseSearchLoading(false);
     }
   }
 
-  function updateQty(lineId, val, max) {
-    const q = Math.min(max, Math.max(0, Number(val)));
-    setReturnLines(prev => ({ ...prev, [lineId]: q }));
+  function loadPurchase(p) {
+    setLoadedPurchase(p);
+    setCart((p.lines || []).map(l => ({
+      key: `pur-${l.id}`,
+      purchase_line_id: l.id,
+      item_id: l.item_id,
+      item_name: l.item_name || l.name,
+      unit_cost: Number(l.unit_cost || 0),
+      quantity: Number(l.returnable_quantity ?? l.quantity),
+      max_qty: Math.max(0, Number(l.returnable_quantity ?? l.quantity)),
+    })).filter(l => l.max_qty > 0));
+    if (p.supplier_id) setSupplier({ id: p.supplier_id, name: p.supplier_name || String(p.supplier_id) });
+    setRightPanel("products");
+    setPurchaseResults([]);
+    setPurchaseSearch("");
   }
 
-  const totals = useMemo(() => {
-    if (!purchase) return 0;
-    return (purchase.lines || []).reduce((acc, l) => {
-      const q = returnLines[l.id] || 0;
-      return acc + (q * l.unit_cost);
-    }, 0);
-  }, [purchase, returnLines]);
+  function addProductToCart(item) {
+    setCart(prev => {
+      const existing = prev.find(l => l.item_id === item.id && !l.purchase_line_id);
+      if (existing) return prev.map(l => l === existing ? { ...l, quantity: l.quantity + 1 } : l);
+      return [...prev, {
+        key: `direct-${item.id}-${Date.now()}`,
+        item_id: item.id,
+        item_name: item.name,
+        unit_cost: Number(item.cost || item.last_purchase_price || 0),
+        quantity: 1,
+        max_qty: Infinity,
+        purchase_line_id: null,
+      }];
+    });
+    setProductSearch("");
+    setProductResults([]);
+  }
+
+  function updateQty(key, delta) {
+    setCart(prev => prev
+      .map(l => l.key !== key ? l : { ...l, quantity: Math.max(0, Math.min(l.max_qty, l.quantity + delta)) })
+      .filter(l => l.quantity > 0));
+  }
+
+  function setQty(key, val) {
+    setCart(prev => prev
+      .map(l => l.key !== key ? l : { ...l, quantity: Math.max(0, Math.min(l.max_qty, Number(val) || 0)) })
+      .filter(l => l.quantity > 0));
+  }
+
+  function removeLine(key) { setCart(prev => prev.filter(l => l.key !== key)); }
 
   async function handleSave() {
-    const payloadLines = Object.entries(returnLines)
-      .filter(([_, q]) => q > 0)
-      .map(([id, q]) => ({ purchase_line_id: Number(id), quantity: q }));
-
-    if (!payloadLines.length) {
-      setMessage({ text: "يرجى تحديد الكميات المراد إرجاعها", type: "error" });
-      return;
-    }
-    if (settlementType === "cash" && !selectedTreasury) {
-      setMessage({ text: "اختر الخزنة التي سيدخل فيها النقد المسترد", type: "error" });
-      return;
-    }
-
+    if (!cart.length) { setMessage({ text: "أضف أصناف للمرتجع أولاً", type: "error" }); return; }
     setIsSaving(true);
+    setMessage({ text: "", type: "" });
     try {
-      await api.post(`/api/purchases/${purchaseId}/return`, {
+      const payload = {
+        supplier_id: supplier?.id || null,
         warehouse_id: Number(selectedWarehouse),
         settlement_type: settlementType,
         treasury_id: settlementType === "cash" ? Number(selectedTreasury) : null,
-        lines: payloadLines
-      });
-      setMessage({ text: "تم تسجيل المرتجع بنجاح", type: "success" });
+        lines: cart.map(l => ({
+          purchase_line_id: l.purchase_line_id || null,
+          item_id: l.item_id,
+          quantity: l.quantity,
+          unit_cost: l.unit_cost,
+        })),
+      };
+      if (isEditMode) {
+        await api.put(`/api/purchases/returns/${editReturnId}`, payload);
+        setMessage({ text: "تم تعديل المرتجع بنجاح", type: "success" });
+      } else if (loadedPurchase) {
+        await api.post(`/api/purchases/${loadedPurchase.id}/return`, payload);
+        setMessage({ text: "تم تسجيل المرتجع بنجاح", type: "success" });
+      } else {
+        await api.post("/api/purchases/general-purchase-return", payload);
+        setMessage({ text: "تم تسجيل المرتجع العام بنجاح", type: "success" });
+      }
       setTimeout(() => navigate("/purchases/returns"), 1500);
     } catch (e) {
-      setMessage({ text: "فشل تسجيل المرتجع", type: "error" });
-    } finally {
-      setIsSaving(false);
-    }
+      setMessage({ text: e.response?.data?.message || "فشل تسجيل المرتجع", type: "error" });
+    } finally { setIsSaving(false); }
   }
 
   return (
-    <div className="flex h-full min-h-[600px] flex-col bg-slate-50 font-sans overflow-hidden px-4 lg:px-8 pb-6">
-      {/* Header */}
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-300 bg-white px-6">
+    <div className="flex h-screen flex-col bg-amber-50/30 font-sans overflow-hidden" dir="rtl">
+
+      {/* ── Header ─────────────────────────────────────────────────────── */}
+      <header className="flex h-14 shrink-0 items-center justify-between border-b border-amber-200 bg-white px-6 shadow-sm">
         <div className="flex items-center gap-4">
-          <button 
-            onClick={() => {
-              if (Object.keys(returnLines).some(k => returnLines[k] > 0)) setWarnModalOpen(true);
-              else navigate("/purchases/returns");
-            }}
-            className="flex h-8 w-8 items-center justify-center rounded-sm border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors"
-          >
+          <button onClick={() => navigate("/purchases/returns")}
+            className="flex h-8 w-8 items-center justify-center rounded-sm border border-amber-200 text-amber-600 hover:bg-amber-50 transition-colors">
             <ArrowLeft className="h-4 w-4" />
           </button>
-          <div className="flex flex-col">
-            <h1 className="text-[14px] font-black text-slate-800 uppercase tracking-tight">إنشاء مرتجع شراء</h1>
-            <span className="text-[10px] font-bold text-slate-400">إرجاع أصناف إلى المورد وتسويه الحساب</span>
+          <div>
+            <h1 className="text-[14px] font-black text-slate-800 uppercase tracking-tight">
+              {isEditMode ? "تعديل مرتجع مشتريات" : loadedPurchase ? `مرتجع فاتورة شراء #${loadedPurchase.id}` : "مرتجع مشتريات جديد"}
+            </h1>
+            <span className="text-[10px] font-bold text-amber-600">
+              {isEditMode
+                ? `${originalDocNo || ""} · ${originalCreatedAt ? new Date(originalCreatedAt).toLocaleString("ar-EG") : ""}`
+                : loadedPurchase ? `${loadedPurchase.supplier_name || "بدون مورد"} · ${formatMoney(loadedPurchase.total)} ج.م`
+                : "أضف أصناف مباشرة أو ابحث عن فاتورة شراء"}
+            </span>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
           {message.text && (
-            <div className={`rounded-sm px-3 py-1.5 text-[11px] font-bold ${message.type === "success" ? "bg-emerald-50 text-emerald-700 border border-emerald-100" : "bg-rose-50 text-rose-700 border border-rose-100"}`}>
+            <div className={`flex items-center gap-1.5 rounded-sm px-3 py-1.5 text-[11px] font-bold border ${
+              message.type === "success"
+                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                : "bg-rose-50 text-rose-700 border-rose-200"
+            }`}>
+              {message.type === "success" ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />}
               {message.text}
             </div>
           )}
-          <button
-            onClick={() => setPrintPreview(true)}
-            disabled={!purchase}
-            className="flex h-9 items-center gap-2 rounded-sm border border-slate-300 bg-white px-4 text-[13px] font-black text-slate-700 hover:bg-slate-50 disabled:opacity-40 transition-all"
-          >
-            <Printer className="h-4 w-4" /> طباعة ومراجعة المستند
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={isSaving || !purchase}
-            className="flex h-9 items-center gap-2 rounded-sm bg-slate-800 px-6 text-[13px] font-black text-white hover:bg-slate-700 disabled:opacity-50 transition-all shadow-sm active:scale-95"
-          >
-            {isSaving ? "جاري الحفظ..." : "تأكيد المرتجع"}
+          {isEditMode && (
+            <div className="flex gap-1.5">
+              <input disabled value={originalDocNo || ""}
+                className="h-8 w-28 rounded-sm border border-amber-200 bg-amber-50 px-2 text-[11px] font-mono font-black text-amber-600 cursor-not-allowed outline-none" />
+              <input disabled value={originalCreatedAt ? new Date(originalCreatedAt).toLocaleString("ar-EG") : ""}
+                className="h-8 w-48 rounded-sm border border-amber-200 bg-amber-50 px-2 text-[11px] font-mono font-black text-amber-600 cursor-not-allowed outline-none" />
+            </div>
+          )}
+          <button onClick={handleSave} disabled={isSaving || !cart.length}
+            className="flex h-9 items-center gap-2 rounded-sm bg-amber-600 px-6 text-[13px] font-black text-white hover:bg-amber-500 disabled:opacity-40 transition-all active:scale-95 shadow-sm">
+            {isSaving ? "جاري الحفظ..." : isEditMode ? "تأكيد التعديل" : "تأكيد المرتجع"}
           </button>
         </div>
       </header>
 
-      <main className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
-        {/* Search Section */}
-        <section className="mb-4 rounded-md border border-slate-300 bg-white p-4 shadow-sm">
-           <div className="flex items-end gap-4 max-w-2xl">
-              <div className="flex-1 flex flex-col gap-1">
-                 <label className="text-[11px] font-bold text-slate-600">رقم فاتورة الشراء الأصلية</label>
-                 <div className="relative">
-                    <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                    <input 
-                      ref={inputRef}
-                      autoFocus
-                      type="text" 
-                      value={purchaseId}
-                      onChange={(e) => setPurchaseId(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                      onFocus={e => e.target.select()}
-                      placeholder="مثال: 123"
-                      className="w-full border border-slate-300 rounded-sm py-2 pl-3 pr-10 text-[12px] font-bold text-slate-800 outline-none focus:border-slate-800"
-                    />
-                 </div>
-              </div>
-              <button 
-                onClick={handleSearch}
-                disabled={loading}
-                className="h-[37px] rounded-sm bg-slate-100 px-8 text-[12px] font-black text-slate-800 hover:bg-slate-200 transition-colors border border-slate-200"
+      {/* ── Body ───────────────────────────────────────────────────────── */}
+      <div className="flex flex-1 min-h-0">
+
+        {/* ── Left: Cart ─────────────────────────────────────────────── */}
+        <div className="flex flex-col w-[400px] shrink-0 border-l border-amber-200 bg-white shadow-sm">
+
+          {/* Settings */}
+          <div className="border-b border-amber-100 p-4 space-y-3 bg-amber-50/50">
+            {/* Supplier */}
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-black text-amber-700 uppercase tracking-widest">المورد</label>
+              <select
+                value={supplier?.id || ""}
+                onChange={e => setSupplier(suppliers.find(s => String(s.id) === e.target.value) || null)}
+                className="w-full border border-amber-200 rounded-sm px-2 py-1.5 text-[12px] font-bold text-slate-800 outline-none focus:border-amber-500 bg-white"
               >
-                {loading ? "جاري البحث..." : "بحث وتحميل الفاتورة"}
-              </button>
-           </div>
-        </section>
+                <option value="">بدون مورد</option>
+                {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
 
-        {purchase ? (
-           <div className="flex flex-1 min-h-0 gap-4">
-              {/* Lines Grid area */}
-              <div className="flex flex-1 flex-col overflow-hidden rounded-md border border-slate-300 bg-white min-h-0">
-                <DataGrid
-                  data={purchase.lines || []}
-                  rowKey="id"
-                  emptyMessage="لا يوجد أصناف"
-                  className="border-0"
-                  containerClass="flex-1 overflow-x-auto overflow-y-auto bg-white scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-transparent min-h-0"
-                  columns={[
-                    {
-                      id: "index", header: "#", width: 40, sortable: false, headerClass: "text-center", cellClass: "text-center font-mono text-[12px] text-slate-400 border-l border-slate-100",
-                      render: (_, i) => i + 1
-                    },
-                    {
-                      id: "code", header: "الكود", width: 100, sortable: true, headerClass: "text-center", cellClass: "font-mono text-[12px] font-black tracking-wider text-slate-500 border-l border-slate-100 text-center",
-                      render: (l) => l.barcode || l.code || l.item_code || "-"
-                    },
-                    {
-                      id: "item_name", header: "الصنف", width: 220, sortable: true, cellClass: "font-bold text-slate-800 border-l border-slate-100 px-2", headerClass: "text-right px-2",
-                      render: (l) => {
-                        const item = items.find(i => i.id === l.item_id);
-                        const imgUrl = item?.primary_image_url || item?.image_url || item?.image;
-                        return (
-                          <div className="flex items-center gap-2 py-1">
-                            {imgUrl ? (
-                              <button onClick={() => { setImagePreviewUrl(resolveImageUrl(imgUrl)); setImageModalOpen(true); }} className="shrink-0 group relative rounded-md overflow-hidden border border-slate-200">
-                                <img src={resolveImageUrl(imgUrl)} alt={l.item_name} className="w-8 h-8 object-cover" />
-                                <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <ZoomIn className="w-4 h-4 text-white" />
-                                </div>
-                              </button>
-                            ) : (
-                              <div className="w-8 h-8 shrink-0 rounded-md bg-slate-100 flex items-center justify-center border border-slate-200"><ImageIcon className="w-4 h-4 text-slate-300"/></div>
-                            )}
-                            <span className="truncate">{l.item_name}</span>
-                          </div>
-                        );
-                      }
-                    },
-                    {
-                      id: "quantity", header: "المشترى", width: 80, sortable: true, headerClass: "text-center", cellClass: "text-center font-mono font-black text-[13px] text-slate-400 border-l border-slate-100",
-                      render: (l) => Number(l.quantity)
-                    },
-                    {
-                      id: "unit_cost", header: "السعر", width: 100, sortable: true, headerClass: "text-center", cellClass: "text-center font-mono font-black text-[13px] text-slate-500 border-l border-slate-100",
-                      render: (l) => formatMoney(l.unit_cost)
-                    },
-                    {
-                      id: "returnQty", header: "الكمية المرتجعة", width: 120, sortable: false, headerClass: "text-center", cellClass: "p-0 border-l border-slate-100 text-center",
-                      render: (l) => (
-                        <div className="flex w-full h-[40px] items-center justify-center bg-slate-50">
-                          <input 
-                            type="number" 
-                            min="0" 
-                            max={l.quantity}
-                            value={returnLines[l.id] || ""}
-                            onChange={(e) => updateQty(l.id, e.target.value, l.quantity)}
-                            onFocus={e => e.target.select()}
-                            className="w-full h-full text-center font-mono text-[14px] font-black outline-none border border-transparent focus:border-slate-800 focus:bg-white focus:ring-2 focus:ring-slate-100 transition-all text-slate-900"
-                          />
-                        </div>
-                      )
-                    },
-                    {
-                      id: "total", header: "قيمة المرتجع", width: 140, sortable: true, headerClass: "text-left px-2", cellClass: "text-left px-2 font-black font-mono text-[14px] text-slate-900 bg-slate-50/30 border-l-0",
-                      sortValue: (l) => (returnLines[l.id] || 0) * l.unit_cost,
-                      render: (l) => formatMoney((returnLines[l.id] || 0) * l.unit_cost)
-                    }
-                  ]}
-                />
-                <div className="flex shrink-0 items-center justify-between border-t border-slate-200 bg-slate-900 px-6 py-4 shadow-lg z-10 text-white">
-                   <div className="flex items-center gap-6 opacity-80">
-                      <p className="text-[12px] font-black uppercase tracking-widest">إجمالي المرتجع</p>
-                   </div>
-                   <div className="flex items-baseline gap-2">
-                      <span className="text-[28px] font-black font-mono">{totals.toLocaleString("ar-EG", { minimumFractionDigits: 2 })}</span>
-                      <span className="text-[12px] font-black opacity-50 uppercase">ج.م</span>
-                   </div>
+            {/* Settlement type */}
+            <div className="flex gap-2">
+              <button onClick={() => setSettlementType("account")}
+                className={`flex-1 rounded-sm border py-2 text-[11px] font-black transition-all ${
+                  settlementType === "account"
+                    ? "border-amber-600 bg-amber-600 text-white shadow-sm"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-amber-300"
+                }`}>
+                خصم من حساب المورد
+              </button>
+              <button onClick={() => setSettlementType("cash")}
+                className={`flex-1 rounded-sm border py-2 text-[11px] font-black transition-all ${
+                  settlementType === "cash"
+                    ? "border-amber-600 bg-amber-600 text-white shadow-sm"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-amber-300"
+                }`}>
+                نقداً
+              </button>
+            </div>
+
+            {/* Treasury (cash only) */}
+            {settlementType === "cash" && (
+              <select value={selectedTreasury} onChange={e => setSelectedTreasury(e.target.value)}
+                className="w-full border border-amber-200 rounded-sm px-2 py-1.5 text-[12px] font-bold text-slate-800 outline-none focus:border-amber-500 bg-white">
+                {treasuries.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            )}
+
+            {/* Warehouse */}
+            <select value={selectedWarehouse} onChange={e => setSelectedWarehouse(e.target.value)}
+              className="w-full border border-amber-200 rounded-sm px-2 py-1.5 text-[12px] font-bold text-slate-800 outline-none focus:border-amber-500 bg-white">
+              {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+            </select>
+          </div>
+
+          {/* Cart lines */}
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            {cart.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full gap-2 text-slate-300">
+                <RotateCcw className="h-8 w-8" />
+                <span className="text-[12px] font-bold">لا يوجد أصناف بعد</span>
+                <span className="text-[11px]">أضف صنفاً أو حمّل فاتورة شراء من اليمين</span>
+              </div>
+            ) : cart.map(line => (
+              <div key={line.key} className="flex items-center gap-2 border-b border-slate-100 px-3 py-2.5 hover:bg-amber-50/30 transition-colors">
+                <div className="flex-1 min-w-0">
+                  <div className="text-[12px] font-black text-slate-800 truncate">{line.item_name}</div>
+                  <div className="text-[11px] font-bold text-amber-600 font-mono">
+                    {formatMoney(line.unit_cost)} × {line.quantity} = {formatMoney(line.unit_cost * line.quantity)} ج.م
+                  </div>
+                  {line.max_qty !== Infinity && (
+                    <div className="text-[10px] font-bold text-slate-400">الحد الأقصى: {line.max_qty}</div>
+                  )}
                 </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button onClick={() => updateQty(line.key, -1)}
+                    className="h-6 w-6 flex items-center justify-center rounded-sm border border-slate-200 text-slate-500 hover:bg-slate-50 active:scale-90 transition-all">
+                    <Minus className="h-3 w-3" />
+                  </button>
+                  <input type="number" value={line.quantity}
+                    onChange={e => setQty(line.key, e.target.value)}
+                    onFocus={e => e.target.select()}
+                    className="w-11 h-6 text-center font-mono font-black text-[12px] border border-amber-200 rounded-sm outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-200" />
+                  <button onClick={() => updateQty(line.key, 1)}
+                    disabled={line.max_qty !== Infinity && line.quantity >= line.max_qty}
+                    className="h-6 w-6 flex items-center justify-center rounded-sm border border-slate-200 text-slate-500 hover:bg-slate-50 active:scale-90 transition-all disabled:opacity-30">
+                    <Plus className="h-3 w-3" />
+                  </button>
+                </div>
+                <button onClick={() => removeLine(line.key)}
+                  className="h-6 w-6 flex items-center justify-center text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-sm transition-colors">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {/* Total */}
+          <div className="flex items-center justify-between bg-amber-700 px-5 py-4 shrink-0">
+            <span className="text-[11px] font-black text-amber-300 uppercase tracking-widest">إجمالي المرتجع</span>
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-[28px] font-black font-mono text-white">{formatMoney(total)}</span>
+              <span className="text-[11px] font-black text-amber-400">ج.م</span>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Right: Panel ───────────────────────────────────────────── */}
+        <div className="flex flex-1 flex-col min-h-0">
+
+          {/* Toggle bar */}
+          <div className="flex items-center gap-2 border-b border-amber-200 bg-white px-4 py-2.5 shrink-0">
+            <button onClick={() => setRightPanel("products")}
+              className={`px-4 py-1.5 rounded-sm text-[12px] font-black border transition-all ${
+                rightPanel === "products"
+                  ? "border-amber-600 bg-amber-600 text-white"
+                  : "border-slate-200 text-slate-500 hover:bg-amber-50 hover:border-amber-300"
+              }`}>
+              إضافة صنف مباشر
+            </button>
+            <button onClick={() => { setRightPanel("search"); setTimeout(() => purchaseSearchRef.current?.focus(), 50); }}
+              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-sm text-[12px] font-black border transition-all ${
+                rightPanel === "search"
+                  ? "border-amber-500 bg-amber-500 text-white"
+                  : "border-slate-200 text-slate-500 hover:bg-amber-50 hover:border-amber-300"
+              }`}>
+              <History className="h-3.5 w-3.5" /> بحث في فواتير الشراء
+            </button>
+            {loadedPurchase && (
+              <span className="mr-auto text-[11px] font-black text-amber-600 flex items-center gap-1">
+                <CheckCircle2 className="h-3.5 w-3.5" /> مرتبط بفاتورة شراء #{loadedPurchase.id}
+              </span>
+            )}
+          </div>
+
+          {rightPanel === "products" ? (
+            /* Product search */
+            <div className="flex flex-col flex-1 min-h-0 p-4 gap-3">
+              <div className="relative">
+                <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-amber-400" />
+                <input
+                  autoFocus
+                  value={productSearch}
+                  onChange={e => setProductSearch(e.target.value)}
+                  placeholder="بحث بالاسم أو الباركود أو الكود..."
+                  className="w-full border border-amber-200 rounded-sm py-2.5 pr-10 pl-3 text-[13px] font-bold text-slate-800 outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-200 bg-white shadow-sm"
+                />
+              </div>
+              <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5">
+                {productResults.map(item => (
+                  <button key={item.id} onClick={() => addProductToCart(item)}
+                    className="w-full flex items-center justify-between rounded-sm border border-slate-200 bg-white px-4 py-3 text-right hover:border-amber-400 hover:bg-amber-50/50 transition-all active:scale-[0.99] shadow-sm">
+                    <div>
+                      <div className="text-[13px] font-black text-slate-800">{item.name}</div>
+                      <div className="text-[11px] font-mono text-slate-400">{item.barcode || item.code || "—"}</div>
+                    </div>
+                    <div className="text-[13px] font-black text-amber-700 font-mono">{formatMoney(item.cost || 0)} ج.م</div>
+                  </button>
+                ))}
+                {productSearch && productResults.length === 0 && (
+                  <div className="flex items-center justify-center py-10 text-slate-400 text-[12px] font-bold">لا توجد نتائج</div>
+                )}
+              </div>
+            </div>
+          ) : (
+            /* Purchase search */
+            <div className="flex flex-col flex-1 min-h-0 p-4 gap-3">
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-amber-400" />
+                  <input
+                    ref={purchaseSearchRef}
+                    value={purchaseSearch}
+                    onChange={e => setPurchaseSearch(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && handlePurchaseSearch()}
+                    placeholder="رقم فاتورة الشراء أو اسم المورد..."
+                    className="w-full border border-amber-200 rounded-sm py-2.5 pr-10 pl-3 text-[13px] font-bold text-slate-800 outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-200 bg-white shadow-sm"
+                  />
+                </div>
+                <button onClick={handlePurchaseSearch} disabled={purchaseSearchLoading}
+                  className="px-5 rounded-sm bg-amber-600 text-white text-[12px] font-black hover:bg-amber-500 disabled:opacity-60 transition-all active:scale-95 shadow-sm">
+                  {purchaseSearchLoading ? "..." : "بحث"}
+                </button>
               </div>
 
-              {/* Sidebar Info */}
-              <aside className="w-[320px] flex flex-col gap-4">
-                 <div className="rounded-md border border-slate-300 bg-white p-5 shadow-sm">
-                    <h3 className="mb-4 text-[12px] font-black text-slate-800 border-b pb-2 border-slate-100 uppercase tracking-widest">بيانات الفاتورة الأصلية</h3>
-                    <div className="space-y-4">
-                       <div className="flex justify-between">
-                          <span className="text-[11px] font-bold text-slate-400">التاريخ:</span>
-                          <span className="text-[11px] font-black text-slate-700">{new Date(purchase.created_at).toLocaleDateString("ar-EG")}</span>
-                       </div>
-                       <div className="flex justify-between">
-                          <span className="text-[11px] font-bold text-slate-400">المورد:</span>
-                          <span className="text-[11px] font-black text-slate-700">مورد #{purchase.supplier_id}</span>
-                       </div>
-                       <div className="flex justify-between">
-                          <span className="text-[11px] font-bold text-slate-400">إجمالي الفاتورة:</span>
-                          <span className="text-[11px] font-black text-slate-700">{formatMoney(purchase.total)}</span>
-                       </div>
+              <div className="flex-1 min-h-0 overflow-y-auto space-y-2">
+                {purchaseResults.map(p => (
+                  <div key={p.id} className="rounded-sm border border-slate-200 bg-white p-4 shadow-sm hover:border-amber-300 transition-colors">
+                    <div className="flex items-start justify-between mb-2">
+                      <div>
+                        <span className="text-[14px] font-black text-slate-800">فاتورة شراء #{p.id}</span>
+                        <span className="mr-2 text-[11px] font-bold text-slate-400">{new Date(p.created_at).toLocaleDateString("ar-EG")}</span>
+                        {p.doc_no && (
+                          <span className="mr-1 text-[10px] font-mono text-slate-400">{p.doc_no}</span>
+                        )}
+                      </div>
+                      <button onClick={() => loadPurchase(p)}
+                        className="px-4 py-1.5 rounded-sm bg-amber-600 text-white text-[11px] font-black hover:bg-amber-500 active:scale-95 transition-all">
+                        تحميل وإرجاع
+                      </button>
                     </div>
-                 </div>
-
-                 <div className="rounded-md border border-slate-300 bg-white p-5 shadow-sm">
-                    <h3 className="mb-4 text-[12px] font-black text-slate-800 border-b pb-2 border-slate-100 uppercase tracking-widest">خيارات المرتجع</h3>
-                    <div className="space-y-4">
-                       <div className="flex flex-col gap-1">
-                          <label className="text-[11px] font-bold text-slate-600">المخزن المراد الخصم منه</label>
-                          <select 
-                            size={4}
-                            value={selectedWarehouse} 
-                            onChange={(e) => setSelectedWarehouse(e.target.value)}
-                            className="w-full border border-slate-300 rounded-sm bg-slate-50 py-1 px-1 text-[11px] font-bold text-slate-800 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 overflow-y-auto custom-scrollbar h-[120px] transition-all shadow-sm focus:shadow-xl"
-                          >
-                            {warehouses.map(w => <option key={w.id} value={w.id} className="py-1 px-2 border-b border-slate-100 last:border-0 rounded-sm cursor-pointer hover:bg-slate-200">{w.name}</option>)}
-                          </select>
-                       </div>
-                       <div className="flex flex-col gap-2">
-                          <label className="text-[11px] font-bold text-slate-600">كيف سيتم تسوية المرتجع؟</label>
-                          <div className="grid grid-cols-1 gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setSettlementType("account")}
-                              className={`rounded-sm border p-3 text-right transition-all ${settlementType === "account" ? "border-slate-900 bg-slate-900 text-white shadow-sm" : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-white"}`}
-                            >
-                              <div className="text-[12px] font-black">خصم من حساب المورد</div>
-                              <div className={`mt-1 text-[10px] font-bold leading-relaxed ${settlementType === "account" ? "text-slate-200" : "text-slate-500"}`}>
-                                يقل دين المورد ولا يدخل نقد إلى الخزنة.
-                              </div>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setSettlementType("cash")}
-                              className={`rounded-sm border p-3 text-right transition-all ${settlementType === "cash" ? "border-emerald-700 bg-emerald-700 text-white shadow-sm" : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-white"}`}
-                            >
-                              <div className="text-[12px] font-black">استرداد نقدي من المورد</div>
-                              <div className={`mt-1 text-[10px] font-bold leading-relaxed ${settlementType === "cash" ? "text-emerald-50" : "text-slate-500"}`}>
-                                يدخل مبلغ المرتجع كاش في الخزنة.
-                              </div>
-                            </button>
-                          </div>
-                       </div>
-                       {settlementType === "cash" && (
-                         <div className="flex flex-col gap-1">
-                            <label className="text-[11px] font-bold text-slate-600">الخزنة التي سيدخل فيها النقد</label>
-                            <select
-                              value={selectedTreasury}
-                              onChange={(e) => setSelectedTreasury(e.target.value)}
-                              className="w-full rounded-sm border border-slate-300 bg-white px-3 py-2 text-[12px] font-bold text-slate-800 outline-none focus:border-emerald-600"
-                            >
-                              {treasuries.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                            </select>
-                         </div>
-                       )}
+                    <div className="flex items-center gap-3 text-[11px] font-bold text-slate-500">
+                      <span>{p.supplier_name || "بدون مورد"}</span>
+                      <span>·</span>
+                      <span className="font-mono text-amber-700">{formatMoney(p.total)} ج.م</span>
+                      <span>·</span>
+                      <span>{(p.lines || []).length} أصناف</span>
                     </div>
-                 </div>
-
-                 <div className="flex-1 flex flex-col justify-end">
-                    <div className="rounded-md bg-amber-50 border border-amber-200 p-4 mb-4">
-                       <div className="flex gap-3">
-                          <Info className="h-5 w-5 text-amber-600 shrink-0" />
-                          <p className="text-[11px] font-bold text-amber-900 leading-relaxed">
-                            {settlementType === "cash"
-                              ? "تنبيه: سيتم إدخال قيمة المرتجع في الخزنة المحددة وتحديث أرصدة الأصناف، ولن يتم خصمها من حساب المورد."
-                              : "تنبيه: سيتم خصم إجمالي المرتجع من مديونية المورد وتحديث أرصدة الأصناف، ولن يدخل أي نقد إلى الخزنة."}
-                          </p>
-                       </div>
-                    </div>
-                    <button 
-                      onClick={handleSave}
-                      className="w-full rounded-sm bg-slate-800 py-4 text-[14px] font-black text-white hover:bg-slate-700 shadow-lg"
-                    >
-                      تنفيذ المرتجع الآن
-                    </button>
-                 </div>
-              </aside>
-           </div>
-        ) : (
-           <div className="flex flex-1 flex-col items-center justify-center text-slate-300">
-              <History className="h-16 w-16 mb-4 opacity-20" />
-              <p className="text-[16px] font-black">ابحث عن فاتورة للبدء</p>
-              <p className="text-[11px] font-bold opacity-60">أدخل رقم فاتورة الشراء لتحميل بيانات الأصناف المتاحة للإرجاع</p>
-           </div>
-        )}
-      </main>
-      {/* Image Preview Modal */}
-      <Modal open={imageModalOpen} onClose={() => setImageModalOpen(false)} title="معاينة صورة الصنف" size="md">
-        <div className="flex flex-col items-center justify-center p-4 bg-slate-50/50 rounded-lg border border-slate-100">
-          {imagePreviewUrl ? (
-            <img src={imagePreviewUrl} alt="Preview" className="max-w-full max-h-[60vh] object-contain rounded-md shadow-sm border border-slate-200 bg-white" />
-          ) : (
-            <div className="flex flex-col items-center justify-center py-12 text-slate-400">
-              <ImageIcon className="w-16 h-16 mb-4 opacity-50" />
-              <p className="font-bold">الصورة غير متوفرة</p>
+                  </div>
+                ))}
+                {purchaseSearch && !purchaseSearchLoading && purchaseResults.length === 0 && (
+                  <div className="flex items-center justify-center py-10 text-slate-400 text-[12px] font-bold">لا توجد نتائج — جرب رقم الفاتورة مباشرة</div>
+                )}
+              </div>
             </div>
           )}
         </div>
-      </Modal>
-
-      {/* Confirm Leave Warning Modal */}
-      <Modal open={warnModalOpen} onClose={() => setWarnModalOpen(false)} title="تحذير: مغادرة الصفحة" size="md">
-        <div className="p-4 space-y-4">
-          <div className="flex items-start gap-4">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-rose-100 text-rose-600">
-              <AlertTriangle className="h-6 w-6" />
-            </div>
-            <div>
-              <h3 className="text-[14px] font-black text-slate-900 mb-1">تجاهل المرتجع؟</h3>
-              <p className="text-[12px] font-bold text-slate-500 leading-relaxed">
-                هل أنت متأكد من رغبتك في المغادرة؟ سيتم <span className="text-rose-600">إلغاء المرتجع</span> الذي تقوم بإعداده ولن يتم حفظه.
-              </p>
-            </div>
-          </div>
-          <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
-            <button onClick={() => setWarnModalOpen(false)} className="rounded-sm border border-slate-300 bg-white px-5 py-2 text-[13px] font-black text-slate-700 hover:bg-slate-50">
-              تراجع وإكمال المرتجع
-            </button>
-            <button onClick={() => navigate("/purchases/returns")} className="rounded-sm bg-rose-600 px-5 py-2 text-[13px] font-black text-white hover:bg-rose-700 shadow-sm shadow-rose-600/20">
-              نعم، تجاهل ومغادرة
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      <PrintPreviewModal
-        open={printPreview}
-        onClose={() => setPrintPreview(false)}
-        invoice={{
-          invoice_no: purchase?.id ? `PRET-${purchase.id}` : "",
-          created_at: new Date().toISOString().split("T")[0],
-          supplier_name: purchase?.supplier_name,
-          lines: (purchase?.lines || [])
-            .filter(l => returnLines[l.id] > 0)
-            .map(l => ({
-              item_name: l.item_name,
-              quantity: returnLines[l.id] || 0,
-              unit_price: l.unit_cost,
-              discount_amount: 0,
-            })),
-        }}
-        settings={{}}
-        operationLabel="إشعار مرتجع مشتريات"
-      />
-
+      </div>
     </div>
   );
 }
