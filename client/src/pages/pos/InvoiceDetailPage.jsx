@@ -156,6 +156,7 @@ export default function InvoiceDetailPage() {
           lines: (invoice.lines || []).map(l => ({
             item_id: l.item_id,
             item_name: l.item_name || l.name,
+            code: l.item_code || l.code || l.barcode || "",
             quantity: l.quantity,
             unit_price: l.unit_price,
             discount: l.discount || 0,
@@ -165,6 +166,9 @@ export default function InvoiceDetailPage() {
           discount: invoice.discount || 0,
           increase: invoice.increase || 0,
           notes: invoice.notes,
+          orig_balance_effect: invoice.debt_remaining || 0,
+          invoice_no: invoice.invoice_no,
+          created_at: invoice.created_at,
         },
       },
     });
@@ -190,6 +194,8 @@ export default function InvoiceDetailPage() {
 
   const statusInfo = STATUS_MAP[invoice.status] || STATUS_MAP.unpaid;
   const isCancelled = invoice.status === "cancelled";
+  const isAmended   = !!invoice.amended_by;   // was replaced by a newer invoice
+  const isAmendment = !!invoice.amendment_of; // is itself a replacement of an older invoice
 
   return (
     <div className="flex h-full min-h-[600px] flex-col bg-slate-50 font-sans overflow-hidden pb-6" dir="rtl">
@@ -201,21 +207,24 @@ export default function InvoiceDetailPage() {
           </button>
           <div className="flex flex-col">
             <h1 className="text-[14px] font-black text-slate-800">فاتورة بيع #{invoice.invoice_no}</h1>
-            <span className="text-[10px] font-bold text-slate-400">
-              {locked ? "محفوظة — اضغط تعديل للتغيير" : "وضع التعديل"}
-            </span>
+            <span className="text-[10px] font-bold text-slate-400">محفوظة</span>
           </div>
           <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-black ${statusInfo.cls}`}>
             {statusInfo.label}
           </span>
-          {locked && (
-            <div className="flex items-center gap-1.5 rounded-sm bg-slate-100 border border-slate-200 px-2.5 py-1 text-[11px] font-bold text-slate-500">
-              <Lock className="h-3 w-3" /> مقفلة
-            </div>
+          {isAmended && (
+            <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-100 px-2.5 py-0.5 text-[10px] font-black text-amber-700">
+              مُعدَّلة ← {invoice.amended_by_no || invoice.amended_by}
+            </span>
+          )}
+          {isAmendment && (
+            <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-100 px-2.5 py-0.5 text-[10px] font-black text-blue-700">
+              تعديل ↑ {invoice.amendment_of_no || invoice.amendment_of}
+            </span>
           )}
         </div>
         <div className="flex items-center gap-3">
-          {!isCancelled && (
+          {!isCancelled && !isAmended && (
             <button
               onClick={() => setCancelOpen(true)}
               className="flex h-9 items-center gap-2 rounded-sm border border-rose-200 bg-rose-50 px-4 text-[13px] font-black text-rose-600 hover:bg-rose-100 transition-all"
@@ -229,7 +238,7 @@ export default function InvoiceDetailPage() {
           >
             <Printer className="h-4 w-4" /> طباعة
           </button>
-          {!isCancelled && (
+          {!isCancelled && !isAmended && (
             <button
               onClick={() => setAmendOpen(true)}
               className="flex h-9 items-center gap-2 rounded-sm bg-indigo-600 px-6 text-[13px] font-black text-white hover:bg-indigo-700 transition-all"
@@ -244,7 +253,7 @@ export default function InvoiceDetailPage() {
         {/* Left */}
         <div className="flex flex-1 flex-col gap-3 min-w-0 overflow-hidden">
           {/* Info bar */}
-          <section className={`grid grid-cols-4 gap-3 rounded-md border border-slate-300 bg-white p-4 shadow-sm shrink-0 ${locked ? "opacity-70" : ""}`}>
+          <section className="grid grid-cols-4 gap-3 rounded-md border border-slate-300 bg-white p-4 shadow-sm shrink-0">
             <div className="flex flex-col gap-1">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">العميل</span>
               <span className="text-[13px] font-black text-slate-800">{invoice.customer_name || "زبون نقدي"}</span>
@@ -277,8 +286,10 @@ export default function InvoiceDetailPage() {
             containerClass="flex-1 overflow-x-auto overflow-y-auto bg-white scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-transparent rounded-md border border-slate-300 min-h-0"
             columns={[
               { id: "index", header: "#", width: 40, headerClass: "text-center", cellClass: "text-center font-mono text-[11px] text-slate-400 border-l border-slate-100", sortable: false, render: (_, i) => i + 1 },
-              { id: "name", header: "الصنف", width: 240, sortable: true, cellClass: "font-black text-slate-800 border-l border-slate-100 px-3", headerClass: "text-right px-3",
-                render: (l) => <div className="py-1"><p className="text-[13px] font-black">{l.item_name || l.name}</p>{l.barcode && <p className="font-mono text-[10px] text-slate-400">{l.barcode}</p>}</div> },
+              { id: "code", header: "الكود", width: 90, sortable: true, headerClass: "text-center", cellClass: "text-center font-mono text-[11px] font-black text-slate-500 border-l border-slate-100",
+                render: (l) => l.item_code || l.code || l.barcode || "—" },
+              { id: "name", header: "الصنف", width: 200, sortable: true, cellClass: "font-black text-slate-800 border-l border-slate-100 px-3", headerClass: "text-right px-3",
+                render: (l) => <div className="py-1"><p className="text-[13px] font-black">{l.item_name || l.name}</p></div> },
               { id: "quantity", header: "الكمية", width: 90, sortable: true, headerClass: "text-center", cellClass: "text-center font-mono text-[13px] font-black border-l border-slate-100", render: (l) => l.quantity },
               { id: "unit_price", header: "السعر", width: 110, sortable: true, headerClass: "text-center", cellClass: "text-center font-mono text-[13px] font-black border-l border-slate-100 text-slate-700", render: (l) => fmt(l.unit_price) },
               { id: "discount", header: "خصم", width: 90, sortable: true, headerClass: "text-center", cellClass: "text-center font-mono text-[13px] font-black border-l border-slate-100 text-amber-700", render: (l) => l.discount > 0 ? fmt(l.discount) : "—" },

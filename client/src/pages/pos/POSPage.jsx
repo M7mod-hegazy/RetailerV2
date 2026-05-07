@@ -34,6 +34,8 @@ import {
   Filter,
   RefreshCw,
   Calendar,
+  FilePlus,
+  Sparkles,
 } from "lucide-react";
 import api from "../../services/api";
 import { InvoiceSaveSuccess } from "../../components/pos/InvoiceSaveSuccess";
@@ -423,11 +425,15 @@ export default function POSPage() {
   const [units, setUnits]                 = useState([]);
   const [employees, setEmployees]         = useState([]);
   const [stockLevels, setStockLevels]     = useState({});
+  const [stockLoaded, setStockLoaded]     = useState(false);
   const [storeSettings, setStoreSettings] = useState({ company_name: "المتجر", address: "" });
   const [printPreview, setPrintPreview] = useState(false);
   const [paymentMethods, setPaymentMethods] = useState([]);
   const [showSetDefaultModal, setShowSetDefaultModal] = useState(false);
   const [pendingViewMode, setPendingViewMode] = useState(null);
+  const [newInvoiceModalOpen, setNewInvoiceModalOpen] = useState(false);
+  const [saveOnlyConfirmOpen, setSaveOnlyConfirmOpen] = useState(false);
+  const [cancelModalOpen, setCancelModalOpen] = useState(false);
 
   const [invoiceTick, setInvoiceTick] = useState(() => Date.now());
   const [invoiceSeq, setInvoiceSeq]   = useState(1);
@@ -488,6 +494,8 @@ export default function POSPage() {
   const [receiptDateTo, setReceiptDateTo]     = useState(toDateInput());
   const [receiptSort, setReceiptSort]         = useState("created_at");
   const [receiptDir, setReceiptDir]           = useState("desc");
+  const [receiptUserId, setReceiptUserId]     = useState("");
+  const [receiptUsersList, setReceiptUsersList] = useState([]);
   const [receiptsLoading, setReceiptsLoading] = useState(false);
   const [invoiceSearchNo, setInvoiceSearchNo] = useState("");
   const [searchedInvoice, setSearchedInvoice] = useState(null);
@@ -579,7 +587,8 @@ export default function POSPage() {
         grouped[row.item_id][row.warehouse_id] = row.quantity;
       });
       setStockLevels(grouped);
-    }).catch(() => {});
+      setStockLoaded(true);
+    }).catch(() => { setStockLoaded(true); });
     api.get("/api/settings").then((r) => {
       const s = r.data.data || {};
       setStoreSettings(s);
@@ -597,31 +606,48 @@ export default function POSPage() {
     setStaging((s) => ({ ...s, warehouseId: s.warehouseId || String(warehouses[0].id) }));
   }, [warehouses]);
 
+  // Amend context — persisted in state so it survives history.replaceState
+  const [amendContext, setAmendContext] = useState(null); // { amend_invoice_id, amend_reason, prefill }
+  const [showAmendSummary, setShowAmendSummary] = useState(true);
+
   // Pre-fill cart when navigated from invoice amend flow
   useEffect(() => {
     const amendState = location.state;
     if (!amendState?.amend_invoice_id || !amendState?.prefill) return;
     const { prefill } = amendState;
     clear();
-    if (prefill.customer_id) setCustomer({ id: prefill.customer_id, name: prefill.customer_name });
     if (prefill.payment_type) setPaymentType(prefill.payment_type);
     if (prefill.discount) setDiscount(prefill.discount);
     if (prefill.increase) setIncrease(prefill.increase);
     (prefill.lines || []).forEach(l => addLine({
       item_id: l.item_id,
       name: l.item_name,
+      code: l.code || "",
       quantity: l.quantity,
       unit_price: l.unit_price,
       discount: l.discount || 0,
       warehouse_id: l.warehouse_id || 1,
     }));
-    // Clear navigation state to prevent re-trigger
+    setAmendContext(amendState);
+    setShowAmendSummary(true);
     window.history.replaceState({}, document.title);
   }, [location.state]);
 
+  // Set customer AFTER amendContext is stored — runs in a separate effect cycle,
+  // after clear() has fully settled, reliably overriding the customer sync effect.
+  useEffect(() => {
+    if (!amendContext?.prefill?.customer_id) return;
+    const { prefill } = amendContext;
+    // Prefer the full customer object (with opening_balance) from the loaded list;
+    // fall back to bare id+name if the list hasn't arrived yet.
+    const full = customers.find((c) => c.id === prefill.customer_id);
+    setCustomer(full || { id: prefill.customer_id, name: prefill.customer_name });
+    setCustomerQuery(prefill.customer_name || "");
+  }, [amendContext, customers]);
+
   // Store amend context for use during submit
-  const amendInvoiceId = location.state?.amend_invoice_id || null;
-  const amendReason = location.state?.amend_reason || null;
+  const amendInvoiceId = amendContext?.amend_invoice_id || null;
+  const amendReason = amendContext?.amend_reason || null;
 
   useEffect(() => {
     if (!selectedItem) return;
@@ -737,8 +763,10 @@ export default function POSPage() {
       const lineTotal = unitPrice * quantity;
 
       if (unitPrice <= 0) warnings.push({ type: "error", code: "zero_price", msg: "سعر صفر" });
-      if (quantity > stockQty && stockQty > 0) warnings.push({ type: "error", code: "stock_exceeded", msg: `تجاوز المخزون (متاح: ${stockQty})` });
-      if (quantity > stockQty && stockQty === 0) warnings.push({ type: "error", code: "no_stock", msg: "لا يوجد مخزون" });
+      // In amend mode the original invoice is still active (not yet cancelled),
+      // so stock will appear consumed. Suppress stock errors until submit restores it.
+      if (!amendContext && stockLoaded && quantity > stockQty && stockQty > 0) warnings.push({ type: "error", code: "stock_exceeded", msg: `تجاوز المخزون (متاح: ${stockQty})` });
+      if (!amendContext && stockLoaded && quantity > stockQty && stockQty === 0) warnings.push({ type: "error", code: "no_stock", msg: "لا يوجد مخزون" });
       if (costPrice > 0 && unitPrice < costPrice && unitPrice > 0) warnings.push({ type: "warning", code: "below_cost", msg: `أقل من التكلفة (${Number(costPrice).toFixed(2)})` });
       if (lineDiscount > lineTotal && lineTotal > 0) warnings.push({ type: "warning", code: "discount_overflow", msg: "الخصم يتجاوز الإجمالي" });
       if (lineDiscount < 0) warnings.push({ type: "warning", code: "negative_discount", msg: "خصم سالب" });
@@ -746,7 +774,7 @@ export default function POSPage() {
       result[l.item_id] = warnings;
     }
     return result;
-  }, [lines, items, stockLevels]);
+  }, [lines, items, stockLevels, stockLoaded, amendContext]);
 
   const hasBlockingErrors = useMemo(
     () => Object.values(lineWarnings).some((ws) => ws.some((w) => w.type === "error")),
@@ -837,7 +865,10 @@ export default function POSPage() {
   }, [lines, cartSortConfig]);
 
   const selectedCustomer   = customer || WALK_IN_CUSTOMER;
-  const hasCustomerBalance = Number(selectedCustomer.opening_balance || 0) > 0;
+  // When amending, the old invoice's debt will be reversed on cancel — subtract it so we show the "pre-invoice" balance.
+  const amendBalanceAdjust = amendContext ? (amendContext.prefill?.orig_balance_effect || 0) : 0;
+  const displayBalance     = Number(selectedCustomer.opening_balance || 0) - amendBalanceAdjust;
+  const hasCustomerBalance = displayBalance > 0;
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -868,6 +899,12 @@ export default function POSPage() {
     setMultiCash("");
     setMultiCredit("");
     setMultiCustomAmounts({});
+  }
+
+  function resetCustomer() {
+    setCustomer(null);
+    setCustomerQuery("");
+    setCustomerLookupOpen(false);
   }
 
   function handleSelectItem(item) {
@@ -992,7 +1029,9 @@ export default function POSPage() {
   async function loadReceipts() {
     setReceiptsLoading(true);
     try {
-      const r = await api.get(`/api/invoices?date_from=${receiptDateFrom}&date_to=${receiptDateTo}&sort=${receiptSort}&dir=${receiptDir}`);
+      const params = new URLSearchParams({ date_from: receiptDateFrom, date_to: receiptDateTo, sort: receiptSort, dir: receiptDir });
+      if (receiptUserId) params.set("user_id", receiptUserId);
+      const r = await api.get(`/api/invoices?${params}`);
       setReceipts(r.data.data || []);
       setReceiptSummary(r.data.summary || { count: 0, total: 0 });
     } catch { /* silent */ }
@@ -1000,9 +1039,14 @@ export default function POSPage() {
   }
 
   useEffect(() => {
-    if (receiptsOpen) loadReceipts();
+    if (receiptsOpen) {
+      loadReceipts();
+      if (!receiptUsersList.length) {
+        api.get("/api/users").then(r => setReceiptUsersList(r.data.data || [])).catch(() => {});
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [receiptsOpen, receiptDateFrom, receiptDateTo, receiptSort, receiptDir]);
+  }, [receiptsOpen, receiptDateFrom, receiptDateTo, receiptSort, receiptDir, receiptUserId]);
 
   // ── Save invoice ──────────────────────────────────────────────────────────────
 
@@ -1074,9 +1118,9 @@ export default function POSPage() {
       };
       let response;
       if (amendInvoiceId) {
-        response = await api.put(`/api/invoices/${amendInvoiceId}/amend`, { ...payload, reason: amendReason });
-        const newInvoiceId = response.data?.data?.new_invoice?.id;
-        if (newInvoiceId) { navigate(`/pos/invoices/${newInvoiceId}`); return; }
+        response = await api.put(`/api/invoices/${amendInvoiceId}`, payload);
+        navigate(`/invoices/${amendInvoiceId}`);
+        return;
       } else {
         response = await api.post("/api/invoices", payload);
       }
@@ -1093,7 +1137,8 @@ export default function POSPage() {
       };
       setLastSavedInvoice(receiptSnap);
       setSaveSuccess({ invoiceNumber: savedInvoiceNo, total: formatMoney(totals.total) });
-      clear(); resetPaymentFields(); resetStaging(); setPaymentType("cash"); setInvoiceSeq((s) => s + 1);
+      setAmendContext(null);
+      clear(); resetPaymentFields(); resetStaging(); resetCustomer(); setPaymentType("cash"); setInvoiceSeq((s) => s + 1);
       if (printAfter) setPrintPreview(true);
     } catch (error) {
       if (error.response?.status === 403 && error.response?.data?.code === "DISCOUNT_LIMIT_EXCEEDED") {
@@ -1493,6 +1538,51 @@ export default function POSPage() {
               </div>
             </div>
 
+            {/* Amend: original invoice summary in payment panel */}
+            {amendContext && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 shadow-sm">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-black text-amber-700 uppercase tracking-widest flex items-center gap-1">
+                    <Pencil className="h-3 w-3" /> الفاتورة الأصلية المُعدَّلة
+                  </span>
+                  <button onClick={() => setShowAmendSummary(false)} className="text-amber-400 hover:text-amber-700">
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+                {showAmendSummary && (
+                  <div className="space-y-1 text-[11px] font-bold text-amber-800">
+                    {/* Locked fields — preserved by in-place edit */}
+                    <div className="flex gap-1.5 mb-2">
+                      <input disabled value={amendContext.prefill?.invoice_no || `#${amendContext.amend_invoice_id}`}
+                        className="flex-1 h-7 rounded-sm border border-amber-200 bg-amber-100/60 px-2 text-[11px] font-mono font-black text-amber-700 cursor-not-allowed outline-none" />
+                      <input disabled value={amendContext.prefill?.created_at ? new Date(amendContext.prefill.created_at).toLocaleString("ar-EG") : ""}
+                        className="flex-1 h-7 rounded-sm border border-amber-200 bg-amber-100/60 px-2 text-[11px] font-mono font-black text-amber-700 cursor-not-allowed outline-none" />
+                    </div>
+                    {amendContext.prefill?.customer_name && (
+                      <div className="flex justify-between"><span className="text-amber-600">العميل</span><span>{amendContext.prefill.customer_name}</span></div>
+                    )}
+                    <div className="flex justify-between">
+                      <span className="text-amber-600">الإجمالي</span>
+                      <span className="font-mono">{(() => {
+                        const lines = amendContext.prefill?.lines || [];
+                        const sub = lines.reduce((s, l) => s + (Number(l.unit_price||0) * Number(l.quantity||1) * (1 - Number(l.discount||0)/100)), 0);
+                        return (sub - (amendContext.prefill?.discount||0) + (amendContext.prefill?.increase||0)).toLocaleString("ar-EG", { minimumFractionDigits: 2 });
+                      })()} ج.م</span>
+                    </div>
+                    <div className="flex justify-between"><span className="text-amber-600">الأصناف</span><span>{(amendContext.prefill?.lines||[]).length} صنف</span></div>
+                    <div className="flex justify-between">
+                      <span className="text-amber-600">الدفع</span>
+                      <span>{{cash:"نقدي",credit:"آجل",bank_transfer:"بنك/فيزا",installments:"أقساط",multi:"متعدد"}[amendContext.prefill?.payment_type] || amendContext.prefill?.payment_type || "—"}</span>
+                    </div>
+                    {amendContext.amend_reason && (
+                      <div className="flex justify-between"><span className="text-amber-600">السبب</span><span className="text-right max-w-[60%]">{amendContext.amend_reason}</span></div>
+                    )}
+                    <div className="flex justify-between"><span className="text-amber-600">المحرر</span><span>{user?.name || "—"}</span></div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Payment Method */}
             <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <h3 className="mb-3 text-[11px] font-black text-slate-400 uppercase tracking-widest">طريقة الدفع</h3>
@@ -1605,14 +1695,22 @@ export default function POSPage() {
             {customer && customer.id && (
               <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="flex items-start gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-800 text-white text-[14px] font-black">{customer.name[0]}</div>
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-800 text-white text-[14px] font-black">{(customer.name || "?")[0]}</div>
                   <div className="flex-1 min-w-0">
                     <p className="text-[13px] font-black text-slate-800 truncate">{customer.name}</p>
                     {customer.phone && <p className="text-[11px] text-slate-500 mt-0.5 font-mono">{customer.phone}</p>}
                     <div className="mt-2 flex items-center justify-between rounded-lg bg-slate-50 border border-slate-100 px-3 py-2">
-                      <span className="text-[11px] font-bold text-slate-500">الرصيد الحالي</span>
-                      <span className={`text-[13px] font-black font-mono ${Number(customer.opening_balance) > 0 ? "text-rose-600" : "text-slate-800"}`}>{Number(customer.opening_balance || 0).toFixed(3)}</span>
+                      <span className="text-[11px] font-bold text-slate-500">{amendContext ? "الرصيد قبل التعديل" : "الرصيد الحالي"}</span>
+                      <span className={`text-[13px] font-black font-mono ${displayBalance > 0 ? "text-rose-600" : "text-slate-800"}`}>{displayBalance.toFixed(3)}</span>
                     </div>
+                    {paymentType === "credit" && lines.length > 0 && (
+                      <div className="mt-1.5 flex items-center justify-between rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
+                        <span className="text-[11px] font-bold text-amber-600">الرصيد بعد الفاتورة</span>
+                        <span className={`text-[13px] font-black font-mono ${displayBalance + totals.total > 0 ? "text-rose-600" : "text-emerald-600"}`}>
+                          {(displayBalance + totals.total).toFixed(3)}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1630,18 +1728,27 @@ export default function POSPage() {
                 </button>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => setPrintPreview(true)}
+                    type="button"
+                    onClick={() => setSaveOnlyConfirmOpen(true)}
                     disabled={!lines.length || isSaving || hasBlockingErrors}
                     className={`flex flex-1 items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-[12px] font-black transition-all ${!lines.length || isSaving || hasBlockingErrors ? "cursor-not-allowed border-slate-100 bg-slate-50 text-slate-400" : "border-slate-200 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50"}`}
                   >
                     حفظ فقط
                   </button>
                   <button
-                    onClick={() => { if(window.confirm("هل تريد إلغاء الفاتورة الحالية؟")) { clear(); resetPaymentFields(); resetStaging(); setPaymentType("cash"); setInvoiceSeq((s) => s + 1); } }}
+                    type="button"
+                    onClick={() => setCancelModalOpen(true)}
                     disabled={!lines.length}
                     className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-[12px] font-black text-rose-700 hover:bg-rose-100 hover:border-rose-300 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
                   >
                     <Trash2 className="h-4 w-4" /> إلغاء
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewInvoiceModalOpen(true)}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-[12px] font-black text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300 transition-all"
+                  >
+                    <FilePlus className="h-4 w-4" /> جديدة
                   </button>
                 </div>
               </div>
@@ -1813,7 +1920,10 @@ export default function POSPage() {
                       <div className="px-2 py-3 text-[10px] text-slate-400 font-bold text-center">اختر صنفاً أولاً</div>
                     ) : (
                       (() => {
-                        const stocked = warehouses.filter((w) => (stockLevels[selectedItem.id]?.[w.id] || 0) > 0);
+                        // In amend mode, show all warehouses; otherwise only those with stock
+                        const stocked = amendContext
+                          ? warehouses
+                          : warehouses.filter((w) => (stockLevels[selectedItem.id]?.[w.id] || 0) > 0);
                         if (stocked.length === 0) {
                           return (
                             <div className="px-2 py-2.5 text-[10px] text-rose-600 font-bold text-center flex items-center justify-center gap-1.5">
@@ -2149,6 +2259,16 @@ export default function POSPage() {
                 <input type="date" value={receiptDateTo} onChange={(e) => setReceiptDateTo(e.target.value)}
                   className="rounded-sm border border-slate-200 px-2 py-1.5 text-[12px] font-bold outline-none focus:border-slate-800" />
               </div>
+              {receiptUsersList.length > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest">المستخدم</label>
+                  <select value={receiptUserId} onChange={(e) => setReceiptUserId(e.target.value)}
+                    className="rounded-sm border border-slate-200 px-2 py-1.5 text-[12px] font-bold outline-none focus:border-slate-800">
+                    <option value="">الكل</option>
+                    {receiptUsersList.map(u => <option key={u.id} value={u.id}>{u.username}</option>)}
+                  </select>
+                </div>
+              )}
               <button onClick={loadReceipts}
                 className="flex items-center gap-1.5 rounded-sm border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-black text-slate-600 hover:border-slate-800 hover:text-slate-900 transition-colors">
                 <RefreshCw className={`h-3.5 w-3.5 ${receiptsLoading ? "animate-spin" : ""}`} /> تحديث
@@ -2177,11 +2297,19 @@ export default function POSPage() {
                 className="border-0"
                 columns={[
                   { id: "invoice_no", header: "رقم الفاتورة", width: 140, cellClass: "px-3 font-mono text-[12px] font-black text-slate-700", render: (inv) => inv.invoice_no },
-                  { id: "customer_name", header: "العميل", width: 160, cellClass: "px-3 text-[12px] font-bold text-slate-800", render: (inv) => inv.customer_name || "زبون نقدي" },
-                  { id: "total", header: "الإجمالي", width: 120, cellClass: "px-3 font-mono text-[13px] font-black text-emerald-700", render: (inv) => formatMoney(inv.total) },
-                  { id: "payment_type", header: "طريقة الدفع", width: 120, cellClass: "px-3 text-[12px] font-bold text-slate-600", render: (inv) => PAYMENT_TYPES.find((p) => p.type === inv.payment_type)?.label || inv.payment_type },
-                  { id: "created_at", header: "الوقت", width: 150, cellClass: "px-3 text-[11px] font-bold text-slate-500 font-mono whitespace-nowrap", render: (inv) => formatArabicDateTime(new Date(inv.created_at)) },
-                  { id: "actions", header: "", width: 90, cellClass: "px-3", render: (inv) => (
+                  { id: "customer_name", header: "العميل", width: 140, cellClass: "px-3 text-[12px] font-bold text-slate-800", render: (inv) => inv.customer_name || "زبون نقدي" },
+                  { id: "total", header: "الإجمالي", width: 110, cellClass: "px-3 font-mono text-[13px] font-black text-emerald-700", render: (inv) => formatMoney(inv.total) },
+                  { id: "payment_type", header: "الدفع", width: 90, cellClass: "px-3 text-[12px] font-bold text-slate-600", render: (inv) => PAYMENT_TYPES.find((p) => p.type === inv.payment_type)?.label || inv.payment_type },
+                  { id: "amendment", header: "تعديل", width: 110, cellClass: "px-3", render: (inv) => (
+                    <div className="flex flex-col gap-0.5">
+                      {inv.amended_by && <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-100 text-amber-700 border border-amber-200 whitespace-nowrap">مُعدَّلة ← {inv.amended_by_no || inv.amended_by}</span>}
+                      {inv.amendment_of && <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-blue-100 text-blue-700 border border-blue-200 whitespace-nowrap">تعديل ↑ {inv.amendment_of_no || inv.amendment_of}</span>}
+                      {!inv.amended_by && !inv.amendment_of && <span className="text-slate-300 text-[10px]">—</span>}
+                    </div>
+                  )},
+                  { id: "created_by", header: "المستخدم", width: 100, cellClass: "px-3 text-[11px] font-bold text-slate-600 whitespace-nowrap", render: (inv) => inv.created_by_username || "—" },
+                  { id: "created_at", header: "الوقت", width: 140, cellClass: "px-3 text-[11px] font-bold text-slate-500 font-mono whitespace-nowrap", render: (inv) => formatArabicDateTime(new Date(inv.created_at)) },
+                  { id: "actions", header: "", width: 80, cellClass: "px-3", render: (inv) => (
                     <div className="flex gap-1">
                       <button onClick={() => navigate(`/invoices/${inv.id}`)} className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-blue-50 hover:text-blue-600" title="فتح الفاتورة"><Pencil className="h-3.5 w-3.5" /></button>
                       <button onClick={() => handleVoidInvoice(inv)} className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="إلغاء"><Trash2 className="h-3.5 w-3.5" /></button>
@@ -2316,6 +2444,168 @@ export default function POSPage() {
             </div>
           </div>
         </Modal>
+
+        {/* New Invoice Warning Modal */}
+        <Modal open={newInvoiceModalOpen} onClose={() => setNewInvoiceModalOpen(false)} title="فاتورة جديدة">
+          <div className="flex flex-col gap-4 mt-2">
+            {lines.length > 0 ? (
+              <>
+                <div className="flex items-start gap-3 p-3 rounded-lg bg-amber-50 border border-amber-200">
+                  <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-[13px] font-black text-amber-800">يوجد أصناف في الفاتورة الحالية</p>
+                    <p className="text-[12px] font-bold text-amber-700 mt-1">اختر كيف تريد المتابعة:</p>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <button
+                    onClick={() => {
+                      setNewInvoiceModalOpen(false);
+                      saveInvoice(false);
+                    }}
+                    disabled={isSaving}
+                    className="flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 text-[13px] font-black text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    حفظ الحالية وإنشاء جديدة
+                  </button>
+                  <button
+                    onClick={() => {
+                      setNewInvoiceModalOpen(false);
+                      clear();
+                      resetPaymentFields();
+                      resetStaging();
+                      resetCustomer();
+                      setPaymentType("cash");
+                      setInvoiceSeq((s) => s + 1);
+                    }}
+                    className="flex items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-[13px] font-black text-rose-700 hover:bg-rose-100 transition-colors"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    تجاهل وإنشاء جديدة
+                  </button>
+                  <button
+                    onClick={() => setNewInvoiceModalOpen(false)}
+                    className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-[12px] font-black text-slate-600 hover:bg-slate-50 transition-colors"
+                  >
+                    إلغاء
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex items-start gap-3 p-3 rounded-lg bg-emerald-50 border border-emerald-200">
+                  <FilePlus className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-[13px] font-black text-emerald-800">إنشاء فاتورة جديدة</p>
+                    <p className="text-[12px] font-bold text-emerald-700 mt-1">الفاتورة الحالية فارغة</p>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <button
+                    onClick={() => {
+                      setNewInvoiceModalOpen(false);
+                      clear();
+                      resetPaymentFields();
+                      resetStaging();
+                      resetCustomer();
+                      setPaymentType("cash");
+                      setInvoiceSeq((s) => s + 1);
+                    }}
+                    className="flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 text-[13px] font-black text-white hover:bg-emerald-700 transition-colors"
+                  >
+                    <FilePlus className="h-4 w-4" />
+                    إنشاء فاتورة جديدة
+                  </button>
+                  <button
+                    onClick={() => setNewInvoiceModalOpen(false)}
+                    className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-[12px] font-black text-slate-600 hover:bg-slate-50 transition-colors"
+                  >
+                    إلغاء
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </Modal>
+
+        {/* Save Only Confirmation Modal */}
+        <Modal open={saveOnlyConfirmOpen} onClose={() => setSaveOnlyConfirmOpen(false)} title="تأكيد الحفظ">
+          <div className="flex flex-col gap-4 mt-2">
+            <div className="flex items-start gap-3 p-3 rounded-lg bg-blue-50 border border-blue-200">
+              <Printer className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-[13px] font-black text-blue-800">هل تريد الحفظ والطباعة؟</p>
+                <p className="text-[12px] font-bold text-blue-700 mt-1">سيتم فتح نافذة الطباعة بعد الحفظ</p>
+              </div>
+            </div>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => {
+                  setSaveOnlyConfirmOpen(false);
+                  setPrintPreview(true);
+                }}
+                disabled={isSaving}
+                className="flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 text-[13px] font-black text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+              >
+                <Printer className="h-4 w-4" />
+                نعم، حفظ وطباعة
+              </button>
+              <button
+                onClick={() => {
+                  setSaveOnlyConfirmOpen(false);
+                  saveInvoice(false);
+                }}
+                disabled={isSaving}
+                className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-[12px] font-black text-slate-700 hover:bg-slate-50 transition-colors"
+              >
+                حفظ فقط بدون طباعة
+              </button>
+              <button
+                onClick={() => setSaveOnlyConfirmOpen(false)}
+                className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-[11px] font-bold text-slate-500 hover:bg-slate-100 transition-colors"
+              >
+                إلغاء
+              </button>
+            </div>
+          </div>
+        </Modal>
+
+        {/* Cancel Invoice Modal */}
+        <Modal open={cancelModalOpen} onClose={() => setCancelModalOpen(false)} title="إلغاء الفاتورة">
+          <div className="flex flex-col gap-4 mt-2">
+            <div className="flex items-start gap-3 p-3 rounded-lg bg-rose-50 border border-rose-200">
+              <Trash2 className="h-5 w-5 text-rose-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-[13px] font-black text-rose-800">هل تريد إلغاء الفاتورة الحالية؟</p>
+                <p className="text-[12px] font-bold text-rose-700 mt-1">سيتم حذف جميع الأصناف المضافة</p>
+              </div>
+            </div>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => {
+                  setCancelModalOpen(false);
+                  clear();
+                  resetPaymentFields();
+                  resetStaging();
+                  resetCustomer();
+                  setPaymentType("cash");
+                  setInvoiceSeq((s) => s + 1);
+                }}
+                className="flex items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 py-3 text-[13px] font-black text-white hover:bg-rose-700 transition-colors"
+              >
+                <Trash2 className="h-4 w-4" />
+                نعم، إلغاء الفاتورة
+              </button>
+              <button
+                onClick={() => setCancelModalOpen(false)}
+                className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-[12px] font-black text-slate-600 hover:bg-slate-50 transition-colors"
+              >
+                تراجع
+              </button>
+            </div>
+          </div>
+        </Modal>
       </div>
     );
   }
@@ -2333,6 +2623,48 @@ export default function POSPage() {
         </div>
       )}
 
+
+      {/* Amend mode banner */}
+      {amendContext && showAmendSummary && (
+        <div className="shrink-0 bg-amber-50 border-b border-amber-200 px-4 py-2 z-20" dir="rtl">
+          <div className="flex items-start gap-3">
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <Pencil className="h-4 w-4 text-amber-600" />
+              <span className="text-[12px] font-black text-amber-800">وضع التعديل — الفاتورة الأصلية:</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-3 flex-1 text-[11px] font-bold text-amber-700">
+              {amendContext.prefill?.customer_name && (
+                <span className="flex items-center gap-1"><User className="h-3 w-3" /> {amendContext.prefill.customer_name}</span>
+              )}
+              <span>الإجمالي: {(() => {
+                const lines = amendContext.prefill?.lines || [];
+                const sub = lines.reduce((s, l) => s + (Number(l.unit_price || 0) * Number(l.quantity || 1) * (1 - Number(l.discount || 0) / 100)), 0);
+                const disc = amendContext.prefill?.discount || 0;
+                const inc = amendContext.prefill?.increase || 0;
+                return (sub - disc + inc).toLocaleString("ar-EG", { minimumFractionDigits: 2 });
+              })()} ج.م</span>
+              <span>{(amendContext.prefill?.lines || []).length} صنف</span>
+              {amendContext.prefill?.payment_type && (
+                <span>{{cash:"نقدي",credit:"آجل",bank_transfer:"بنك/فيزا",installments:"أقساط",multi:"متعدد"}[amendContext.prefill.payment_type] || amendContext.prefill.payment_type}</span>
+              )}
+              {amendContext.amend_reason && (
+                <span className="text-amber-600">السبب: {amendContext.amend_reason}</span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => { setAmendContext(null); clear(); resetPaymentFields(); resetStaging(); resetCustomer(); setPaymentType("cash"); }}
+                className="flex items-center gap-1.5 rounded-md bg-white border border-amber-300 px-3 py-1 text-[11px] font-black text-amber-700 hover:bg-amber-100 transition-colors"
+              >
+                <Plus className="h-3.5 w-3.5" /> فاتورة جديدة
+              </button>
+              <button onClick={() => setShowAmendSummary(false)} className="h-6 w-6 flex items-center justify-center rounded-md hover:bg-amber-100 text-amber-500">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main content */}
       <div
@@ -2487,9 +2819,6 @@ export default function POSPage() {
                 <span className="font-mono bg-white px-1.5 py-0.5 rounded-sm border border-slate-200">{invoiceNumber}</span>
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={() => { clear(); resetPaymentFields(); resetStaging(); setPaymentType("cash"); setInvoiceSeq((s) => s + 1); }} className="hover:text-slate-800 transition-colors" title="إلغاء وبدء جديد">
-                  <RotateCcw className="w-3.5 h-3.5" />
-                </button>
                 <button onClick={() => setProfitModalOpen(true)} className="hover:text-emerald-600 transition-colors" title="الربح المتوقع">
                   <TrendingUp className="w-3.5 h-3.5" />
                 </button>
@@ -2532,9 +2861,16 @@ export default function POSPage() {
                 <Plus className="h-4 w-4" />
               </button>
             </div>
-            {customer?.id && hasCustomerBalance && (
-              <div className="text-[11px] font-black text-amber-700 bg-amber-100/50 border border-amber-200 px-2 py-1 rounded-sm text-center">
-                رصيد العميل الحالي: {formatMoney(selectedCustomer.opening_balance)}
+            {customer?.id && (
+              <div className="flex items-center gap-2 mt-1">
+                <div className="text-[11px] font-black text-amber-700 bg-amber-100/50 border border-amber-200 px-2 py-1 rounded-sm">
+                  {amendContext ? "قبل التعديل: " : "الرصيد: "}{formatMoney(displayBalance)}
+                </div>
+                {paymentType === "credit" && lines.length > 0 && (
+                  <div className="text-[11px] font-black text-rose-700 bg-rose-100/50 border border-rose-200 px-2 py-1 rounded-sm">
+                    بعد الفاتورة: {formatMoney(displayBalance + totals.total)}
+                  </div>
+                )}
               </div>
             )}
             {/* Default customer quick-select */}
@@ -2875,11 +3211,18 @@ export default function POSPage() {
                   <Printer className="h-5 w-5" /> طباعة ومراجعة المستند
                 </button>
                 <div className="flex gap-2">
-                  <button type="button" onClick={() => setPrintPreview(true)} disabled={!lines.length || isSaving || hasBlockingErrors} className={`flex flex-1 items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-[12px] font-black transition-all ${!lines.length || isSaving || hasBlockingErrors ? "cursor-not-allowed border-slate-100 bg-slate-50 text-slate-400" : "border-slate-200 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50"}`}>
+                  <button type="button" onClick={() => setSaveOnlyConfirmOpen(true)} disabled={!lines.length || isSaving || hasBlockingErrors} className={`flex flex-1 items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-[12px] font-black transition-all ${!lines.length || isSaving || hasBlockingErrors ? "cursor-not-allowed border-slate-100 bg-slate-50 text-slate-400" : "border-slate-200 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50"}`}>
                     حفظ فقط
                   </button>
-                  <button type="button" onClick={() => { if(window.confirm("هل تريد إلغاء الفاتورة الحالية؟")) { clear(); resetPaymentFields(); resetStaging(); setPaymentType("cash"); setInvoiceSeq((s) => s + 1); } }} disabled={!lines.length} className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-[12px] font-black text-rose-700 hover:bg-rose-100 hover:border-rose-300 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+                  <button type="button" onClick={() => setCancelModalOpen(true)} disabled={!lines.length} className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-[12px] font-black text-rose-700 hover:bg-rose-100 hover:border-rose-300 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
                     <Trash2 className="h-4 w-4" /> إلغاء
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewInvoiceModalOpen(true)}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-[12px] font-black text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300 transition-all"
+                  >
+                    <FilePlus className="h-4 w-4" /> جديدة
                   </button>
                 </div>
               </div>
@@ -2962,6 +3305,16 @@ export default function POSPage() {
                 <ArrowUpDown className="h-3.5 w-3.5 text-slate-500" />
               </button>
             </div>
+            {receiptUsersList.length > 0 && (
+              <div className="flex items-center gap-1.5">
+                <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest">المستخدم</label>
+                <select value={receiptUserId} onChange={(e) => setReceiptUserId(e.target.value)}
+                  className="rounded-sm border border-slate-200 px-2 py-1.5 text-[12px] font-bold outline-none focus:border-slate-800">
+                  <option value="">الكل</option>
+                  {receiptUsersList.map(u => <option key={u.id} value={u.id}>{u.username}</option>)}
+                </select>
+              </div>
+            )}
             <button onClick={loadReceipts}
               className="flex items-center gap-1.5 rounded-sm border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-black text-slate-600 hover:border-slate-800 hover:text-slate-900 transition-colors">
               <RefreshCw className={`h-3.5 w-3.5 ${receiptsLoading ? "animate-spin" : ""}`} /> تحديث
@@ -3027,6 +3380,24 @@ export default function POSPage() {
                     const statusInfo = PAYMENT_STATUS_LABELS[inv.status] || PAYMENT_STATUS_LABELS.paid;
                     return <span className={`inline-flex items-center rounded-sm border px-1.5 py-0.5 text-[10px] font-black ${statusInfo.cls}`}>{statusInfo.label}</span>;
                   }
+                },
+                {
+                  id: "amendment", header: "تعديل", width: 120, sortable: false,
+                  headerClass: "text-right px-3 font-black uppercase tracking-widest text-slate-500",
+                  cellClass: "px-3",
+                  render: (inv) => (
+                    <div className="flex flex-col gap-0.5">
+                      {inv.amended_by && <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-100 text-amber-700 border border-amber-200 whitespace-nowrap">مُعدَّلة ← {inv.amended_by_no || inv.amended_by}</span>}
+                      {inv.amendment_of && <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-blue-100 text-blue-700 border border-blue-200 whitespace-nowrap">تعديل ↑ {inv.amendment_of_no || inv.amendment_of}</span>}
+                      {!inv.amended_by && !inv.amendment_of && <span className="text-slate-300 text-[10px]">—</span>}
+                    </div>
+                  )
+                },
+                {
+                  id: "created_by", header: "المستخدم", width: 110, sortable: false,
+                  headerClass: "text-right px-3 font-black uppercase tracking-widest text-slate-500",
+                  cellClass: "px-3 text-[11px] font-bold text-slate-600 whitespace-nowrap",
+                  render: (inv) => inv.created_by_username || "—"
                 },
                 {
                   id: "created_at", header: "الوقت", width: 150, sortable: true,
@@ -3120,7 +3491,7 @@ export default function POSPage() {
             const unitProfit  = Number(line.unit_price || 0) - purchase;
             const totalProfit = unitProfit * Number(line.quantity || 0);
             return (
-              <div key={line.item_id} className="flex items-center justify-between rounded-sm border border-slate-100 bg-slate-50 px-4 py-3">
+              <div key={`${line.item_id}-${line.unit_price}`} className="flex items-center justify-between rounded-sm border border-slate-100 bg-slate-50 px-4 py-3">
                 <div>
                   <div className="text-[13px] font-black text-slate-800">{line.item_name}</div>
                   <div className="text-[11px] text-slate-500">شراء: {formatMoney(purchase)} · بيع: {formatMoney(line.unit_price)} · كمية: {line.quantity}</div>
@@ -3338,6 +3709,168 @@ export default function POSPage() {
               className="flex-[2] flex items-center justify-center gap-2 rounded-lg bg-slate-800 px-4 py-2.5 text-[13px] font-black text-white hover:bg-slate-700 transition-colors"
             >
               نعم، احفظه كافتراضي
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* New Invoice Warning Modal */}
+      <Modal open={newInvoiceModalOpen} onClose={() => setNewInvoiceModalOpen(false)} title="فاتورة جديدة">
+        <div className="flex flex-col gap-4 mt-2">
+          {lines.length > 0 ? (
+            <>
+              <div className="flex items-start gap-3 p-3 rounded-lg bg-amber-50 border border-amber-200">
+                <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-[13px] font-black text-amber-800">يوجد أصناف في الفاتورة الحالية</p>
+                  <p className="text-[12px] font-bold text-amber-700 mt-1">اختر كيف تريد المتابعة:</p>
+                </div>
+              </div>
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={() => {
+                    setNewInvoiceModalOpen(false);
+                    saveInvoice(false);
+                  }}
+                  disabled={isSaving}
+                  className="flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 text-[13px] font-black text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  حفظ الحالية وإنشاء جديدة
+                </button>
+                <button
+                  onClick={() => {
+                    setNewInvoiceModalOpen(false);
+                    clear();
+                    resetPaymentFields();
+                    resetStaging();
+                    resetCustomer();
+                    setPaymentType("cash");
+                    setInvoiceSeq((s) => s + 1);
+                  }}
+                  className="flex items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-[13px] font-black text-rose-700 hover:bg-rose-100 transition-colors"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  تجاهل وإنشاء جديدة
+                </button>
+                <button
+                  onClick={() => setNewInvoiceModalOpen(false)}
+                  className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-[12px] font-black text-slate-600 hover:bg-slate-50 transition-colors"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-start gap-3 p-3 rounded-lg bg-emerald-50 border border-emerald-200">
+                <FilePlus className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-[13px] font-black text-emerald-800">إنشاء فاتورة جديدة</p>
+                  <p className="text-[12px] font-bold text-emerald-700 mt-1">الفاتورة الحالية فارغة</p>
+                </div>
+              </div>
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={() => {
+                    setNewInvoiceModalOpen(false);
+                    clear();
+                    resetPaymentFields();
+                    resetStaging();
+                    resetCustomer();
+                    setPaymentType("cash");
+                    setInvoiceSeq((s) => s + 1);
+                  }}
+                  className="flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 text-[13px] font-black text-white hover:bg-emerald-700 transition-colors"
+                >
+                  <FilePlus className="h-4 w-4" />
+                  إنشاء فاتورة جديدة
+                </button>
+                <button
+                  onClick={() => setNewInvoiceModalOpen(false)}
+                  className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-[12px] font-black text-slate-600 hover:bg-slate-50 transition-colors"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </Modal>
+
+      {/* Save Only Confirmation Modal */}
+      <Modal open={saveOnlyConfirmOpen} onClose={() => setSaveOnlyConfirmOpen(false)} title="تأكيد الحفظ">
+        <div className="flex flex-col gap-4 mt-2">
+          <div className="flex items-start gap-3 p-3 rounded-lg bg-blue-50 border border-blue-200">
+            <Printer className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-[13px] font-black text-blue-800">هل تريد الحفظ والطباعة؟</p>
+              <p className="text-[12px] font-bold text-blue-700 mt-1">سيتم فتح نافذة الطباعة بعد الحفظ</p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={() => {
+                setSaveOnlyConfirmOpen(false);
+                setPrintPreview(true);
+              }}
+              disabled={isSaving}
+              className="flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-3 text-[13px] font-black text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+            >
+              <Printer className="h-4 w-4" />
+              نعم، حفظ وطباعة
+            </button>
+            <button
+              onClick={() => {
+                setSaveOnlyConfirmOpen(false);
+                saveInvoice(false);
+              }}
+              disabled={isSaving}
+              className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-[12px] font-black text-slate-700 hover:bg-slate-50 transition-colors"
+            >
+              حفظ فقط بدون طباعة
+            </button>
+            <button
+              onClick={() => setSaveOnlyConfirmOpen(false)}
+              className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-[11px] font-bold text-slate-500 hover:bg-slate-100 transition-colors"
+            >
+              إلغاء
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Cancel Invoice Modal */}
+      <Modal open={cancelModalOpen} onClose={() => setCancelModalOpen(false)} title="إلغاء الفاتورة">
+        <div className="flex flex-col gap-4 mt-2">
+          <div className="flex items-start gap-3 p-3 rounded-lg bg-rose-50 border border-rose-200">
+            <Trash2 className="h-5 w-5 text-rose-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-[13px] font-black text-rose-800">هل تريد إلغاء الفاتورة الحالية؟</p>
+              <p className="text-[12px] font-bold text-rose-700 mt-1">سيتم حذف جميع الأصناف المضافة</p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={() => {
+                setCancelModalOpen(false);
+                clear();
+                resetPaymentFields();
+                resetStaging();
+                resetCustomer();
+                setPaymentType("cash");
+                setInvoiceSeq((s) => s + 1);
+              }}
+              className="flex items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 py-3 text-[13px] font-black text-white hover:bg-rose-700 transition-colors"
+            >
+              <Trash2 className="h-4 w-4" />
+              نعم، إلغاء الفاتورة
+            </button>
+            <button
+              onClick={() => setCancelModalOpen(false)}
+              className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-[12px] font-black text-slate-600 hover:bg-slate-50 transition-colors"
+            >
+              تراجع
             </button>
           </div>
         </div>
