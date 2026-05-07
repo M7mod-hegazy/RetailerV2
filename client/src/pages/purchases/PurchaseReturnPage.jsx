@@ -2,9 +2,10 @@ import React, { useEffect, useMemo, useState } from "react";
 import api from "../../services/api";
 import {
   ArrowRightLeft, Plus, Calendar, User, DollarSign,
-  Eye, Search, X, RotateCcw, TrendingDown, ArrowUpRight
+  Eye, Search, X, RotateCcw, TrendingDown, ArrowUpRight,
+  Pencil, FileX, ExternalLink
 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import Modal from "../../components/ui/Modal";
 import QuickReturnModal from "../../components/returns/QuickReturnModal";
 import DataGrid from "../../components/ui/DataGrid";
@@ -14,7 +15,6 @@ import SearchInput from "../../components/ui/SearchInput";
 import { adaptForServer } from "../../utils/search";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import TodayInvoicesButton from "../../components/pos/TodayInvoicesButton";
-import GeneralPurchaseReturnModal from "../../components/returns/GeneralPurchaseReturnModal";
 
 const REASON_LABELS = {
   defective: "تلف / عيب",
@@ -33,12 +33,15 @@ function formatDate(d) {
 }
 
 export default function PurchaseReturnPage() {
+  const navigate = useNavigate();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeReturn, setActiveReturn] = useState(null);
   const [modalDetailOpen, setModalDetailOpen] = useState(false);
   const [quickReturnOpen, setQuickReturnOpen] = useState(false);
   const [generalReturnOpen, setGeneralReturnOpen] = useState(false);
+  const [cancelId, setCancelId] = useState(null);
+  const [cancelReason, setCancelReason] = useState("");
 
   // Filters
   const [searchTerm, setSearchTerm] = useState("");
@@ -70,6 +73,19 @@ export default function PurchaseReturnPage() {
       setActiveReturn(response.data.data);
       setModalDetailOpen(true);
     } catch { toast.error("حدث خطأ في تحميل التفاصيل"); }
+  }
+
+  async function handleCancel() {
+    if (!cancelReason.trim()) return;
+    try {
+      await api.post(`/api/purchases/returns/${cancelId}/cancel`, { reason: cancelReason });
+      toast.success("تم إلغاء مرتجع الشراء");
+      setCancelId(null);
+      setCancelReason("");
+      loadData();
+    } catch (e) {
+      toast.error(e.response?.data?.message || "فشل الإلغاء");
+    }
   }
 
   function clearFilters() {
@@ -111,7 +127,7 @@ export default function PurchaseReturnPage() {
         <div className="flex items-center gap-2">
           <TodayInvoicesButton variant="compact" />
           <button
-            onClick={() => setGeneralReturnOpen(true)}
+            onClick={() => navigate("/purchases/returns/new")}
             className="flex items-center gap-2 rounded-lg bg-rose-600 px-5 py-2.5 text-[13px] font-black text-white shadow-lg hover:bg-rose-500 transition-all active:scale-95"
           >
             <Plus className="h-4 w-4" /> مرتجع عام
@@ -256,17 +272,43 @@ export default function PurchaseReturnPage() {
               render: (r) => formatMoney(r.total)
             },
             {
-              id: "actions", header: "", width: 60, sortable: false, headerClass: "text-center", cellClass: "text-center p-0 border-l-0",
-              render: (row) => (
-                <div className="flex h-[40px] items-center justify-center">
-                  <button
-                    onClick={() => handleShowDetail(row.id)}
-                    className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-800 hover:text-white transition-all"
-                  >
-                    <Eye className="h-4 w-4" />
-                  </button>
-                </div>
-              )
+              id: "status", header: "الحالة", width: 100, sortable: false, headerClass: "text-center", cellClass: "text-center border-l border-slate-100",
+              render: (r) => {
+                if (r.amended_by) return <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-black text-amber-700">مُستبدل</span>;
+                if (r.status === "cancelled") return <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-500">ملغي</span>;
+                return <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-700">نشط</span>;
+              }
+            },
+            {
+              id: "actions", header: "", width: 120, sortable: false, headerClass: "text-center", cellClass: "text-center p-0 border-l-0",
+              render: (row) => {
+                const isCancelled = row.status === "cancelled";
+                const isAmended = !!row.amended_by;
+                return (
+                  <div className="flex h-[40px] items-center justify-center gap-1">
+                    <button onClick={() => handleShowDetail(row.id)}
+                      className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-800 hover:text-white transition-all" title="معاينة سريعة">
+                      <Eye className="h-4 w-4" />
+                    </button>
+                    <button onClick={() => navigate(`/purchases/returns/${row.id}`)}
+                      className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-800 transition-colors" title="فتح الصفحة الكاملة">
+                      <ExternalLink className="h-4 w-4" />
+                    </button>
+                    {!isCancelled && !isAmended && (
+                      <button onClick={() => { setCancelId(row.id); setCancelReason(""); }}
+                        className="flex h-7 w-7 items-center justify-center rounded-lg text-rose-400 hover:bg-rose-50 hover:text-rose-600 transition-colors" title="إلغاء">
+                        <FileX className="h-4 w-4" />
+                      </button>
+                    )}
+                    {!isCancelled && !isAmended && (
+                      <button onClick={() => navigate("/purchases/returns/amend", { state: { amend_return_id: row.id, original: row } })}
+                        className="flex h-7 w-7 items-center justify-center rounded-lg text-indigo-400 hover:bg-indigo-50 hover:text-indigo-600 transition-colors" title="تعديل">
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                );
+              }
             }
           ]}
         />
@@ -348,12 +390,32 @@ export default function PurchaseReturnPage() {
         onSuccess={loadData}
       />
 
-      {/* General Purchase Return Modal */}
-      <GeneralPurchaseReturnModal
-        open={generalReturnOpen}
-        onClose={() => setGeneralReturnOpen(false)}
-        onSuccess={loadData}
-      />
+
+      {cancelId && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" dir="rtl">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-[16px] font-black text-slate-800">سبب إلغاء مرتجع الشراء</h3>
+              <button onClick={() => { setCancelId(null); setCancelReason(""); }} className="h-8 w-8 flex items-center justify-center rounded-lg bg-slate-50 text-slate-400 hover:text-slate-700"><X className="h-4 w-4" /></button>
+            </div>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {["خطأ في البيانات", "خطأ في الكمية", "مرتجع مكرر", "تسوية مع المورد", "أخرى"].map(p => (
+                <button key={p} onClick={() => setCancelReason(p)}
+                  className={`px-3 py-1.5 rounded-lg text-[12px] font-bold border transition-colors ${cancelReason === p ? "bg-rose-600 text-white border-rose-600" : "border-slate-200 text-slate-600 hover:border-rose-300"}`}
+                >{p}</button>
+              ))}
+            </div>
+            <textarea value={cancelReason} onChange={e => setCancelReason(e.target.value)} placeholder="أو اكتب السبب..."
+              className="w-full border border-slate-200 rounded-xl p-3 text-[12px] resize-none h-20 focus:outline-none focus:ring-2 focus:ring-rose-300" />
+            <div className="flex gap-2 mt-4">
+              <button onClick={handleCancel} disabled={!cancelReason.trim()}
+                className="flex-1 bg-rose-600 text-white rounded-xl py-2.5 text-[13px] font-black disabled:opacity-40 hover:bg-rose-700 transition-colors">تأكيد الإلغاء</button>
+              <button onClick={() => { setCancelId(null); setCancelReason(""); }}
+                className="flex-1 border border-slate-200 rounded-xl py-2.5 text-[13px] font-black text-slate-600 hover:bg-slate-50 transition-colors">رجوع</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
