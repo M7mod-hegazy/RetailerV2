@@ -25,12 +25,14 @@ const chequesRoutes = require("./routes/cheques.routes");
 const installmentsRoutes = require("./routes/installments.routes");
 const expensesRoutes = require("./routes/expenses.routes");
 const revenuesRoutes = require("./routes/revenues.routes");
+const withdrawalsRoutes = require("./routes/withdrawals.routes");
 const stockRoutes = require("./routes/stock.routes");
 const operationsRoutes = require("./routes/operations.routes");
 const reportRoutes = require("./routes/report.routes");
 const notificationsRoutes = require("./routes/notifications.routes");
 const promotionsRoutes = require("./routes/promotions.routes");
 const helpRoutes = require("./routes/help.routes");
+const documentsRoutes = require("./routes/documents.routes");
 const backupRoutes = require("./routes/backup.routes");
 const searchRoutes = require("./routes/search.routes");
 const loyaltyRoutes = require("./routes/loyalty.routes");
@@ -92,6 +94,7 @@ function createApp() {
   app.use("/api/installments", installmentsRoutes);
   app.use("/api/expenses", expensesRoutes);
   app.use("/api/revenues", revenuesRoutes);
+  app.use("/api/withdrawals", withdrawalsRoutes);
   app.use("/api/stock", stockRoutes);
   app.use("/api/operations", operationsRoutes);
   app.use("/api/reports", reportRoutes);
@@ -109,6 +112,7 @@ function createApp() {
   app.use("/api/branches", branchesRoutes);
   app.use("/api/daily-sessions", dailySessionsRoutes);
   app.use("/api/ajal-debts", ajalDebtsRoutes);
+  app.use("/api/documents", documentsRoutes);
 
   app.use(errorHandler);
   return app;
