@@ -53,6 +53,7 @@ import { usePosStore } from "../../stores/posStore";
 import { useAuthStore } from "../../stores/authStore";
 import { useSound } from "../../hooks/useSound";
 import { useNavigate, useLocation } from "react-router-dom";
+import { useInvoiceActivation } from "../../hooks/useInvoiceActivation";
 
 // --- Local Lookup Component ---
 const BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:5000";
@@ -649,6 +650,14 @@ export default function POSPage() {
   const amendInvoiceId = amendContext?.amend_invoice_id || null;
   const amendReason = amendContext?.amend_reason || null;
 
+  // Idle/Active invoice state — doc number reserved on first interaction
+  const { docNo, createdAt: invoiceCreatedAt, isActive: invoiceIsActive, activate: activateInvoice, reset: resetActivation } = useInvoiceActivation(
+    "pos_sale",
+    amendContext?.prefill?.invoice_no
+      ? { docNo: amendContext.prefill.invoice_no, createdAt: amendContext.prefill.created_at }
+      : null
+  );
+
   useEffect(() => {
     if (!selectedItem) return;
     setPriceType("retail");
@@ -908,6 +917,7 @@ export default function POSPage() {
   }
 
   function handleSelectItem(item) {
+    activateInvoice();
     setSelectedItem(item);
     setItemNameQuery(item.name || "");
     setItemCodeQuery(item.code || item.item_code || item.barcode || "");
@@ -941,10 +951,17 @@ export default function POSPage() {
   }
 
   function handlePickCustomer(c) {
-    setCustomer(c);
-    setCustomerQuery(c.name || "");
+    activateInvoice();
     setCustomerLookupOpen(false);
     if (!customer?.id) setPaymentType("cash");
+    // Fetch ajal debt total asynchronously and enrich customer object
+    api.get(`/api/ajal-debts?party_type=customer&party_id=${c.id}&status=open`)
+      .then(r => {
+        const ajal = (r.data.data || []).reduce((s, d) => s + Number(d.original_amount) - Number(d.paid_amount), 0);
+        setCustomer({ ...c, ajal_total: ajal > 0 ? ajal : undefined });
+      })
+      .catch(() => setCustomer(c));
+    setCustomerQuery(c.name || "");
   }
 
   function handleCustomerKeyDown(e) {
@@ -1091,6 +1108,8 @@ export default function POSPage() {
         return Number(l.unit_price || 0) < Number(item?.purchase_price || 0);
       });
       const payload = {
+        doc_no: docNo || undefined,
+        created_at: invoiceCreatedAt || undefined,
         customer_id: customer?.id || null,
         seller_id: sellerId ? Number(sellerId) : null,
         increase: Number(increase || 0),
@@ -1138,6 +1157,7 @@ export default function POSPage() {
       setLastSavedInvoice(receiptSnap);
       setSaveSuccess({ invoiceNumber: savedInvoiceNo, total: formatMoney(totals.total) });
       setAmendContext(null);
+      resetActivation();
       clear(); resetPaymentFields(); resetStaging(); resetCustomer(); setPaymentType("cash"); setInvoiceSeq((s) => s + 1);
       if (printAfter) setPrintPreview(true);
     } catch (error) {
@@ -1295,9 +1315,16 @@ export default function POSPage() {
               <Receipt className="h-3.5 w-3.5 text-slate-400 shrink-0" />
               <input
                 readOnly
-                value={invoiceNumber}
-                className="w-[155px] rounded-sm border border-slate-200 bg-slate-100 px-2 py-1 text-[12px] font-mono font-black text-slate-600 cursor-default text-center select-none"
+                disabled
+                value={invoiceIsActive ? (docNo || invoiceNumber) : "—"}
+                className="w-[165px] rounded-sm border border-slate-200 bg-slate-100 px-2 py-1 text-[12px] font-mono font-black text-slate-600 cursor-default text-center select-none disabled:opacity-70"
               />
+              {invoiceIsActive && invoiceCreatedAt && (
+                <input readOnly disabled
+                  value={new Intl.DateTimeFormat("ar-EG", { dateStyle: "short", timeStyle: "short" }).format(new Date(invoiceCreatedAt))}
+                  className="w-[130px] rounded-sm border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-mono font-bold text-slate-400 cursor-default text-center select-none disabled:opacity-70"
+                />
+              )}
             </div>
             <div className="flex items-center gap-1.5 rounded-sm border border-slate-200 bg-slate-50 px-2.5 py-1 shrink-0">
               <User className="h-3.5 w-3.5 text-slate-400 shrink-0" />
@@ -1708,6 +1735,20 @@ export default function POSPage() {
                         <span className="text-[11px] font-bold text-amber-600">الرصيد بعد الفاتورة</span>
                         <span className={`text-[13px] font-black font-mono ${displayBalance + totals.total > 0 ? "text-rose-600" : "text-emerald-600"}`}>
                           {(displayBalance + totals.total).toFixed(3)}
+                        </span>
+                      </div>
+                    )}
+                    {customer?.ajal_total > 0 && (
+                      <div className="mt-1 flex items-center justify-between rounded-lg bg-rose-50 border border-rose-100 px-3 py-1.5">
+                        <span className="text-[10px] font-bold text-rose-500">ديون آجلة مفتوحة</span>
+                        <span className="text-[12px] font-black font-mono text-rose-700">{Number(customer.ajal_total).toFixed(3)}</span>
+                      </div>
+                    )}
+                    {selectedTreasuryId && (paymentType === "cash" || paymentType === "multi") && lines.length > 0 && (
+                      <div className="mt-1 flex items-center justify-between rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-1.5">
+                        <span className="text-[10px] font-bold text-emerald-600">الخزينة بعد الفاتورة</span>
+                        <span className="text-[12px] font-black font-mono text-emerald-700">
+                          {(Number(treasuries.find(t => String(t.id) === String(selectedTreasuryId))?.balance || 0) + totals.total).toFixed(3)}
                         </span>
                       </div>
                     )}
@@ -2677,9 +2718,16 @@ export default function POSPage() {
             <div className="flex items-center gap-2 border border-slate-200 bg-white px-3 py-2 shrink-0 flex-wrap rounded-md">
               <input
                 readOnly
-                value={invoiceNumber}
-                className="w-[140px] rounded-sm border border-slate-200 bg-slate-100 px-2 py-1 text-[11px] font-mono font-black text-slate-500 cursor-default text-center select-none"
+                disabled
+                value={invoiceIsActive ? (docNo || invoiceNumber) : "—"}
+                className="w-[150px] rounded-sm border border-slate-200 bg-slate-100 px-2 py-1 text-[11px] font-mono font-black text-slate-500 cursor-default text-center select-none disabled:opacity-70"
               />
+              {invoiceIsActive && invoiceCreatedAt && (
+                <input readOnly disabled
+                  value={new Intl.DateTimeFormat("ar-EG", { dateStyle: "short", timeStyle: "short" }).format(new Date(invoiceCreatedAt))}
+                  className="w-[120px] rounded-sm border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-mono font-bold text-slate-400 cursor-default text-center select-none disabled:opacity-70"
+                />
+              )}
               <div className="flex items-center gap-1.5 rounded-sm border border-slate-200 bg-slate-50 px-2 py-1">
                 <User className="h-3 w-3 text-slate-400" />
                 <span className="text-[11px] font-bold text-slate-500 max-w-[90px] truncate">{user?.name || "-"}</span>
