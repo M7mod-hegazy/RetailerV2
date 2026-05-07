@@ -25,6 +25,8 @@ const ItemsListPage = lazy(() => import("./pages/items/ItemsListPage"));
 const CustomersListPage = lazy(() => import("./pages/customers/CustomersListPage"));
 const SuppliersListPage = lazy(() => import("./pages/suppliers/SuppliersListPage"));
 const RevenueCategoriesPage = lazy(() => import("./pages/definitions/RevenueCategoriesPage"));
+const FinancialCategoriesPage = lazy(() => import("./pages/definitions/FinancialCategoriesPage"));
+const WithdrawalsListPage = lazy(() => import("./pages/expenses/WithdrawalsListPage"));
 const UnitsPage = lazy(() => import("./pages/definitions/UnitsPage"));
 const WarehousesPage = lazy(() => import("./pages/definitions/WarehousesPage"));
 const BranchesPage = lazy(() => import("./pages/definitions/BranchesPage"));
@@ -32,13 +34,13 @@ const BanksPage = lazy(() => import("./pages/definitions/BanksPage"));
 const UsersPage = lazy(() => import("./pages/definitions/UsersPage"));
 const EmployeesPage = lazy(() => import("./pages/definitions/EmployeesPage"));
 const POSPage = lazy(() => import("./pages/pos/POSPage"));
-const SalesReturnPage = lazy(() => import("./pages/sales/SalesReturnPage"));
+const InvoiceDetailPage = lazy(() => import("./pages/pos/InvoiceDetailPage"));
+const SalesReturnDetailPage = lazy(() => import("./pages/pos/SalesReturnDetailPage"));
+const PurchaseReturnDetailPage = lazy(() => import("./pages/purchases/PurchaseReturnDetailPage"));
 const SalesReturnFormPage = lazy(() => import("./pages/sales/SalesReturnFormPage"));
-const PurchasesListPage = lazy(() => import("./pages/purchases/PurchasesListPage"));
 const PurchaseFormPage = lazy(() => import("./pages/purchases/PurchaseFormPage"));
 const PurchaseOrdersPage = lazy(() => import("./pages/purchases/PurchaseOrdersPage"));
 const PurchaseOrderFormPage = lazy(() => import("./pages/purchases/PurchaseOrderFormPage"));
-const PurchaseReturnPage = lazy(() => import("./pages/purchases/PurchaseReturnPage"));
 const PurchaseReturnFormPage = lazy(() => import("./pages/purchases/PurchaseReturnFormPage"));
 const PaymentsListPage = lazy(() => import("./pages/payments/PaymentsListPage"));
 const PaymentFormPage = lazy(() => import("./pages/payments/PaymentFormPage"));
@@ -136,6 +138,7 @@ export default function App() {
                     <Route path="definitions/suppliers/:id" element={<SupplierProfilePage />} />
                     <Route path="definitions/expense-categories" element={<ExpenseCategoriesPage />} />
                     <Route path="definitions/revenue-categories" element={<RevenueCategoriesPage />} />
+                    <Route path="definitions/financial-categories" element={<FinancialCategoriesPage />} />
                     <Route path="definitions/units" element={<UnitsPage />} />
                     <Route path="definitions/warehouses" element={<WarehousesPage />} />
                     <Route path="definitions/branches" element={<BranchesPage />} />
@@ -144,17 +147,23 @@ export default function App() {
                     <Route path="definitions/users" element={<UsersPage />} />
                     <Route path="definitions/employees" element={<EmployeesPage />} />
                     <Route path="pos" element={<POSPage />} />
+                    <Route path="invoices/:id" element={<InvoiceDetailPage />} />
                     <Route path="daily-treasury" element={<DailyTreasuryPage />} />
                     <Route path="operations/payment-methods" element={<PaymentMethodsPage />} />
                     <Route path="operations/payment-transactions" element={<PaymentTransactionsPage />} />
-                    <Route path="sales/returns" element={<SalesReturnPage />} />
+                    <Route path="sales/returns" element={<Navigate to="/sales/returns/new" replace />} />
                     <Route path="sales/returns/new" element={<SalesReturnFormPage />} />
-                    <Route path="purchases" element={<PurchasesListPage />} />
+                    <Route path="sales/returns/amend" element={<SalesReturnFormPage />} />
+                    <Route path="purchases" element={<Navigate to="/purchases/new" replace />} />
                     <Route path="purchases/new" element={<PurchaseFormPage />} />
+                    <Route path="purchases/:id" element={<PurchaseFormPage />} />
                     <Route path="purchases/orders" element={<PurchaseOrdersPage />} />
                     <Route path="purchases/orders/new" element={<PurchaseOrderFormPage />} />
-                    <Route path="purchases/returns" element={<PurchaseReturnPage />} />
+                    <Route path="purchases/returns" element={<Navigate to="/purchases/returns/new" replace />} />
                     <Route path="purchases/returns/new" element={<PurchaseReturnFormPage />} />
+                    <Route path="purchases/returns/amend" element={<PurchaseReturnFormPage />} />
+                    <Route path="purchases/returns/:id" element={<PurchaseReturnDetailPage />} />
+                    <Route path="pos/sales-returns/:id" element={<SalesReturnDetailPage />} />
                     <Route path="payments" element={<PaymentsListPage />} />
                     <Route path="payments/new" element={<PaymentFormPage />} />
                     <Route path="accounts/customers" element={<CustomerAccountsPage />} />
@@ -178,6 +187,7 @@ export default function App() {
                     <Route path="definitions/promotions" element={<PromotionsPage />} />
                     <Route path="expenses" element={<ExpensesListPage />} />
                     <Route path="revenues" element={<RevenuesListPage />} />
+                    <Route path="withdrawals" element={<WithdrawalsListPage />} />
                     <Route path="stock/levels" element={<StockLevelsPage />} />
                     <Route path="stock/movements" element={<StockMovementsPage />} />
                     <Route path="stock/transfer" element={<StockTransferPage />} />
