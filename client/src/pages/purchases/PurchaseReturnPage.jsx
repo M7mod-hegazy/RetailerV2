@@ -301,7 +301,7 @@ export default function PurchaseReturnPage() {
                       </button>
                     )}
                     {!isCancelled && !isAmended && (
-                      <button onClick={() => navigate("/purchases/returns/amend", { state: { amend_return_id: row.id, original: row } })}
+                      <button onClick={() => navigate("/purchases/returns/new", { state: { edit_return_id: row.id } })}
                         className="flex h-7 w-7 items-center justify-center rounded-lg text-indigo-400 hover:bg-indigo-50 hover:text-indigo-600 transition-colors" title="تعديل">
                         <Pencil className="h-4 w-4" />
                       </button>

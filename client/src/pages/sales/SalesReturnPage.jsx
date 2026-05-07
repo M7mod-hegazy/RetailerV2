@@ -314,7 +314,7 @@ export default function SalesReturnPage() {
                     )}
                     {!isCancelled && !isAmended && (
                       <button
-                        onClick={() => navigate("/pos/sales-returns/amend", { state: { amend_return_id: row.id, original: row } })}
+                        onClick={() => navigate("/sales/returns/new", { state: { edit_return_id: row.id } })}
                         className="flex h-7 w-7 items-center justify-center rounded-lg text-indigo-400 hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
                         title="تعديل"
                       >
