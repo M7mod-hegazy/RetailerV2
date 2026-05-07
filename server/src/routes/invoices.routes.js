@@ -1,6 +1,6 @@
 const express = require("express");
 const { createInvoice, getInvoiceWithLines, editInvoice, cancelInvoice, amendInvoice } = require("../services/invoiceService");
-const { createReturn, getReturns, getReturnDetails } = require("../services/returnService");
+const { createReturn, createGeneralReturn, getReturns, getReturnDetails, cancelSalesReturn, amendSalesReturn, editSalesReturn } = require("../services/returnService");
 const { adjustStock } = require("../services/stockService");
 const { getDb } = require("../config/database");
 
@@ -9,7 +9,7 @@ const router = express.Router();
 router.get("/", (req, res) => {
   try {
     const db = getDb();
-    const { date_from, date_to, sort = "created_at", dir = "desc", search = "", customer_id } = req.query;
+    const { date_from, date_to, sort = "created_at", dir = "desc", search = "", customer_id, user_id } = req.query;
     const allowedSort = ["created_at", "total", "invoice_no", "payment_type", "status"];
     const safeSort = allowedSort.includes(sort) ? `i.${sort}` : "i.created_at";
     const safeDir  = dir === "asc" ? "ASC" : "DESC";
@@ -28,14 +28,25 @@ router.get("/", (req, res) => {
       params.push(`%${search}%`, `%${search}%`);
     }
     if (customer_id) { conditions.push("i.customer_id = ?"); params.push(customer_id); }
+    if (user_id) { conditions.push("i.user_id = ?"); params.push(user_id); }
     const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
     const rows = db.prepare(`
       SELECT i.id, i.invoice_no, i.subtotal, i.discount, i.total,
              i.payment_type, i.status, i.created_at,
+             i.amended_by, i.amendment_of,
+             (SELECT invoice_no FROM invoices WHERE id = i.amendment_of) AS amendment_of_no,
+             (SELECT invoice_no FROM invoices WHERE id = i.amended_by)   AS amended_by_no,
              c.name AS customer_name, c.phone AS customer_phone,
+             e.name AS seller_name,
+             u.username AS cancelled_by_name,
+             u2.username AS created_by_username,
+             i.user_id AS created_by_user_id,
              (SELECT COUNT(*) FROM invoice_lines WHERE invoice_id = i.id) AS items_count
       FROM invoices i
-      LEFT JOIN customers c ON c.id = i.customer_id
+      LEFT JOIN customers  c ON c.id = i.customer_id
+      LEFT JOIN employees  e ON e.id = i.seller_id
+      LEFT JOIN users      u ON u.id = i.cancelled_by
+      LEFT JOIN users      u2 ON u2.id = i.user_id
       ${where}
       ORDER BY ${safeSort} ${safeDir}
       LIMIT 100
@@ -102,38 +113,29 @@ router.get("/returns/:id", (req, res, next) => {
 
 router.post("/general-return", (req, res, next) => {
   try {
-    const db = getDb();
-    const { lines, customer_id, refund_method, notes, reason } = req.body;
-    if (!lines || !lines.length) { const e = new Error("يجب إضافة أصناف"); e.status = 400; throw e; }
+    const result = createGeneralReturn({ ...req.body, user_id: req.user?.id || req.body.user_id || null });
+    res.json({ success: true, data: result });
+  } catch (e) { next(e); }
+});
 
-    const result = db.transaction(() => {
-      const docNo = "GR-" + Date.now();
-      let total = 0;
-      for (const line of lines) {
-        total += Number(line.quantity) * Number(line.unit_price);
-      }
+router.post("/returns/:id/cancel", (req, res, next) => {
+  try {
+    const { reason, user_id } = req.body || {};
+    const result = cancelSalesReturn(Number(req.params.id), reason, req.user?.id || user_id || null);
+    res.json({ success: true, data: result });
+  } catch (e) { next(e); }
+});
 
-      const ret = db.prepare(`
-        INSERT INTO sales_returns (doc_no, invoice_id, customer_id, total, refund_method, reason, notes, created_at)
-        VALUES (?, NULL, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
-      `).run(docNo, customer_id || null, total, refund_method || 'cash_back', reason || 'other', notes || null);
+router.put("/returns/:id", (req, res, next) => {
+  try {
+    const result = editSalesReturn(Number(req.params.id), req.body || {}, req.user?.id || req.body?.user_id || null);
+    res.json({ success: true, data: result });
+  } catch (e) { next(e); }
+});
 
-      for (const line of lines) {
-        const lineTotal = Number(line.quantity) * Number(line.unit_price);
-        db.prepare("INSERT INTO sales_return_lines (sales_return_id, invoice_line_id, item_id, quantity, unit_price, line_total) VALUES (?, NULL, ?, ?, ?, ?)").run(ret.lastInsertRowid, line.item_id, line.quantity, line.unit_price, lineTotal);
-        adjustStock({ item_id: line.item_id, warehouse_id: line.warehouse_id || 1, quantityDelta: Number(line.quantity), movement_type: "sales_return", reference_type: "sales_return", reference_id: ret.lastInsertRowid });
-      }
-
-      if (refund_method === 'cash_back' || !refund_method) {
-        const tId = db.prepare("SELECT default_treasury_id FROM settings WHERE id = 1").get()?.default_treasury_id;
-        if (tId) db.prepare("UPDATE treasuries SET balance = balance - ? WHERE id = ?").run(total, tId);
-      } else if (refund_method === 'credit_note' && customer_id) {
-        db.prepare("UPDATE customers SET opening_balance = opening_balance - ? WHERE id = ?").run(total, customer_id);
-      }
-
-      return { id: ret.lastInsertRowid, doc_no: docNo, total };
-    })();
-
+router.put("/returns/:id/amend", (req, res, next) => {
+  try {
+    const result = amendSalesReturn(Number(req.params.id), req.body || {}, req.user?.id || req.body?.user_id || null);
     res.json({ success: true, data: result });
   } catch (e) { next(e); }
 });
@@ -177,6 +179,20 @@ router.post("/general-purchase-return", (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+router.get("/cancel-reasons", (_req, res) => {
+  res.json({
+    success: true,
+    data: [
+      "خطأ في البيانات",
+      "طلب العميل الإلغاء",
+      "خطأ في السعر",
+      "خطأ في الكمية",
+      "تكرار الفاتورة",
+      "تعديل الفاتورة",
+    ],
+  });
+});
+
 router.get("/:id", (req, res, next) => {
   try {
     const invoice = getInvoiceWithLines(Number(req.params.id));
@@ -199,7 +215,8 @@ router.put("/:id", (req, res, next) => {
 });
 
 router.post("/", (req, res) => {
-  const invoice = createInvoice(req.body || {});
+  const payload = { ...(req.body || {}), user_id: req.user?.id || null };
+  const invoice = createInvoice(payload);
   res.status(201).json({ success: true, data: invoice });
 });
 
@@ -225,20 +242,6 @@ router.post("/:id/void", (req, res, next) => {
   } catch (error) {
     next(error);
   }
-});
-
-router.get("/cancel-reasons", (_req, res) => {
-  res.json({
-    success: true,
-    data: [
-      "خطأ في البيانات",
-      "طلب العميل الإلغاء",
-      "خطأ في السعر",
-      "خطأ في الكمية",
-      "تكرار الفاتورة",
-      "تعديل الفاتورة",
-    ],
-  });
 });
 
 router.delete("/:id", (req, res, next) => {
