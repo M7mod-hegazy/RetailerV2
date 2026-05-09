@@ -16,6 +16,7 @@ import SearchInput from "../../components/ui/SearchInput";
 import Highlight from "../../components/ui/Highlight";
 import { fuzzyFilterRows } from "../../utils/search";
 import { useAuthStore } from "../../stores/authStore";
+import { useInvoiceActivation } from "../../hooks/useInvoiceActivation";
 
 const BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:5000";
 function resolveImageUrl(u) {
@@ -88,6 +89,11 @@ export default function PurchaseFormPage() {
   const [locked, setLocked] = useState(isEditMode && !isAmendMode);
   const [loadingExisting, setLoadingExisting] = useState(isEditMode);
   const [editDebtRemaining, setEditDebtRemaining] = useState(0); // debt this purchase added to supplier balance (reversal on edit)
+
+  // editActivation is populated after the existing purchase loads (edit mode only)
+  const [editActivation, setEditActivation] = useState(null);
+  const { docNo, createdAt: invoiceCreatedAt, isActive: invoiceIsActive, activate: activateInvoice, reset: resetActivation } =
+    useInvoiceActivation("purchase_receipt", editActivation);
 
   const [lines, setLines] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
@@ -181,6 +187,7 @@ export default function PurchaseFormPage() {
       const p = r.data.data;
       setRefNo(p.doc_no || p.ref_no || "");
       setDocDate((p.created_at || "").slice(0, 10));
+      setEditActivation({ docNo: p.doc_no || p.ref_no || "", createdAt: p.created_at || new Date().toISOString() });
       setPaymentMode(p.payment_method || "cash");
       setEditDebtRemaining(p.debt_remaining || 0);
       if (p.supplier_id) {
@@ -234,6 +241,7 @@ export default function PurchaseFormPage() {
   }
 
   function handlePickSupplier(s) {
+    activateInvoice();
     setSupplier(s);
     setSupplierQuery(s.name);
     setSupplierLookupOpen(false);
@@ -241,6 +249,7 @@ export default function PurchaseFormPage() {
 
   function addLine() {
     if (!selectedItem) return;
+    activateInvoice();
     const qty = Number(staging.quantity || 1);
     const cost = Number(staging.unitCost || 0);
     const sellingPrice = Number(staging.sellingPrice || 0);
@@ -303,8 +312,9 @@ export default function PurchaseFormPage() {
     return {
       supplier_id: supplier?.id || null,
       warehouse_id: defaultWarehouseId,
-      ref_no: refNo,
-      date: docDate,
+      doc_no: docNo || refNo,
+      ref_no: docNo || refNo,
+      date: invoiceCreatedAt || docDate,
       payment_method: paymentMode,
       bank_ref: paymentMode === "bank_transfer" ? bankRef : undefined,
       due_date: paymentMode === "future_due" ? dueDate : undefined,
@@ -343,7 +353,7 @@ export default function PurchaseFormPage() {
         await api.post("/api/purchases", buildPayload());
         if (priceChangedLines.length > 0) toast.success(`تم تحديث أسعار بيع ${priceChangedLines.length} صنف`);
         toast.success("تم حفظ فاتورة المشتريات بنجاح");
-        // Reset to new empty form
+        // Reset to idle state — doc number and date shown only after next interaction
         setLines([]);
         setSupplier(null);
         setSupplierQuery("");
@@ -351,7 +361,7 @@ export default function PurchaseFormPage() {
         setBankRef("");
         setDueDate("");
         setMultiAmounts({});
-        setDocDate(new Date().toISOString().split("T")[0]);
+        resetActivation();
         navigate("/purchases/new", { replace: true });
       }
     } catch (e) {
@@ -394,8 +404,7 @@ export default function PurchaseFormPage() {
     setBankRef("");
     setDueDate("");
     setMultiAmounts({});
-    setRefNo(`INV-${Date.now().toString().slice(-6)}`);
-    setDocDate(new Date().toISOString().split("T")[0]);
+    resetActivation();
   }
 
   async function createSupplier() {
@@ -447,11 +456,11 @@ export default function PurchaseFormPage() {
               المحرر: {user.name}
             </div>
           )}
-          {!isLocked && isEditMode && (
+          {!isLocked && (
             <div className="flex gap-1.5">
-              <input disabled value={refNo || ""} placeholder="رقم المستند"
+              <input disabled value={invoiceIsActive ? (docNo || refNo || "") : "—"} placeholder="رقم المستند"
                 className="h-7 w-28 rounded-sm border border-slate-200 bg-slate-100 px-2 text-[11px] font-mono font-black text-slate-400 cursor-not-allowed outline-none" />
-              <input disabled value={docDate ? new Date(docDate).toLocaleString("ar-EG") : ""}
+              <input disabled value={invoiceIsActive && invoiceCreatedAt ? new Date(invoiceCreatedAt).toLocaleString("ar-EG") : "—"}
                 className="h-7 w-44 rounded-sm border border-slate-200 bg-slate-100 px-2 text-[11px] font-mono font-black text-slate-400 cursor-not-allowed outline-none" />
             </div>
           )}

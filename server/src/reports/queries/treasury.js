@@ -1,0 +1,123 @@
+const { getDb } = require("../../config/database");
+const { addDateFilter } = require("../helpers");
+
+function cashFlow(startDate, endDate, opts = {}) {
+  const db = getDb();
+  const params = [];
+  return db.prepare(`
+    SELECT DATE(t.date) AS date, t.type, SUM(t.amount) AS total
+    FROM (
+      SELECT created_at AS date, 'مبيعات' AS type, total AS amount
+      FROM invoices WHERE status = 'paid'
+      UNION ALL
+      SELECT created_at, 'إيرادات أخرى', amount FROM revenues
+      UNION ALL
+      SELECT created_at, 'مصروفات', -amount FROM expenses
+    ) t
+    WHERE 1=1 ${addDateFilter("t.date", startDate, endDate, params)}
+    GROUP BY DATE(t.date), t.type
+    ORDER BY date DESC
+  `).all(...params);
+}
+
+function treasury(startDate, endDate, opts = {}) {
+  const db = getDb();
+  const treasuries = db.prepare(`
+    SELECT t.name, t.code, t.balance, 'treasury' AS source,
+      COUNT(p.id) AS tx_count
+    FROM treasuries t
+    LEFT JOIN payments p ON p.treasury_id = t.id
+    GROUP BY t.id
+    ORDER BY t.name ASC
+  `).all();
+  const banks = db.prepare(`
+    SELECT b.name, b.code, b.balance, 'bank' AS source,
+      COUNT(p.id) AS tx_count
+    FROM banks b
+    LEFT JOIN payments p ON p.bank_id = b.id
+    GROUP BY b.id
+    ORDER BY b.name ASC
+  `).all();
+  return [...treasuries, ...banks];
+}
+
+function cashConsistency(startDate, endDate, opts = {}) {
+  const db = getDb();
+  const params = [];
+  return db.prepare(`
+    SELECT DATE(s.opened_at) AS date, s.id AS shift_id,
+      u.full_name AS cashier,
+      s.opening_cash, s.closing_cash,
+      COALESCE(SUM(i.total), 0) AS sales_total,
+      (s.opening_cash + COALESCE(SUM(i.total), 0)) AS expected_cash,
+      COALESCE(s.closing_cash, 0) - s.opening_cash - COALESCE(SUM(i.total), 0) AS cash_variance,
+      COUNT(DISTINCT i.id) AS invoice_count,
+      s.status
+    FROM shifts s
+    JOIN users u ON u.id = s.user_id
+    LEFT JOIN invoices i ON i.shift_id = s.id
+    WHERE 1=1 ${addDateFilter("s.opened_at", startDate, endDate, params)}
+    GROUP BY s.id
+    ORDER BY s.opened_at DESC
+  `).all(...params);
+}
+
+function paymentMethodFlow(startDate, endDate, opts = {}) {
+  const db = getDb();
+  const params = [];
+  return db.prepare(`
+    SELECT i.payment_type, DATE(i.created_at) AS date,
+      COUNT(*) AS transaction_count,
+      SUM(i.total) AS total_amount,
+      SUM(SUM(i.total)) OVER (PARTITION BY i.payment_type ORDER BY DATE(i.created_at)) AS running_total
+    FROM invoices i
+    WHERE i.status = 'paid' ${addDateFilter("i.created_at", startDate, endDate, params)}
+    GROUP BY i.payment_type, DATE(i.created_at)
+    ORDER BY date DESC, total_amount DESC
+  `).all(...params);
+}
+
+function bankCashSplit(startDate, endDate, opts = {}) {
+  const db = getDb();
+  const rows = [
+    ...db.prepare("SELECT 'treasury' AS type, name, balance FROM treasuries WHERE is_active = 1").all(),
+    ...db.prepare("SELECT 'bank' AS type, name, balance FROM banks WHERE is_active = 1").all(),
+  ];
+  const grandTotal = rows.reduce((s, r) => s + Number(r.balance || 0), 0);
+  return rows.map(r => ({
+    ...r,
+    percentage: grandTotal > 0 ? Math.round((Number(r.balance) / grandTotal) * 100) : 0,
+  }));
+}
+
+function reconciliationExceptions(startDate, endDate, opts = {}) {
+  const db = getDb();
+  const params = [];
+  return db.prepare(`
+    SELECT DATE(s.opened_at) AS date, s.id AS shift_id,
+      u.full_name AS cashier,
+      s.opening_cash, s.closing_cash,
+      COALESCE(SUM(i.total), 0) AS sales_total,
+      (s.opening_cash + COALESCE(SUM(i.total), 0)) AS expected_cash,
+      COALESCE(s.closing_cash, 0) - s.opening_cash - COALESCE(SUM(i.total), 0) AS cash_variance,
+      COUNT(DISTINCT i.id) AS invoice_count,
+      s.status
+    FROM shifts s
+    JOIN users u ON u.id = s.user_id
+    LEFT JOIN invoices i ON i.shift_id = s.id
+    WHERE ABS(COALESCE(s.closing_cash, 0) - s.opening_cash - COALESCE(SUM(i.total), 0)) > 0.01
+      ${addDateFilter("s.opened_at", startDate, endDate, params)}
+    GROUP BY s.id
+    HAVING ABS(cash_variance) > 0.01
+    ORDER BY s.opened_at DESC
+  `).all(...params);
+}
+
+module.exports = {
+  cashFlow,
+  treasury,
+  cashConsistency,
+  paymentMethodFlow,
+  bankCashSplit,
+  reconciliationExceptions,
+};

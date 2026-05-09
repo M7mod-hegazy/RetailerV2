@@ -229,8 +229,8 @@ export default function SupplierAccountsPage() {
                     <div className="flex items-center justify-between gap-2">
                       <div className="text-[10px] text-slate-400 font-mono truncate">{s.phone || s.code || "—"}</div>
                       <div className="flex items-center gap-1 shrink-0">
-                        {b > 0 && <span className="text-[9px] font-black bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded-full">ندين له</span>}
-                        {b < 0 && <span className="text-[9px] font-black bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full">يديننا</span>}
+                        {b > 0 && <span className="text-[9px] font-black bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded-full">له مستحق</span>}
+                        {b < 0 && <span className="text-[9px] font-black bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full">عليه مستحق</span>}
                         <span className={`text-[12px] font-black font-mono ${b > 0 ? "text-rose-600" : b < 0 ? "text-emerald-600" : "text-slate-400"}`}>
                           {fmt(Math.abs(b))}
                         </span>
@@ -288,7 +288,7 @@ export default function SupplierAccountsPage() {
               }`}>
                 <div>
                   <div className={`text-[11px] font-black uppercase tracking-widest mb-1 ${bal > 0 ? "text-rose-500" : bal < 0 ? "text-emerald-600" : "text-slate-400"}`}>
-                    {bal > 0 ? "نحن ندين للمورد — رصيد مستحق" : bal < 0 ? "المورد يديننا — رصيد دائن" : "الحساب مسوّى"}
+                    {bal > 0 ? "له مستحق" : bal < 0 ? "عليه مستحق" : "الحساب مسوّى"}
                   </div>
                   <div className={`text-[36px] font-black font-mono leading-none ${bal > 0 ? "text-rose-600" : bal < 0 ? "text-emerald-600" : "text-slate-400"}`}>
                     {fmt(Math.abs(bal))}
@@ -519,13 +519,13 @@ export default function SupplierAccountsPage() {
             </p>
             {bal > 0 && (
               <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 mb-4 text-[12px] font-bold text-rose-800">
-                نحن ندين للمورد <span className="font-mono font-black">{fmt(bal)} ج.م</span> — هذا المبلغ سيُخصم من المستحق بعد السداد.
-                {Number(payForm.amount) > bal && <div className="mt-1 text-amber-700 font-black">⚠️ المبلغ المدخل ({fmt(Number(payForm.amount))}) أكبر من المستحق — الفرق ({fmt(Number(payForm.amount) - bal)} ج.م) سيُسجَّل كرصيد دائن يديننا المورد.</div>}
+                له مستحق <span className="font-mono font-black">{fmt(bal)} ج.م</span>
+                {Number(payForm.amount) > bal && <div className="mt-1 text-amber-700 font-black">⚠️ المبلغ المدخل أكبر من المستحق — الفرق سيصبح عليه مستحق.</div>}
               </div>
             )}
             {bal < 0 && (
               <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 mb-4 text-[12px] font-bold text-emerald-800">
-                المورد يديننا <span className="font-mono font-black">{fmt(Math.abs(bal))} ج.م</span> — هذا الاسترداد سيُقلل ما يدين به لنا.
+                عليه مستحق <span className="font-mono font-black">{fmt(Math.abs(bal))} ج.م</span>
               </div>
             )}
             {bal === 0 && (
@@ -585,9 +585,9 @@ export default function SupplierAccountsPage() {
               <span className={`font-mono font-black ${bal > 0 ? "text-rose-600" : bal < 0 ? "text-emerald-600" : "text-slate-500"}`}>
                 {fmt(Math.abs(bal))} ج.م
               </span>
-              {bal > 0 && <span className="text-rose-500 text-[10px]"> — نحن ندين للمورد</span>}
-              {bal < 0 && <span className="text-emerald-600 text-[10px]"> — المورد يديننا</span>}
-              {bal === 0 && <span className="text-slate-400 text-[10px]"> — الحساب مسوّى</span>}
+              {bal > 0 && <span className="text-rose-500 text-[10px]"> — له مستحق</span>}
+              {bal < 0 && <span className="text-emerald-600 text-[10px]"> — عليه مستحق</span>}
+              {bal === 0 && <span className="text-slate-400 text-[10px]"> — مسوّى</span>}
             </p>
 
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-5">
@@ -629,7 +629,7 @@ export default function SupplierAccountsPage() {
                     {fmt(Math.abs(newBal))} ج.م
                   </p>
                   <p className={`text-[10px] font-black mt-0.5 ${newBal > 0 ? "text-rose-400" : newBal < 0 ? "text-emerald-500" : "text-slate-400"}`}>
-                    {newBal > 0 ? "مستحق للمورد" : newBal < 0 ? "رصيد دائن من المورد" : "الحساب مسوّى ✓"}
+                    {newBal > 0 ? "له مستحق" : newBal < 0 ? "عليه مستحق" : "مسوّى ✓"}
                   </p>
                 </div>
                 );

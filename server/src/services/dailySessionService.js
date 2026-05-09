@@ -261,13 +261,11 @@ function cashBreakdown(db, dateText, session) {
       AND COALESCE(pm.type, pm.category, pm.name, 'cash') != 'cash'
   `, [date]);
 
-  const withdrawals = sessionId
-    ? scalar(db, `
-        SELECT COALESCE(SUM(amount), 0) AS total
-        FROM daily_withdrawals
-        WHERE session_id = ?
-      `, [sessionId])
-    : 0;
+  const withdrawals = scalar(db, `
+    SELECT COALESCE(SUM(amount), 0) AS total
+    FROM withdrawals
+    WHERE date(created_at) = ? AND COALESCE(payment_method, 'cash') = 'cash'
+  `, [date]);
 
   const customerCashCollections = customerPayments + customerAjalPayments;
   const supplierCashPayments = supplierPayments + supplierAjalPayments;
@@ -316,85 +314,101 @@ function cashBreakdown(db, dateText, session) {
 function liveOpeningBalance(db, dateText) {
   const date = normalizeDate(dateText);
 
+  // Anchor: last closed session's actual_cash before this date.
+  // This captures initial cash float and any manually-confirmed counts.
+  // If no closed session exists, anchor is 0 (new system, calculate from scratch).
+  const anchor = db.prepare(`
+    SELECT actual_cash, date AS anchor_date
+    FROM daily_sessions
+    WHERE date < ? AND status = 'closed' AND actual_cash IS NOT NULL
+    ORDER BY date DESC
+    LIMIT 1
+  `).get(date);
+
+  const anchorBalance = Number(anchor?.actual_cash || 0);
+  const since = anchor?.anchor_date || '1970-01-01';
+
+  // Add all cash movements strictly between anchor date and today (exclusive both ends)
   const posCash = scalar(db, `
     SELECT COALESCE(SUM(total),0) AS total FROM invoices
-    WHERE date(created_at) < ? AND payment_type = 'cash' AND status != 'cancelled'
-  `, [date]);
+    WHERE date(created_at) > ? AND date(created_at) < ? AND payment_type = 'cash' AND status != 'cancelled'
+  `, [since, date]);
 
   const posInstallmentCash = scalar(db, `
     SELECT COALESCE(SUM(pa.amount),0) AS total
     FROM payment_allocations pa
     JOIN invoices i ON i.id = pa.invoice_id
-    WHERE date(i.created_at) < ? AND i.payment_type = 'installments' AND i.status != 'cancelled'
-  `, [date]);
+    WHERE date(i.created_at) > ? AND date(i.created_at) < ? AND i.payment_type = 'installments' AND i.status != 'cancelled'
+  `, [since, date]);
 
   const posMultiCash = scalar(db, `
     SELECT COALESCE(SUM(p.amount),0) AS total
     FROM payments p
     JOIN invoices i ON p.notes = 'Invoice ' || i.invoice_no
-    WHERE date(i.created_at) < ? AND i.payment_type = 'multi' AND p.method = 'cash' AND i.status != 'cancelled'
-  `, [date]);
+    WHERE date(i.created_at) > ? AND date(i.created_at) < ? AND i.payment_type = 'multi' AND p.method = 'cash' AND i.status != 'cancelled'
+  `, [since, date]);
 
   const customerPayments = scalar(db, `
     SELECT COALESCE(SUM(amount),0) AS total FROM payments
-    WHERE date(created_at) < ? AND party_type = 'customer' AND method = 'cash'
-  `, [date]);
+    WHERE date(created_at) > ? AND date(created_at) < ? AND party_type = 'customer' AND method = 'cash'
+  `, [since, date]);
 
   const customerAjalPayments = scalar(db, `
     SELECT COALESCE(SUM(ap.amount),0) AS total
     FROM ajal_payments ap
     LEFT JOIN payment_methods pm ON pm.id = ap.payment_method_id
     LEFT JOIN ajal_debts d ON d.id = ap.debt_id
-    WHERE date(COALESCE(ap.payment_date, ap.created_at)) < ?
+    WHERE date(COALESCE(ap.payment_date, ap.created_at)) > ?
+      AND date(COALESCE(ap.payment_date, ap.created_at)) < ?
       AND COALESCE(d.party_type,'customer') = 'customer'
       AND COALESCE(pm.type, pm.category, pm.name, 'cash') = 'cash'
-  `, [date]);
+  `, [since, date]);
 
   const revenuesCash = scalar(db, `
     SELECT COALESCE(SUM(amount),0) AS total FROM revenues
-    WHERE date(created_at) < ? AND COALESCE(payment_method,'cash') = 'cash'
-  `, [date]);
+    WHERE date(created_at) > ? AND date(created_at) < ? AND COALESCE(payment_method,'cash') = 'cash'
+  `, [since, date]);
 
   const purchaseReturnsCash = scalar(db, `
     SELECT COALESCE(SUM(total),0) AS total FROM purchase_returns
-    WHERE date(created_at) < ? AND COALESCE(settlement_type,'account') = 'cash'
-  `, [date]);
+    WHERE date(created_at) > ? AND date(created_at) < ? AND COALESCE(settlement_type,'account') = 'cash'
+  `, [since, date]);
 
   const expensesCash = scalar(db, `
     SELECT COALESCE(SUM(amount),0) AS total FROM expenses
-    WHERE date(created_at) < ? AND COALESCE(payment_method,'cash') = 'cash'
-  `, [date]);
+    WHERE date(created_at) > ? AND date(created_at) < ? AND COALESCE(payment_method,'cash') = 'cash'
+  `, [since, date]);
 
   const supplierPayments = scalar(db, `
     SELECT COALESCE(SUM(amount),0) AS total FROM payments
-    WHERE date(created_at) < ? AND party_type = 'supplier' AND method = 'cash'
-  `, [date]);
+    WHERE date(created_at) > ? AND date(created_at) < ? AND party_type = 'supplier' AND method = 'cash'
+  `, [since, date]);
 
   const supplierAjalPayments = scalar(db, `
     SELECT COALESCE(SUM(ap.amount),0) AS total
     FROM ajal_payments ap
     LEFT JOIN payment_methods pm ON pm.id = ap.payment_method_id
     LEFT JOIN ajal_debts d ON d.id = ap.debt_id
-    WHERE date(COALESCE(ap.payment_date, ap.created_at)) < ?
+    WHERE date(COALESCE(ap.payment_date, ap.created_at)) > ?
+      AND date(COALESCE(ap.payment_date, ap.created_at)) < ?
       AND COALESCE(d.party_type,'customer') = 'supplier'
       AND COALESCE(pm.type, pm.category, pm.name, 'cash') = 'cash'
-  `, [date]);
+  `, [since, date]);
 
   const salesReturnsCash = scalar(db, `
     SELECT COALESCE(SUM(total),0) AS total FROM sales_returns
-    WHERE date(created_at) < ? AND COALESCE(refund_method,'cash_back') = 'cash_back'
-  `, [date]);
+    WHERE date(created_at) > ? AND date(created_at) < ? AND COALESCE(refund_method,'cash_back') = 'cash_back'
+  `, [since, date]);
 
   const withdrawals = scalar(db, `
-    SELECT COALESCE(SUM(dw.amount),0) AS total
-    FROM daily_withdrawals dw
-    JOIN daily_sessions ds ON ds.id = dw.session_id
-    WHERE date(ds.date) < ?
-  `, [date]);
+    SELECT COALESCE(SUM(amount),0) AS total
+    FROM withdrawals
+    WHERE date(created_at) > ? AND date(created_at) < ? AND COALESCE(payment_method,'cash') = 'cash'
+  `, [since, date]);
 
-  const prevCashIn = posCash + posInstallmentCash + posMultiCash + customerPayments + customerAjalPayments + revenuesCash + purchaseReturnsCash;
-  const prevCashOut = expensesCash + supplierPayments + supplierAjalPayments + salesReturnsCash + withdrawals;
-  return prevCashIn - prevCashOut;
+  const deltaCashIn = posCash + posInstallmentCash + posMultiCash + customerPayments + customerAjalPayments + revenuesCash + purchaseReturnsCash;
+  const deltaCashOut = expensesCash + supplierPayments + supplierAjalPayments + salesReturnsCash + withdrawals;
+  return anchorBalance + deltaCashIn - deltaCashOut;
 }
 
 function calculateDailySummary(db, dateText, options = {}) {

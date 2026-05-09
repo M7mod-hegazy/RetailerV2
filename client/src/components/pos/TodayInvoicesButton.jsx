@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from "react";
 import { Receipt, X, RefreshCw } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import api from "../../services/api";
 
 const PAYMENT_LABELS = {
@@ -17,16 +18,20 @@ function todayStr() {
 }
 
 export default function TodayInvoicesButton({ variant = "default" }) {
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(false);
   const [dateFrom, setDateFrom] = useState(todayStr());
   const [dateTo, setDateTo] = useState(todayStr());
+  const [userId, setUserId] = useState("");
+  const [usersList, setUsersList] = useState([]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams({ date_from: dateFrom, date_to: dateTo, limit: 200 });
+      if (userId) params.set("user_id", userId);
       const r = await api.get(`/api/invoices?${params}`);
       setInvoices(r.data.data || r.data || []);
     } catch {
@@ -34,14 +39,18 @@ export default function TodayInvoicesButton({ variant = "default" }) {
     } finally {
       setLoading(false);
     }
-  }, [dateFrom, dateTo]);
+  }, [dateFrom, dateTo, userId]);
 
   function handleOpen() {
     setOpen(true);
     load();
+    if (!usersList.length) {
+      api.get("/api/users").then(r => setUsersList(r.data.data || [])).catch(() => {});
+    }
   }
 
-  const total = invoices.reduce((s, i) => s + Number(i.total || 0), 0);
+  const activeInvoices = invoices.filter(i => i.status !== "cancelled");
+  const total = activeInvoices.reduce((s, i) => s + Number(i.total || 0), 0);
 
   const buttonClass =
     variant === "compact"
@@ -74,7 +83,8 @@ export default function TodayInvoicesButton({ variant = "default" }) {
                 <div>
                   <h2 className="text-[16px] font-black text-slate-900">فواتير اليوم</h2>
                   <p className="text-[11px] font-bold text-slate-400">
-                    {invoices.length} فاتورة — إجمالي {fmt(total)} ج.م
+                    {activeInvoices.length} فاتورة نشطة — إجمالي {fmt(total)} ج.م
+                    {invoices.length > activeInvoices.length && <span className="text-rose-400 mr-2">({invoices.length - activeInvoices.length} ملغي)</span>}
                   </p>
                 </div>
               </div>
@@ -106,6 +116,16 @@ export default function TodayInvoicesButton({ variant = "default" }) {
                   className="rounded-lg border border-slate-200 px-3 py-1.5 text-[12px] font-bold outline-none focus:border-emerald-400"
                 />
               </div>
+              {usersList.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-black text-slate-500">المستخدم:</span>
+                  <select value={userId} onChange={(e) => setUserId(e.target.value)}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-[12px] font-bold outline-none focus:border-emerald-400">
+                    <option value="">الكل</option>
+                    {usersList.map(u => <option key={u.id} value={u.id}>{u.username}</option>)}
+                  </select>
+                </div>
+              )}
               <button
                 onClick={load}
                 className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-black text-white hover:bg-emerald-700"
@@ -139,7 +159,7 @@ export default function TodayInvoicesButton({ variant = "default" }) {
                 <table className="w-full text-[12px] border-collapse">
                   <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
                     <tr>
-                      {["رقم الفاتورة", "العميل", "الأصناف", "الإجمالي", "طريقة الدفع", "الحالة", "الوقت"].map((h) => (
+                      {["رقم الفاتورة", "العميل", "الأصناف", "الإجمالي", "طريقة الدفع", "الحالة", "تعديل", "المستخدم", "الوقت"].map((h) => (
                         <th
                           key={h}
                           className="px-4 py-3 text-right font-black text-slate-500 text-[11px] uppercase tracking-wider whitespace-nowrap"
@@ -153,7 +173,8 @@ export default function TodayInvoicesButton({ variant = "default" }) {
                     {invoices.map((inv, i) => (
                       <tr
                         key={inv.id}
-                        className={`border-b border-slate-50 hover:bg-slate-50 transition-colors ${i % 2 === 0 ? "" : "bg-slate-50/40"}`}
+                        onClick={() => { setOpen(false); navigate(`/invoices/${inv.id}`); }}
+                        className={`border-b border-slate-50 hover:bg-emerald-50 cursor-pointer transition-colors ${i % 2 === 0 ? "" : "bg-slate-50/40"}`}
                       >
                         <td className="px-4 py-3 font-mono text-[12px] font-black text-slate-700">{inv.invoice_no}</td>
                         <td className="px-4 py-3 text-[12px] font-bold text-slate-800 max-w-[140px] truncate">
@@ -176,25 +197,34 @@ export default function TodayInvoicesButton({ variant = "default" }) {
                                 : inv.status === "partial"
                                 ? "bg-amber-50 text-amber-700 border-amber-200"
                                 : inv.status === "cancelled"
-                                ? "bg-slate-100 text-slate-500 border-slate-200"
+                                ? "bg-slate-100 text-slate-500 border-slate-200 line-through"
                                 : "bg-rose-50 text-rose-700 border-rose-200"
                             }`}
                           >
-                            {inv.status === "paid"
-                              ? "مدفوع"
-                              : inv.status === "partial"
-                              ? "جزئي"
-                              : inv.status === "cancelled"
-                              ? "ملغي"
-                              : "آجل"}
+                            {inv.status === "paid" ? "مدفوع" : inv.status === "partial" ? "جزئي" : inv.status === "cancelled" ? "ملغي" : "آجل"}
                           </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-col gap-0.5">
+                            {inv.amended_by && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-100 text-amber-700 border border-amber-200 whitespace-nowrap" title={`عُدِّلت → ${inv.amended_by_no || inv.amended_by}`}>
+                                مُعدَّلة ← {inv.amended_by_no || inv.amended_by}
+                              </span>
+                            )}
+                            {inv.amendment_of && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-blue-100 text-blue-700 border border-blue-200 whitespace-nowrap" title={`تعديل على: ${inv.amendment_of_no || inv.amendment_of}`}>
+                                تعديل ↑ {inv.amendment_of_no || inv.amendment_of}
+                              </span>
+                            )}
+                            {!inv.amended_by && !inv.amendment_of && <span className="text-slate-300">—</span>}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-[11px] font-bold text-slate-600 whitespace-nowrap">
+                          {inv.created_by_username || "—"}
                         </td>
                         <td className="px-4 py-3 text-[11px] font-bold text-slate-400 whitespace-nowrap font-mono">
                           {inv.created_at
-                            ? new Date(inv.created_at).toLocaleTimeString("ar-EG", {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              })
+                            ? new Date(inv.created_at).toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })
                             : "—"}
                         </td>
                       </tr>

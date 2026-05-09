@@ -1,7 +1,7 @@
 const { getDb } = require("../config/database");
 const { adjustStock } = require("./stockService");
 
-function transferStock({ item_id, from_warehouse_id, to_warehouse_id, quantity, notes = null }) {
+function transferStock({ item_id, from_warehouse_id, to_warehouse_id, quantity, notes = null, user_id = null }) {
   const db = getDb();
   const normalizedQuantity = Number(quantity || 0);
 
@@ -35,6 +35,7 @@ function transferStock({ item_id, from_warehouse_id, to_warehouse_id, quantity, 
       reference_type: "stock_transfer",
       reference_id: null,
       notes,
+      user_id,
     });
 
     adjustStock({
@@ -45,6 +46,7 @@ function transferStock({ item_id, from_warehouse_id, to_warehouse_id, quantity, 
       reference_type: "stock_transfer",
       reference_id: null,
       notes,
+      user_id,
     });
 
     return { item_id, from_warehouse_id, to_warehouse_id, quantity: normalizedQuantity };

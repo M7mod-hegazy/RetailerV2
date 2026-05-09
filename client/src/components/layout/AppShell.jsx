@@ -76,12 +76,12 @@ export default function AppShell({ children }) {
 
   return (
     <>
-      <div className="app-background">
-        <div className="orb-1"></div>
-        <div className="orb-2"></div>
-        <div className="orb-3"></div>
+      <div className="app-background pointer-events-none">
+        <div className="orb-1 pointer-events-none"></div>
+        <div className="orb-2 pointer-events-none"></div>
+        <div className="orb-3 pointer-events-none"></div>
       </div>
-      <div className="shell-frame relative min-h-screen">
+      <div className="shell-frame relative min-h-screen pointer-events-auto">
         {isMobile ? <MobileLayout branding={branding}>{children}</MobileLayout> : <DesktopLayout branding={branding}>{children}</DesktopLayout>}
       </div>
       <PageTour />

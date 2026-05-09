@@ -95,6 +95,7 @@ export default function PhysicalCountPage() {
   const [formSelectedItems, setFormSelectedItems] = useState([]);
   const [formItemsLoading, setFormItemsLoading] = useState(false);
   const [formSubmitting, setFormSubmitting] = useState(false);
+  const [formErrors, setFormErrors] = useState({}); // { fieldName: "error message" }
 
   // Reference data
   const [warehouses, setWarehouses] = useState([]);
@@ -198,10 +199,21 @@ export default function PhysicalCountPage() {
 
   // ── Create session ────────────────────────────────────────────────────────────
   async function handleCreateSession() {
-    if (!formName.trim()) { toast.error("أدخل اسماً للجرد"); return; }
-    if (formScope === "warehouse" && !formWarehouse) { toast.error("اختر المستودع"); return; }
-    if (formScope === "category" && !formCategory) { toast.error("اختر الفئة"); return; }
-    if (formScope === "custom" && formSelectedItems.length === 0) { toast.error("اختر صنفاً واحداً على الأقل"); return; }
+    // Clear previous errors
+    setFormErrors({});
+    
+    // Validate and collect errors
+    const errors = {};
+    if (!formName.trim()) errors.formName = "أدخل اسماً للجرد";
+    if (formScope === "warehouse" && !formWarehouse) errors.formWarehouse = "اختر المستودع";
+    if (formScope === "category" && !formCategory) errors.formCategory = "اختر الفئة";
+    if (formScope === "custom" && formSelectedItems.length === 0) errors.formItems = "اختر صنفاً واحداً على الأقل";
+    
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
+      toast.error(Object.values(errors)[0]);
+      return;
+    }
 
     setFormSubmitting(true);
     try {
@@ -228,6 +240,7 @@ export default function PhysicalCountPage() {
   function resetForm() {
     setFormName(""); setFormScope("warehouse"); setFormWarehouse(""); setFormCategory("");
     setFormNotes(""); setFormItemSearch(""); setFormSelectedItems([]);
+    setFormErrors({});
   }
 
   // ── Auto-save a line ──────────────────────────────────────────────────────────
@@ -327,7 +340,7 @@ export default function PhysicalCountPage() {
   // ─── Render: Dashboard ────────────────────────────────────────────────────────
   if (view === "dashboard") {
     return (
-      <div className="standard-page-container flex flex-col h-screen" dir="rtl">
+      <div className="flex flex-col h-full" dir="rtl">
         {/* Header */}
         <div className="px-6 py-5 border-b border-slate-200 bg-white shrink-0">
           <div className="flex items-start justify-between">
@@ -364,11 +377,16 @@ export default function PhysicalCountPage() {
                   <div className="sm:col-span-2">
                     <label className="block text-[12px] font-black uppercase tracking-wider text-slate-500 mb-1.5">اسم الجرد *</label>
                     <input
-                      className="w-full rounded border border-slate-200 bg-slate-50/50 py-2.5 px-3 text-[13px] font-bold outline-none focus:border-slate-800 focus:ring-1 focus:ring-slate-800 transition-all placeholder:font-medium"
+                      className={`w-full rounded border py-2.5 px-3 text-[13px] font-bold outline-none transition-all placeholder:font-medium ${
+                        formErrors.formName 
+                          ? "border-red-400 bg-red-50/50 focus:border-red-500 focus:ring-1 focus:ring-red-500" 
+                          : "border-slate-200 bg-slate-50/50 focus:border-slate-800 focus:ring-1 focus:ring-slate-800"
+                      }`}
                       value={formName}
-                      onChange={(e) => setFormName(e.target.value)}
+                      onChange={(e) => { setFormName(e.target.value); if (formErrors.formName) setFormErrors((p) => ({ ...p, formName: null })); }}
                       placeholder="مثال: جرد أبريل 2026"
                     />
+                    {formErrors.formName && <p className="mt-1 text-[12px] font-bold text-red-500">{formErrors.formName}</p>}
                   </div>
 
                   <div className="sm:col-span-2">
@@ -400,14 +418,19 @@ export default function PhysicalCountPage() {
                       <div className="relative">
                         <select
                           value={formWarehouse}
-                          onChange={(e) => setFormWarehouse(e.target.value)}
-                          className="w-full appearance-none rounded border border-slate-200 bg-slate-50/50 py-2.5 pl-8 pr-3 text-[13px] font-bold text-slate-700 outline-none focus:border-slate-800"
+                          onChange={(e) => { setFormWarehouse(e.target.value); if (formErrors.formWarehouse) setFormErrors((p) => ({ ...p, formWarehouse: null })); }}
+                          className={`w-full appearance-none rounded border py-2.5 pl-8 pr-3 text-[13px] font-bold text-slate-700 outline-none ${
+                            formErrors.formWarehouse
+                              ? "border-red-400 bg-red-50/50 focus:border-red-500"
+                              : "border-slate-200 bg-slate-50/50 focus:border-slate-800"
+                          }`}
                         >
                           <option value="">اختر المستودع...</option>
                           {warehouses.map((w) => <option key={w.id} value={String(w.id)}>{w.name}</option>)}
                         </select>
                         <ChevronDown className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 pointer-events-none" />
                       </div>
+                      {formErrors.formWarehouse && <p className="mt-1 text-[12px] font-bold text-red-500">{formErrors.formWarehouse}</p>}
                     </div>
                   )}
 
@@ -417,14 +440,19 @@ export default function PhysicalCountPage() {
                       <div className="relative">
                         <select
                           value={formCategory}
-                          onChange={(e) => setFormCategory(e.target.value)}
-                          className="w-full appearance-none rounded border border-slate-200 bg-slate-50/50 py-2.5 pl-8 pr-3 text-[13px] font-bold text-slate-700 outline-none focus:border-slate-800"
+                          onChange={(e) => { setFormCategory(e.target.value); if (formErrors.formCategory) setFormErrors((p) => ({ ...p, formCategory: null })); }}
+                          className={`w-full appearance-none rounded border py-2.5 pl-8 pr-3 text-[13px] font-bold text-slate-700 outline-none ${
+                            formErrors.formCategory
+                              ? "border-red-400 bg-red-50/50 focus:border-red-500"
+                              : "border-slate-200 bg-slate-50/50 focus:border-slate-800"
+                          }`}
                         >
                           <option value="">اختر الفئة...</option>
                           {categories.map((c) => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
                         </select>
                         <ChevronDown className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 pointer-events-none" />
                       </div>
+                      {formErrors.formCategory && <p className="mt-1 text-[12px] font-bold text-red-500">{formErrors.formCategory}</p>}
                     </div>
                   )}
 
@@ -434,13 +462,19 @@ export default function PhysicalCountPage() {
                       <div className="relative mb-2 group">
                         <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 group-focus-within:text-slate-900 transition-colors" />
                         <input
-                          className="w-full rounded border border-slate-200 bg-white py-2.5 pl-3 pr-10 text-[13px] font-bold outline-none focus:border-slate-800 focus:ring-1 focus:ring-slate-800 transition-all shadow-sm"
+                          className={`w-full rounded border py-2.5 pl-3 pr-10 text-[13px] font-bold outline-none transition-all shadow-sm ${
+                            formErrors.formItems
+                              ? "border-red-400 bg-red-50/50 focus:border-red-500 focus:ring-1 focus:ring-red-500"
+                              : "border-slate-200 bg-white focus:border-slate-800 focus:ring-1 focus:ring-slate-800"
+                          }`}
                           placeholder="بحث عن صنف..."
                           value={formItemSearch}
                           onChange={(e) => setFormItemSearch(e.target.value)}
                         />
                       </div>
-                      <div className="max-h-[250px] overflow-y-auto rounded border border-slate-200 bg-white divide-y divide-slate-100 scrollbar-thin">
+                      <div className={`max-h-[250px] overflow-y-auto rounded border bg-white divide-y divide-slate-100 scrollbar-thin ${
+                        formErrors.formItems ? "border-red-400" : "border-slate-200"
+                      }`}>
                         {formItemsLoading && (
                           <div className="flex items-center justify-center py-6 text-slate-400"><Loader2 className="w-5 h-5 animate-spin" /></div>
                         )}
@@ -454,7 +488,10 @@ export default function PhysicalCountPage() {
                               <input
                                 type="checkbox"
                                 checked={checked}
-                                onChange={() => setFormSelectedItems((p) => checked ? p.filter((id) => id !== item.item_id) : [...p, item.item_id])}
+                                onChange={() => {
+                                  setFormSelectedItems((p) => checked ? p.filter((id) => id !== item.item_id) : [...p, item.item_id]);
+                                  if (formErrors.formItems) setFormErrors((p) => ({ ...p, formItems: null }));
+                                }}
                                 className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
                               />
                               <div className="flex-1">
@@ -465,6 +502,7 @@ export default function PhysicalCountPage() {
                           );
                         })}
                       </div>
+                      {formErrors.formItems && <p className="mt-1 text-[12px] font-bold text-red-500">{formErrors.formItems}</p>}
                       {formSelectedItems.length > 0 && (
                         <p className="mt-2 text-[11px] font-black text-slate-600 bg-white inline-block px-2 py-0.5 rounded border border-slate-200">{formSelectedItems.length} صنف محدد</p>
                       )}
@@ -498,7 +536,7 @@ export default function PhysicalCountPage() {
               <div className="px-5 py-4 border-b border-slate-200 bg-slate-50/50">
                 <h2 className="text-[14px] font-black text-slate-800 uppercase tracking-wide">سجل جلسات الجرد</h2>
               </div>
-              <div className="flex flex-col flex-1 max-h-[500px]">
+              <div className="flex flex-col flex-1">
                 <DataGrid
                   data={sessions}
                   rowKey="id"
@@ -594,7 +632,7 @@ export default function PhysicalCountPage() {
 
   // ─── Render: Session / Counting view ─────────────────────────────────────────
   return (
-    <div className="standard-page-container flex flex-col h-screen" dir="rtl">
+    <div className="flex flex-col h-full" dir="rtl">
       {/* Header */}
       <div className="px-6 py-4 border-b border-slate-200 bg-white shrink-0">
         <div className="flex items-center justify-between mb-3">
@@ -633,7 +671,7 @@ export default function PhysicalCountPage() {
       </div>
 
       {/* Content wrapper */}
-      <div className="flex-1 flex flex-col min-h-0 bg-slate-50/50 pb-20">
+      <div className="flex-1 flex flex-col min-h-0 bg-slate-50/50">
         
         {/* Toolbar */}
         <div className="flex items-center px-6 py-3 border-b border-slate-200 bg-white justify-between shrink-0">
@@ -695,7 +733,7 @@ export default function PhysicalCountPage() {
           </div>
         </div>
 
-        <div className="flex flex-col flex-1 min-h-[400px]">
+        <div className="flex flex-col flex-1 min-h-0">
           <DataGrid
             data={filteredLines}
             rowKey={(r) => `${r.item_id}_${r.warehouse_id ?? "null"}`}
@@ -706,7 +744,7 @@ export default function PhysicalCountPage() {
               </div>
             }
             className="border-0"
-            containerClass="flex-1 overflow-x-auto overflow-y-auto bg-white scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-transparent min-h-0"
+            containerClass="flex-1 overflow-x-auto overflow-y-auto bg-white scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-transparent min-h-0 pb-16"
             rowClass={(line) => {
               const key = `${line.item_id}_${line.warehouse_id ?? "null"}`;
               const localVal = localCounts[key] ?? line.counted_quantity;
@@ -726,7 +764,7 @@ export default function PhysicalCountPage() {
               {
                 id: "code", header: "الكود", width: 120, sortable: true,
                 headerClass: "text-right px-4", cellClass: "px-4 text-slate-500 font-mono text-[11px] tracking-wider border-l border-slate-100",
-                render: (line) => line.barcode || line.item_code || "—"
+                render: (line) => line.item_code || line.barcode || "—"
               },
               {
                 id: "item_name", header: "الصنف", width: 200, sortable: true,

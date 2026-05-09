@@ -225,7 +225,7 @@ export default function PurchaseOrdersPage() {
         <DataGrid
           data={rows}
           rowKey="id"
-          emptyMessage={hasSearch ? "لا توجد أوامر مطابقة للبحث" : "لا توجد أوامر شراء"}
+          emptyMessage={debouncedSearch ? "لا توجد أوامر مطابقة للبحث" : "لا توجد أوامر شراء"}
           emptyIcon={<Package className="h-10 w-10 opacity-30 mb-2" />}
           className="border-0"
           columns={[

@@ -34,6 +34,7 @@ export default function AnalyticsPage() {
   const [allSalesRows, setAllSalesRows] = useState([]);
   const [chartLoading, setChartLoading] = useState(false);
   const [lowStock, setLowStock] = useState([]);
+  const [belowMargin, setBelowMargin] = useState([]);
   const [topItems, setTopItems] = useState([]);
   const [topCategories, setTopCategories] = useState([]);
 
@@ -59,18 +60,20 @@ export default function AnalyticsPage() {
     async function loadDashboard() {
       setLoading(true);
       try {
-        const [summaryRes, stockRes, expensesRes, revenuesRes, topCategoriesRes] = await Promise.all([
+        const [summaryRes, stockRes, expensesRes, revenuesRes, topCategoriesRes, marginRes] = await Promise.all([
           api.get("/api/dashboard"),
           api.get("/api/reports/low-stock"),
           api.get("/api/expenses"),
           api.get("/api/revenues"),
-          api.get("/api/reports/run/sales-by-category?start_date=" + new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0])
+          api.get("/api/reports/run/sales-by-category?start_date=" + new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]),
+          api.get("/api/reports/margin-alerts").catch(() => ({ data: { data: [] } })),
         ]);
 
         setSummary(summaryRes.data?.data || zeroSummary);
 
         setLowStock(stockRes.data?.data?.slice(0, 5) || []);
         setTopCategories(topCategoriesRes.data?.data?.slice(0, 4) || []);
+        setBelowMargin(marginRes.data?.data?.slice(0, 5) || []);
 
         const todayIso = new Date().toISOString().slice(0, 10);
         const expenseTotal = (expensesRes.data?.data || [])
@@ -532,6 +535,47 @@ export default function AnalyticsPage() {
             </div>
           </div>
 
+        </div>
+
+        {/* Margin Health */}
+        <div className="rounded-[28px] bg-white/70 backdrop-blur-xl border border-white/60 shadow-[0_8px_32px_rgba(0,0,0,0.06)] p-6 flex flex-col gap-5">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-[20px] bg-rose-100/50 text-rose-600 flex items-center justify-center border border-rose-100">
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+            <h2 className="text-[18px] font-black text-slate-900 tracking-tight">صحة الهوامش</h2>
+            <Link to="/reports/margin-health" className="mr-auto text-[11px] font-black text-indigo-600 hover:underline">تقرير كامل ←</Link>
+          </div>
+          <div className="flex-1 flex flex-col gap-3">
+            {belowMargin.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-10 h-full text-center bg-white rounded-[20px] border border-slate-100">
+                <div className="w-14 h-14 bg-emerald-100/50 rounded-full flex items-center justify-center text-emerald-500 mb-4">
+                  <Sparkles className="w-6 h-6" />
+                </div>
+                <span className="text-[15px] font-black text-slate-800">هوامش الربح سليمة</span>
+                <span className="text-[12px] font-bold text-slate-500 mt-1">لا توجد أصناف تحت الحد الأدنى للهامش.</span>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {belowMargin.map((item) => (
+                  <div key={item.item_id || item.id} className="flex items-center justify-between rounded-[20px] border border-rose-100 bg-rose-50/40 p-4">
+                    <span className="font-bold text-slate-800 text-[13px]">{item.item_name || item.name}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">هامش</span>
+                      <span className="inline-flex items-center justify-center h-7 px-3 bg-rose-100 text-rose-700 rounded-full text-[12px] font-black ring-1 ring-rose-200">
+                        {Number(item.current_margin_percent ?? 0).toFixed(1)}%
+                      </span>
+                    </div>
+                  </div>
+                ))}
+                {belowMargin.length === 5 && (
+                  <Link to="/reports/margin-health" className="block w-full py-3 mt-2 text-center text-[12px] font-black text-rose-600 bg-rose-50/50 rounded-[16px] hover:bg-rose-50 transition-colors">
+                    عرض التفاصيل الكاملة ←
+                  </Link>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
       </div>

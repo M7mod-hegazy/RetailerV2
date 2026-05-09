@@ -3,6 +3,7 @@ const { adjustStock } = require("./stockService");
 const { calculateEarnedPoints, earnPointsForInvoice } = require("./loyaltyService");
 const { generateDocNumber } = require("../utils/docNumber");
 const { assertCanWriteForDate, normalizeDate } = require("./dailySessionService");
+const { getSnapshotCosts } = require("./waccService");
 
 function generateInvoiceNumber(db) {
   const settings = db.prepare("SELECT branch_code, invoice_prefix FROM settings WHERE id = 1").get() || {};
@@ -13,7 +14,13 @@ function generateInvoiceNumber(db) {
 }
 
 function recalculateInvoiceStatus(db, invoiceId) {
-  const invoice = db.prepare("SELECT * FROM invoices WHERE id = ?").get(invoiceId);
+  const invoice = db.prepare(`
+    SELECT i.*, c.name AS customer_name, c.phone AS customer_phone,
+           (SELECT invoice_no FROM invoices WHERE id = i.amendment_of) AS amendment_of_no,
+           (SELECT invoice_no FROM invoices WHERE id = i.amended_by)   AS amended_by_no
+    FROM invoices i LEFT JOIN customers c ON c.id = i.customer_id
+    WHERE i.id = ?
+  `).get(invoiceId);
   if (!invoice) return null;
 
   const allocated = db
@@ -21,8 +28,10 @@ function recalculateInvoiceStatus(db, invoiceId) {
     .get(invoiceId).total;
 
   const outstanding = Math.max(0, invoice.total - allocated);
-  const status =
-    outstanding === 0 ? "paid" : allocated > 0 ? "partial" : invoice.payment_type === "credit" ? "unpaid" : invoice.status;
+  // Never override terminal states — cancelled/amended invoices stay cancelled.
+  const status = (invoice.status === "cancelled" || invoice.amended_by)
+    ? "cancelled"
+    : outstanding === 0 ? "paid" : allocated > 0 ? "partial" : invoice.payment_type === "credit" ? "unpaid" : invoice.status;
 
   db.prepare("UPDATE invoices SET status = ? WHERE id = ?").run(status, invoiceId);
   return { ...invoice, status, allocated, outstanding };
@@ -30,12 +39,16 @@ function recalculateInvoiceStatus(db, invoiceId) {
 
 function getInvoiceWithLines(invoiceId) {
   const db = getDb();
-  const invoice = db.prepare("SELECT * FROM invoices WHERE id = ?").get(invoiceId);
+  const invoice = db.prepare(`
+    SELECT i.*, c.name AS customer_name, c.phone AS customer_phone
+    FROM invoices i LEFT JOIN customers c ON c.id = i.customer_id
+    WHERE i.id = ?
+  `).get(invoiceId);
   if (!invoice) return null;
 
   const lines = db
     .prepare(
-      `SELECT il.*, i.name AS item_name, i.barcode
+      `SELECT il.*, i.name AS item_name, i.barcode, i.code AS item_code
               ,COALESCE((SELECT SUM(srl.quantity) FROM sales_return_lines srl WHERE srl.invoice_line_id = il.id), 0) AS returned_quantity
        FROM invoice_lines il
        LEFT JOIN items i ON i.id = il.item_id
@@ -55,6 +68,14 @@ function getInvoiceWithLines(invoiceId) {
     `)
     .all(invoiceId);
 
+  // Remaining unpaid debt tied to this invoice (will be reversed on cancel/amend)
+  const ajalDebt = db.prepare(
+    "SELECT original_amount, paid_amount FROM ajal_debts WHERE invoice_id = ? AND source_type = 'invoice' AND status != 'voided' ORDER BY id DESC LIMIT 1"
+  ).get(invoiceId);
+  const debt_remaining = ajalDebt
+    ? Math.max(0, Number(ajalDebt.original_amount) - Number(ajalDebt.paid_amount || 0))
+    : 0;
+
   return {
     ...recalculateInvoiceStatus(db, invoiceId),
     lines: lines.map((line) => ({
@@ -67,6 +88,7 @@ function getInvoiceWithLines(invoiceId) {
       method_name: allocation.method_name || allocation.method,
       amount: allocation.amount,
     })),
+    debt_remaining,
   };
 }
 
@@ -85,12 +107,13 @@ function createInvoice(payload) {
       const lineDiscount = Number(line.discount || 0);
       const itemId = Number(line.item_id || 0);
       const warehouseId = Number(line.warehouse_id || payload.warehouse_id || 1);
-      const item = db.prepare("SELECT id, name, purchase_price FROM items WHERE id = ?").get(itemId);
+      const item = db.prepare("SELECT id, name, name_en, barcode, purchase_price FROM items WHERE id = ?").get(itemId);
       const stockRow = db
         .prepare("SELECT quantity FROM stock_levels WHERE item_id = ? AND warehouse_id = ?")
         .get(itemId, warehouseId);
       const currentStock = Number(stockRow?.quantity || 0);
       const purchasePrice = Number(item?.purchase_price || 0);
+      const snapshotCosts = getSnapshotCosts(itemId, db);
 
       if (!item) lineErrors.push(`الصنف غير موجود (سطر ${index + 1})`);
       if (!Number.isFinite(quantity) || quantity <= 0) lineErrors.push(`الكمية غير صالحة في السطر ${index + 1}`);
@@ -114,6 +137,11 @@ function createInvoice(payload) {
         unit_price: unitPrice,
         discount: lineDiscount,
         line_total: Math.max(0, rowSubtotal - lineDiscount),
+        item_name_ar:       item?.name      || null,
+        item_name_en:       item?.name_en   || null,
+        barcode:            item?.barcode   || null,
+        cost_wacc:          snapshotCosts.cost_wacc,
+        cost_last_purchase: snapshotCosts.cost_last_purchase,
       };
     });
 
@@ -158,7 +186,7 @@ function createInvoice(payload) {
 
     const inv = db
       .prepare(
-        "INSERT INTO invoices (invoice_no, customer_id, subtotal, discount, increase, total, payment_type, status, seller_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO invoices (invoice_no, customer_id, subtotal, discount, increase, total, payment_type, status, seller_id, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         invoiceNo,
@@ -170,6 +198,7 @@ function createInvoice(payload) {
         paymentType,
         remainingAmount > 0 ? (amountReceived > 0 ? "partial" : "unpaid") : "paid",
         payload.seller_id ? Number(payload.seller_id) : null,
+        payload.user_id ? Number(payload.user_id) : null,
       );
 
     db.prepare("UPDATE invoices SET created_at = ? WHERE id = ?")
@@ -177,14 +206,23 @@ function createInvoice(payload) {
 
     for (const line of normalizedLines) {
       db.prepare(
-        "INSERT INTO invoice_lines (invoice_id, item_id, quantity, unit_price, discount, line_total) VALUES (?, ?, ?, ?, ?, ?)",
+        `INSERT INTO invoice_lines
+          (invoice_id, item_id, warehouse_id, quantity, unit_price, discount, line_total,
+           item_name_ar, item_name_en, barcode, cost_wacc, cost_last_purchase)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         inv.lastInsertRowid,
         line.item_id,
+        line.warehouse_id || 1,
         line.quantity,
         line.unit_price,
         line.discount,
         line.line_total,
+        line.item_name_ar,
+        line.item_name_en,
+        line.barcode,
+        line.cost_wacc,
+        line.cost_last_purchase,
       );
 
       adjustStock({
@@ -408,10 +446,10 @@ function cancelInvoice(invoiceId, reason, userId) {
     }
 
     try {
-      const pts = db.prepare("SELECT points FROM loyalty_transactions WHERE invoice_id = ? AND type = 'earn'").get(invoiceId);
+      const pts = db.prepare("SELECT points FROM loyalty_transactions WHERE invoice_id = ? AND transaction_type = 'earn'").get(invoiceId);
       if (pts && invoice.customer_id) {
         db.prepare("UPDATE customers SET loyalty_points = MAX(0, loyalty_points - ?) WHERE id = ?").run(pts.points, invoice.customer_id);
-        db.prepare("INSERT INTO loyalty_transactions (customer_id, invoice_id, type, points, notes) VALUES (?, ?, 'redeem', ?, ?)").run(
+        db.prepare("INSERT INTO loyalty_transactions (customer_id, invoice_id, transaction_type, points, note) VALUES (?, ?, 'redeem', ?, ?)").run(
           invoice.customer_id, invoiceId, pts.points, `إلغاء فاتورة #${invoice.invoice_no}`
         );
       }
@@ -445,16 +483,26 @@ function editInvoice(invoiceId, payload) {
     // Delete old lines
     db.prepare("DELETE FROM invoice_lines WHERE invoice_id = ?").run(invoiceId);
 
-    // Insert new lines
+    // Insert new lines with snapshot fields
     const newLines = payload.lines || [];
     let subtotal = 0;
     for (const line of newLines) {
       const lineDiscount = Number(line.discount || 0);
       const lineSubtotal = Number(line.quantity) * Number(line.unit_price);
       const lineTotal = Math.max(0, lineSubtotal - lineDiscount);
+      const warehouseId = Number(line.warehouse_id || 1);
       subtotal += lineSubtotal;
-      db.prepare("INSERT INTO invoice_lines (invoice_id, item_id, quantity, unit_price, discount, line_total) VALUES (?, ?, ?, ?, ?, ?)").run(invoiceId, line.item_id, line.quantity, line.unit_price, lineDiscount, lineTotal);
-      adjustStock({ item_id: line.item_id, warehouse_id: line.warehouse_id || 1, quantityDelta: -Number(line.quantity), movement_type: "sale", reference_type: "invoice", reference_id: invoiceId });
+      const itemRow = db.prepare("SELECT name, name_en, barcode FROM items WHERE id = ?").get(line.item_id);
+      const snap = getSnapshotCosts(line.item_id, db);
+      db.prepare(
+        `INSERT INTO invoice_lines
+          (invoice_id, item_id, warehouse_id, quantity, unit_price, discount, line_total,
+           item_name_ar, item_name_en, barcode, cost_wacc, cost_last_purchase)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(invoiceId, line.item_id, warehouseId, line.quantity, line.unit_price, lineDiscount, lineTotal,
+            itemRow?.name || null, itemRow?.name_en || null, itemRow?.barcode || null,
+            snap.cost_wacc, snap.cost_last_purchase);
+      adjustStock({ item_id: line.item_id, warehouse_id: warehouseId, quantityDelta: -Number(line.quantity), movement_type: "sale", reference_type: "invoice", reference_id: invoiceId });
     }
 
     const discount = Number(payload.discount ?? invoice.discount ?? 0);

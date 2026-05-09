@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import {
   AlertTriangle,
+  ArrowLeft,
   ArrowLeftRight,
   BarChart3,
   CheckCircle2,
@@ -85,7 +87,10 @@ function StatusBadge({ qty, min }) {
 }
 
 export default function StockLevelsPage() {
-  const [tab, setTab] = useState("levels");
+  const location = useLocation();
+  const [tab, setTab] = useState(() =>
+    location.pathname.endsWith("/transfer") ? "transfer" : "levels"
+  );
 
   // ── shared ──
   const [warehouses, setWarehouses] = useState([]);
@@ -118,6 +123,7 @@ export default function StockLevelsPage() {
   const [txNotes, setTxNotes]       = useState("");
   const [txSearch, setTxSearch]     = useState("");
   const [txItems, setTxItems]       = useState([]); // items in fromWH
+  const [destStock, setDestStock]   = useState({}); // item_id → qty in destination
   const [txLoading, setTxLoading]   = useState(false);
   const [selected, setSelected]     = useState(new Set()); // item_ids selected
   const [qtys, setQtys]             = useState({});        // item_id → qty string
@@ -216,8 +222,10 @@ export default function StockLevelsPage() {
   }
 
   async function submitAdjust() {
+    if (adjQty === "" || adjQty === null || adjQty === undefined) { toast.error("يرجى إدخال الكمية"); return; }
     const qty = Number(adjQty);
     if (isNaN(qty)) { toast.error("كمية غير صحيحة"); return; }
+    if (adjMode === "delta" && qty === 0) { toast.error("يرجى إدخال قيمة غير صفرية للفرق"); return; }
     const warehouseId = adjustRow.warehouse_id ?? (adjWarehouseId ? Number(adjWarehouseId) : null);
     if (!warehouseId) { toast.error("يرجى تحديد المخزن"); return; }
     setAdjLoading(true);
@@ -242,6 +250,20 @@ export default function StockLevelsPage() {
       .catch(() => toast.error("تعذر تحميل أصناف المخزن"))
       .finally(() => setTxLoading(false));
   }, [fromWH]);
+
+  // Load destination warehouse stock
+  useEffect(() => {
+    if (!toWH) { setDestStock({}); return; }
+    api.get("/api/stock/levels", { params: { warehouse_id: toWH } })
+      .then((r) => {
+        const map = {};
+        (r.data.data || []).forEach((item) => {
+          map[item.item_id] = item.quantity || 0;
+        });
+        setDestStock(map);
+      })
+      .catch(() => setDestStock({}));
+  }, [toWH]);
 
   useEffect(() => { loadTxItems(); setSelected(new Set()); setQtys({}); setTxPage(1); }, [loadTxItems]);
   useEffect(() => { setTxPage(1); }, [txSearch]);
@@ -471,7 +493,7 @@ export default function StockLevelsPage() {
       </div>
 
       {/* Main Workspace Wrapper */}
-      <div className="flex flex-col rounded-sm border border-slate-200 bg-white shadow-sm overflow-hidden min-h-[60vh]">
+      <div className="flex flex-col rounded-sm border border-slate-200 bg-white shadow-sm min-h-[60vh]">
         
         {/* Tabs */}
         <div className="flex items-center bg-slate-50 border-b border-slate-200">
@@ -545,7 +567,7 @@ export default function StockLevelsPage() {
                 columns={[
                   {
                     id: "code", header: "الكود", width: 100, sortable: true, headerClass: "text-center", cellClass: "text-center font-mono text-[12px] font-black text-slate-500 border-l border-slate-100",
-                    render: (r) => r.code || r.item_code || "-"
+                    render: (r) => r.code || "—"
                   },
                   {
                     id: "item_name", header: "الصنف", width: 220, sortable: true, cellClass: "font-black text-[13px] text-slate-800 border-l border-slate-100 px-3", headerClass: "text-right px-3",
@@ -577,6 +599,18 @@ export default function StockLevelsPage() {
                     render: (r) => <StatusBadge qty={r.quantity} min={r.min_stock_qty} />
                   },
                   {
+                    id: "margin_pct", header: "هامش الربح", width: 100, sortable: true, headerClass: "text-center", cellClass: "text-center border-l border-slate-100",
+                    render: (r) => {
+                      if (r.margin_pct == null) return <span className="text-slate-300 text-[11px]">—</span>;
+                      const bad = r.below_margin;
+                      return (
+                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-black ${bad ? "bg-rose-50 text-rose-600 border border-rose-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"}`}>
+                          {bad && <AlertTriangle className="h-3 w-3" />}{r.margin_pct}%
+                        </span>
+                      );
+                    }
+                  },
+                  {
                     id: "actions", header: "", width: 80, sortable: false, headerClass: "text-center", cellClass: "text-center px-2 py-0 border-l-0",
                     render: (r) => (
                       <button onClick={() => { setAdjustRow({ item_id: r.item_id, warehouse_id: r.warehouse_id, name: r.item_name, current: r.quantity }); setAdjQty(""); setAdjMode("delta"); setAdjReason(""); setAdjWH(""); }}
@@ -591,7 +625,7 @@ export default function StockLevelsPage() {
                   if (!isAdj) return null;
                   return (
                     <tr className="bg-sky-50 shadow-inner">
-                      <td colSpan={8} className="px-6 py-5 border-b-2 border-sky-100">
+                      <td colSpan={9} className="px-6 py-5 border-b-2 border-sky-100">
                         <div className="flex flex-wrap items-end gap-x-6 gap-y-4">
                           <div className="flex flex-col gap-1 w-48">
                             <span className="text-[10px] font-black uppercase text-sky-600/70">الصنف المستهدف</span>
@@ -684,7 +718,7 @@ export default function StockLevelsPage() {
             <div className="flex flex-wrap items-end gap-x-6 gap-y-4 px-6 py-4 border-b border-slate-200 bg-white">
               <div className="w-52 space-y-1.5 relative group">
                 <span className="text-[10px] font-black tracking-widest uppercase text-slate-500">من مخزن (المصدر)</span>
-                <select value={fromWH} onChange={(e) => setFromWH(e.target.value)}
+                <select value={fromWH} onChange={(e) => { setFromWH(e.target.value); setToWH(""); }}
                   className="w-full appearance-none rounded-sm border border-slate-200 bg-slate-50/50 py-2 pl-8 pr-3 text-[13px] font-black text-slate-800 outline-none focus:border-slate-800 focus:bg-white shadow-sm transition-colors">
                   <option value="">اختر المخزن المصدر...</option>
                   {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
@@ -751,7 +785,7 @@ export default function StockLevelsPage() {
                  <span className="text-[14px] font-black uppercase text-slate-500 tracking-widest">يرجى تحديد المخزن المصدر لتحميل البضاعة</span>
               </div>
             ) : (
-              <>
+              <div className="flex flex-col">
                 {/* Search & Actions */}
                 <div className="flex items-center justify-between px-6 py-3 bg-slate-50/70 border-b border-slate-200">
                   <div className="relative w-72 group">
@@ -772,145 +806,157 @@ export default function StockLevelsPage() {
                 </div>
 
                 {/* Table */}
-                {/* Table */}
-                <div className="flex flex-col flex-1 h-[50vh] min-h-[400px]">
-                  <DataGrid
-                    data={pageTxItems}
-                    rowKey={(r) => r.item_id}
-                    emptyMessage="لا توجد أصناف في المصدر"
-                    className="border-0"
-                    containerClass="flex-1 overflow-x-auto overflow-y-auto bg-white scrollbar-thin scrollbar-thumb-slate-300 scrollbar-track-transparent min-h-0"
-                    sortConfig={{ key: null, dir: "asc" }} 
-                    onSort={() => {}}
-                    rowClass={(item) => {
-                      const unavailable = item.quantity === 0;
-                      const isSel       = selected.has(item.item_id);
-                      const validation  = itemValidation[item.item_id];
-                      let rowBg = "hover:!bg-slate-50/50";
-                      if (unavailable) rowBg = "!bg-slate-50/80 opacity-60 grayscale";
-                      else if (validation === "over_qty") rowBg = "!bg-rose-50/60";
-                      else if (validation === "no_qty") rowBg = "!bg-amber-50/60";
-                      else if (isSel) rowBg = "!bg-sky-50/40";
-                      return rowBg;
-                    }}
-                    columns={[
-                      {
-                        id: "select",
-                        width: 40,
-                        sortable: false,
-                        headerClass: "text-center shrink-0 border-l border-slate-100",
-                        cellClass: "text-center px-0 border-l border-slate-100",
-                        header: (
-                           <input type="checkbox"
-                             checked={pageTxItems.filter((i) => i.quantity > 0).every((i) => selected.has(i.item_id)) && pageTxItems.some((i) => i.quantity > 0)}
-                             ref={(el) => { if (el) el.indeterminate = somePageSel && !allPageSel; }}
-                             onChange={toggleTxAllAvailable} 
-                             className="h-3.5 w-3.5 cursor-pointer rounded-sm accent-slate-800" 
-                           />
-                        ),
-                        render: (item) => {
-                          const unavailable = item.quantity === 0;
-                          return (
-                            <input type="checkbox" 
-                              checked={selected.has(item.item_id)} 
-                              disabled={unavailable} 
-                              onChange={() => !unavailable && toggleTxRow(item.item_id)}
-                              className="h-3.5 w-3.5 cursor-pointer rounded-sm accent-slate-800 disabled:opacity-30" 
-                            />
-                          );
-                        }
-                      },
-                      {
-                        id: "code", header: "الكود", width: 100, sortable: false, headerClass: "text-center", cellClass: "text-center font-mono text-[12px] font-black text-slate-500 border-l border-slate-100",
-                        render: (r) => r.code || r.item_code || "-"
-                      },
-                      {
-                        id: "name",
-                        header: "الصنف",
-                        width: 250,
-                        sortable: false,
-                        headerClass: "text-right px-4",
-                        cellClass: "px-4 border-l border-slate-100",
-                        render: (item) => (
-                           <div className="flex flex-col">
-                             <p className="font-black text-[13px] text-slate-800 drop-shadow-sm leading-tight">{item.item_name}</p>
-                             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                                {item.barcode && <span className="font-mono text-[10px] text-slate-400 bg-slate-100 px-1 rounded-sm">{item.barcode}</span>}
-                                <span className="text-[10px] font-bold text-slate-400">{item.category_name || "—"}</span>
-                             </div>
-                           </div>
-                        )
-                      },
-                      {
-                        id: "stock",
-                        header: "رصيد متوفر",
-                        width: 140,
-                        sortable: false,
-                        headerClass: "text-right px-4",
-                        cellClass: "px-4 border-l border-slate-100 text-right",
-                        render: (item) => (
-                           <div className="flex flex-col items-end gap-1">
-                              <span className={`font-mono font-black text-[14px] ${item.quantity === 0 ? "text-rose-500" : item.quantity <= (item.min_stock_qty ?? 0) ? "text-amber-600" : "text-slate-700"}`}>
-                                {item.quantity}
-                              </span>
-                              <StatusBadge qty={item.quantity} min={item.min_stock_qty} />
-                           </div>
-                        )
-                      },
-                      {
-                        id: "qty",
-                        header: "كمية النقل",
-                        width: 160,
-                        sortable: false,
-                        headerClass: "text-center px-4 bg-sky-50/50 text-sky-600",
-                        cellClass: "px-2 border-l border-slate-100 text-center bg-sky-50/30",
-                        render: (item) => {
-                          const isSel = selected.has(item.item_id);
-                          const unavailable = item.quantity === 0;
-                          const validation = itemValidation[item.item_id];
-                          if (isSel && !unavailable) {
+                <div className="border border-slate-200 rounded-sm scrollbar-thin" style={{ maxHeight: '55vh', overflow: 'auto' }}>
+                  <div className="pb-4">
+                  <table className="w-full text-sm border-collapse min-w-max">
+                    {/* Grouped Header Row */}
+                    <thead className="sticky top-0 z-10">
+                      <tr className="bg-slate-100 border-b border-slate-300">
+                        <th colSpan="1" className="w-[40px] bg-slate-50" />
+                        <th colSpan="1" className="w-[100px] border-l border-slate-200 bg-slate-50" />
+                        <th colSpan="1" className="w-[220px] border-l border-slate-200 bg-slate-50" />
+                        <th colSpan="1" className="border-l border-slate-200 bg-blue-100 px-2 py-2">
+                          <div className="text-[10px] font-black text-blue-700 uppercase tracking-wider text-center">
+                            📦 {fromWarehouse?.name || "المصدر"}
+                          </div>
+                        </th>
+                        <th colSpan="1" className="w-[130px] border-l border-slate-200 bg-amber-100 px-2 py-2">
+                          <div className="text-[10px] font-black text-amber-700 uppercase tracking-wider text-center">
+                            ↔️ النقل
+                          </div>
+                        </th>
+                        <th colSpan="2" className="border-l border-slate-200 bg-emerald-100 px-2 py-2">
+                          <div className="text-[10px] font-black text-emerald-700 uppercase tracking-wider text-center">
+                            📥 {toWarehouse?.name || "الوجهة"}
+                          </div>
+                        </th>
+                      </tr>
+                      {/* Column Headers Row */}
+                      <tr className="bg-slate-50/90 text-slate-500 border-b border-slate-200">
+                        <th className="w-[40px] py-2 text-center">
+                          <input type="checkbox"
+                            checked={pageTxItems.filter((i) => i.quantity > 0).every((i) => selected.has(i.item_id)) && pageTxItems.some((i) => i.quantity > 0)}
+                            ref={(el) => { if (el) el.indeterminate = somePageSel && !allPageSel; }}
+                            onChange={toggleTxAllAvailable} 
+                            className="h-3.5 w-3.5 cursor-pointer rounded-sm accent-slate-800" 
+                          />
+                        </th>
+                        <th className="w-[100px] py-2 text-center text-[10px] font-black border-l border-slate-100">الكود</th>
+                        <th className="w-[220px] py-2 text-right px-3 text-[10px] font-black border-l border-slate-100">الصنف</th>
+                        <th className="py-2 text-center text-[10px] font-black text-blue-600 border-l border-slate-100 bg-blue-50/30 w-[100px]">الرصيد</th>
+                        <th className="py-2 text-center text-[10px] font-black text-amber-700 border-l border-slate-100 bg-amber-50/30 w-[130px]">الكمية</th>
+                        <th className="py-2 text-center text-[10px] font-black text-emerald-600 border-l border-slate-100 bg-emerald-50/30 w-[80px]">قبل</th>
+                        <th className="py-2 text-center text-[10px] font-black text-emerald-600 bg-emerald-50/30 w-[80px]">بعد</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                        {pageTxItems.length === 0 ? (
+                          <tr>
+                            <td colSpan="7" className="py-16 text-center">
+                              <div className="flex flex-col items-center opacity-40">
+                                <Package className="h-12 w-12 text-slate-400 mb-2" />
+                                <span className="text-[13px] font-black text-slate-500">لا توجد أصناف في المصدر</span>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : (
+                          pageTxItems.map((item) => {
+                            const unavailable = item.quantity === 0;
+                            const isSel = selected.has(item.item_id);
+                            const validation = itemValidation[item.item_id];
+                            const txQty = Number(qtys[item.item_id] || 0);
+                            const destBefore = destStock[item.item_id] || 0;
+                            const destAfter = isSel && txQty > 0 ? destBefore + txQty : null;
+                            
+                            let rowBg = "hover:bg-slate-50/50";
+                            if (unavailable) rowBg = "bg-slate-50/80 opacity-60 grayscale";
+                            else if (validation === "over_qty") rowBg = "bg-rose-50/60";
+                            else if (validation === "no_qty") rowBg = "bg-amber-50/60";
+                            else if (isSel) rowBg = "bg-sky-50/40";
+                            
                             return (
-                               <div className="relative max-w-[120px] mx-auto group-focus-within/input:z-10" onClick={(e) => e.stopPropagation()}>
-                                  <input type="number" min="1" max={item.quantity} step="1" 
-                                    value={qtys[item.item_id] || ""} 
-                                    onChange={(e) => setItemQty(item.item_id, e.target.value)}
-                                    placeholder="حدد..."
-                                    className={`w-full rounded-sm border py-1.5 px-2 text-center font-mono text-[13px] font-black outline-none shadow-sm transition-all focus:scale-105 focus:-translate-y-0.5 focus:shadow-md
-                                      ${validation === "over_qty" ? "border-rose-400 bg-rose-50 text-rose-800 focus:border-rose-600 focus:ring-4 focus:ring-rose-500/10"
-                                      : validation === "no_qty" ? "border-amber-400 bg-amber-50 text-amber-900 focus:border-amber-600 focus:ring-4 focus:ring-amber-500/10"
-                                      : "border-sky-300 bg-white text-sky-900 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/10"}`}
+                              <tr 
+                                key={item.item_id}
+                                onClick={() => !unavailable && toggleTxRow(item.item_id)}
+                                className={`group border-b border-slate-100 transition-colors cursor-pointer ${rowBg}`}
+                              >
+                                <td className="py-2 text-center w-[40px]">
+                                  <input type="checkbox" 
+                                    checked={isSel} 
+                                    disabled={unavailable} 
+                                    onChange={() => !unavailable && toggleTxRow(item.item_id)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="h-3.5 w-3.5 cursor-pointer rounded-sm accent-slate-800 disabled:opacity-30" 
                                   />
-                                  {validation === "over_qty" && <span className="absolute -bottom-4 left-0 right-0 text-center text-[10px] font-bold text-rose-500 truncate whitespace-nowrap">الحد: {item.quantity}</span>}
-                                  {validation === "no_qty" && <span className="absolute -bottom-4 left-0 right-0 text-center text-[10px] font-bold text-amber-600">أدخل رقم</span>}
-                               </div>
+                                </td>
+                                <td className="py-2 text-center font-mono text-[11px] font-black text-slate-500 border-l border-slate-100 w-[100px]">
+                                  {item.code || item.item_code || "—"}
+                                </td>
+                                <td className="py-2 px-3 border-l border-slate-100 w-[220px]">
+                                  <div className="flex flex-col">
+                                    <p className="font-black text-[12px] text-slate-800 leading-tight">{item.item_name}</p>
+                                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                                      {item.barcode && <span className="font-mono text-[9px] text-slate-400 bg-slate-100 px-1 rounded-sm">{item.barcode}</span>}
+                                      <span className="text-[9px] font-bold text-slate-400">{item.category_name || "—"}</span>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="py-2 px-2 text-center border-l border-slate-100 bg-blue-50/10 w-[100px]">
+                                  <span className={`font-mono font-black text-[13px] ${item.quantity === 0 ? "text-rose-500" : item.quantity <= (item.min_stock_qty ?? 0) ? "text-amber-600" : "text-blue-700"}`}>
+                                    {item.quantity}
+                                  </span>
+                                </td>
+                                <td className="py-2 px-1 text-center border-l border-slate-100 bg-amber-50/20 w-[130px]">
+                                  {isSel && !unavailable ? (
+                                    <div className="flex items-center justify-center gap-1" onClick={(e) => e.stopPropagation()}>
+                                      <button 
+                                        onClick={() => setItemQty(item.item_id, String(Math.max(1, txQty - 1)))}
+                                        className="w-6 h-6 flex items-center justify-center rounded bg-slate-200 hover:bg-slate-300 text-slate-700 font-black text-[14px] transition-colors"
+                                      >
+                                        −
+                                      </button>
+                                      <input type="number" min="1" max={item.quantity} step="1" 
+                                        value={qtys[item.item_id] || ""} 
+                                        onChange={(e) => setItemQty(item.item_id, e.target.value)}
+                                        className={`w-14 rounded border py-1 text-center font-mono text-[12px] font-black outline-none
+                                          ${validation === "over_qty" ? "border-rose-400 bg-rose-50 text-rose-800"
+                                          : validation === "no_qty" ? "border-amber-400 bg-amber-50 text-amber-900"
+                                          : "border-amber-300 bg-white text-amber-900"}`}
+                                      />
+                                      <button 
+                                        onClick={() => setItemQty(item.item_id, String(item.quantity))}
+                                        className="w-6 h-6 flex items-center justify-center rounded bg-amber-200 hover:bg-amber-300 text-amber-800 font-black text-[14px] transition-colors"
+                                        title="تحديد الكمية المتاحة كاملة"
+                                      >
+                                        +
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <span className="text-[10px] font-bold text-slate-300">انقر لتحديد</span>
+                                  )}
+                                </td>
+                                <td className="py-2 px-2 text-center border-l border-slate-100 bg-emerald-50/10 w-[80px]">
+                                  <span className="font-mono font-black text-[12px] text-slate-600">{destBefore}</span>
+                                </td>
+                                <td className="py-2 px-2 text-center bg-emerald-50/10 w-[80px]">
+                                  {destAfter !== null ? (
+                                    <div className="flex flex-col items-center">
+                                      <span className="font-mono font-black text-[13px] text-emerald-700">
+                                        {destAfter}
+                                      </span>
+                                      <span className="text-[8px] font-bold text-emerald-600">+{txQty}</span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-slate-300 font-mono text-[12px]">—</span>
+                                  )}
+                                </td>
+                              </tr>
                             );
-                          }
-                          return <span className="text-[11px] font-bold text-slate-300 pointer-events-none">أشر للتحديد</span>;
-                        }
-                      },
-                      {
-                        id: "after",
-                        header: "الرصيد بعد التنفيذ",
-                        width: 140,
-                        sortable: false,
-                        headerClass: "text-left px-4",
-                        cellClass: "px-4 text-left",
-                        render: (item) => {
-                          const txQty = Number(qtys[item.item_id] || 0);
-                          const isSel = selected.has(item.item_id);
-                          const after = isSel && txQty > 0 ? item.quantity - txQty : null;
-                          if (after === null) return <span className="text-slate-200">—</span>;
-                          let afterColor = "text-slate-700";
-                          if (after < 0) afterColor = "text-rose-600 bg-rose-50 px-2 py-0.5 rounded";
-                          else if (after === 0) afterColor = "text-amber-600 bg-amber-50 px-2 py-0.5 rounded";
-                          else if (after <= (item.min_stock_qty ?? 0)) afterColor = "text-amber-700 bg-amber-100 px-2 py-0.5 rounded";
-                          else afterColor = "text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded";
-                          
-                          return <span className={`font-mono font-black text-[13px] ${afterColor}`}>{after}</span>;
-                        }
-                      }
-                    ]}
-                  />
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
 
                 {/* Pagination */}
@@ -930,46 +976,32 @@ export default function StockLevelsPage() {
                     </div>
                   </div>
                 )}
-              </>
-            )}
-
-            {/* STICKY ACTION BAR */}
-            {selected.size > 0 && (
-              <div className="fixed bottom-0 left-0 right-0 z-50 bg-slate-900 border-t border-slate-800 shadow-[0_-10px_40px_rgba(0,0,0,0.3)] animate-in slide-in-from-bottom-5">
-                 <div className="flex items-center justify-between px-6 py-4 mr-[280px]">
-                    <div className="flex items-center gap-6">
-                       <div className="flex items-center gap-3">
-                          <div className={`flex h-10 w-10 items-center justify-center rounded ${errorItems.length > 0 ? "bg-rose-900/50" : "bg-sky-900/50"}`}>
-                             {errorItems.length > 0 ? <AlertTriangle className="h-5 w-5 text-rose-400" /> : <ArrowLeftRight className="h-5 w-5 text-sky-400" />}
-                          </div>
-                          <div className="flex flex-col">
-                             {errorItems.length > 0 ? (
-                                <>
-                                  <span className="text-[14px] font-black text-rose-400">{errorItems.length} عناصر بها أخطاء مرجعية</span>
-                                  <span className="text-[11px] font-bold text-slate-400">يرجى إصلاح الكميات الخاطئة حتى تتمكن من إتمام عملية النقل</span>
-                                </>
-                             ) : (
-                                <>
-                                  <span className="text-[14px] font-black text-white">{validItems.length} سطر مخزني صالح للنقل</span>
-                                  <span className="text-[11px] font-bold text-slate-400 drop-shadow-sm">{fromWarehouse?.name} &larr; {toWarehouse?.name || "يرجى تحديد مخزن الوجهة"}</span>
-                                </>
-                             )}
-                          </div>
-                       </div>
-                       <button onClick={() => { setSelected(new Set()); setQtys({}); }} className="text-[12px] font-bold text-slate-400 hover:text-white transition-colors underline underline-offset-4">تفريغ التحديد</button>
-                    </div>
-                    
-                    <button onClick={handleTransferSubmit} disabled={txSubmitting || !canTransfer}
-                       className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-white px-8 py-3 rounded-sm font-black text-[14px] shadow-lg disabled:opacity-50 disabled:bg-slate-700 disabled:text-slate-400 disabled:cursor-not-allowed transition-colors active:scale-95">
-                       <CheckCircle2 className="h-5 w-5" />
-                       {txSubmitting ? "جاري ترحيل الأرصدة..." : "ترحيل ونقل الأرصدة المحددة"}
-                    </button>
-                 </div>
               </div>
             )}
-            
-            {/* Height buffer for sticky action bar */}
-            {selected.size > 0 && <div className="h-20" />}
+
+            {/* Action Section */}
+            {fromWH && toWH && selected.size > 0 && (
+              <div className="border-t border-slate-200 bg-white px-6 py-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <span className={`px-3 py-1.5 rounded-sm text-[12px] font-black ${errorItems.length > 0 ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"}`}>
+                      {errorItems.length > 0 ? `${errorItems.length} أخطاء` : `${validItems.length} صنف جاهز`}
+                    </span>
+                    <span className="text-[12px] font-bold text-slate-500">
+                      {fromWarehouse?.name} ← {toWarehouse?.name}
+                    </span>
+                    <button onClick={() => { setSelected(new Set()); setQtys({}); }} className="text-[11px] font-bold text-slate-400 hover:text-rose-600 underline">
+                      مسح التحديد
+                    </button>
+                  </div>
+                  <button onClick={handleTransferSubmit} disabled={txSubmitting || !canTransfer}
+                    className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-sm font-black text-[13px] shadow-sm disabled:opacity-50 disabled:bg-slate-400 disabled:cursor-not-allowed transition-colors">
+                    <CheckCircle2 className="h-4 w-4" />
+                    {txSubmitting ? "جاري التحويل..." : "تنفيذ التحويل"}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1019,7 +1051,7 @@ export default function StockLevelsPage() {
                   },
                   {
                     id: "code", header: "الكود", width: 100, sortable: false, headerClass: "text-center", cellClass: "text-center font-mono text-[12px] font-black text-slate-500 border-l border-slate-100",
-                    render: (mv) => mv.item_code || "-"
+                    render: (mv) => mv.item_code || mv.code || "—"
                   },
                   {
                     id: "item_name", header: "الصنف", width: 220, sortable: true,
@@ -1067,6 +1099,11 @@ export default function StockLevelsPage() {
                     id: "notes", header: "الملاحظات", width: 180, sortable: true,
                     headerClass: "text-right px-3", cellClass: "text-right px-3 text-[11px] font-bold text-slate-500 truncate border-l border-slate-100",
                     render: (mv) => <span title={mv.notes}>{mv.notes || "—"}</span>
+                  },
+                  {
+                    id: "created_by", header: "المستخدم", width: 100, sortable: false,
+                    headerClass: "text-center", cellClass: "text-center text-[11px] font-bold text-slate-600 border-l border-slate-100",
+                    render: (mv) => mv.created_by_name || "—"
                   },
                   {
                     id: "actions", header: "الإجراءات", width: 220, sortable: false,

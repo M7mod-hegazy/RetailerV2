@@ -14,6 +14,7 @@ import {
   Search, 
   Shapes, 
   Trash2, 
+  Upload,
   X,
   Package,
   Activity,
@@ -38,6 +39,9 @@ import Modal from "../../components/ui/Modal";
 import ImageUpload from "../../components/ui/ImageUpload";
 import { usePageTour } from "../../hooks/usePageTour";
 import Highlight from "../../components/ui/Highlight";
+import ItemExportModal from "./ItemExportModal";
+import ItemImportModal from "./ItemImportModal";
+import ItemSmartUpdateModal from "./ItemSmartUpdateModal";
 
 // ─── pure helpers ─────────────────────────────────────────────────────────────
 
@@ -45,15 +49,17 @@ function parseImageUrls(text) {
   return String(text || "").split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
 }
 
-function marginInfo(purchase, sale) {
+function marginInfo(purchase, sale, threshold = 15) {
   const p = Number(purchase || 0);
   const s = Number(sale || 0);
   if (!p || !s) return null;
   const pct = ((s - p) / p) * 100;
+  const belowThreshold = pct < threshold;
   return {
     pct,
     label: `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`,
-    cls: pct >= 15 ? "text-emerald-500 bg-emerald-50" : pct >= 5 ? "text-amber-500 bg-amber-50" : "text-rose-500 bg-rose-50",
+    cls: !belowThreshold ? "text-emerald-500 bg-emerald-50" : pct >= 5 ? "text-amber-500 bg-amber-50" : "text-rose-500 bg-rose-50",
+    belowThreshold,
   };
 }
 
@@ -87,7 +93,7 @@ function exportCsv(items, categoryName) {
 
 
 const EMPTY_DRAFT = {
-  name: "", barcode: "", purchase_price: "", sale_price: "",
+  code: "", name: "", barcode: "", purchase_price: "", sale_price: "",
   wholesale_price: "", unit_id: "", min_stock_qty: "", image_urls_text: "",
 };
 
@@ -351,6 +357,7 @@ export default function ItemsListPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const deepLinkQuery = searchParams.get("q") || "";
 
+  const [globalMinMargin, setGlobalMinMargin] = useState(15);
   const [categories, setCategories]   = useState([]);
   const [units, setUnits]             = useState([]);
   const [items, setItems]             = useState([]);
@@ -363,7 +370,11 @@ export default function ItemsListPage() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [newRow, setNewRow]           = useState(EMPTY_DRAFT);
   const [showDeleted, setShowDeleted]     = useState(false);
+  const [showSkuGaps, setShowSkuGaps]     = useState(false);
   const [newCategoryOpen, setNewCategoryOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [smartUpdateOpen, setSmartUpdateOpen] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   // sort
   const [sortConfig, setSortConfig]   = useState({ key: null, dir: "asc" });
@@ -374,6 +385,8 @@ export default function ItemsListPage() {
   // drag
   const [dragOverId, setDragOverId]   = useState(null);
   const dragItemId                    = useRef(null);
+  // profit display mode: "number" or "percentage"
+  const [profitMode, setProfitMode]   = useState(() => localStorage.getItem("items_profit_mode") || "percentage");
 
   // Column resizing state & handlers
   const [colWidths, setColWidths] = useState({
@@ -382,8 +395,8 @@ export default function ItemsListPage() {
     unit: 100,
     barcode: 130,
     purchase_price: 100,
-    sale_price: 100,
-    wholesale_price: 100,
+    sale_price: 110,
+    wholesale_price: 110,
     min_stock_qty: 80,
     margin: 70,
     stock_quantity: 80,
@@ -472,6 +485,13 @@ export default function ItemsListPage() {
   }, []);
 
   useEffect(() => {
+    api.get("/api/settings").then(r => {
+      const v = r.data?.data?.min_margin_percent;
+      if (v != null) setGlobalMinMargin(Number(v));
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
     setLoading(true);
     Promise.all([loadCategories(), loadUnits()])
       .then(([cats, unitRows]) => {
@@ -537,6 +557,36 @@ export default function ItemsListPage() {
     return { rows: list.slice(0, ROW_LIMIT), total: list.length };
   }, [items, sortConfig]);
 
+  const skuGapRows = useMemo(() => {
+    if (!selectedCategory?.sku_prefix) return [];
+    const prefix = String(selectedCategory.sku_prefix);
+    const used = new Set();
+    let max = 0;
+    items.forEach((item) => {
+      const match = String(item.code || "").match(/^(\d+)\.(\d+)$/);
+      if (!match || match[1] !== prefix) return;
+      const sequence = Number(match[2]);
+      if (!Number.isInteger(sequence) || sequence <= 0) return;
+      used.add(sequence);
+      if (sequence > max) max = sequence;
+    });
+    const gaps = [];
+    for (let sequence = 1; sequence < max; sequence += 1) {
+      if (!used.has(sequence)) gaps.push({ __gap: true, id: `gap-${prefix}.${sequence}`, code: `${prefix}.${sequence}` });
+    }
+    return gaps;
+  }, [items, selectedCategory]);
+
+  const tableRows = useMemo(() => {
+    if (!showSkuGaps || !skuGapRows.length) return displayItems.rows;
+    return [...displayItems.rows, ...skuGapRows].sort((a, b) => String(a.code || "").localeCompare(String(b.code || ""), "ar", { numeric: true }));
+  }, [displayItems.rows, showSkuGaps, skuGapRows]);
+
+  const selectedItemsForExport = useMemo(
+    () => items.filter((item) => selectedIds.has(item.id)),
+    [items, selectedIds],
+  );
+
   function toggleSort(key) {
     setSortConfig((prev) =>
       prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" },
@@ -559,13 +609,39 @@ export default function ItemsListPage() {
     localStorage.setItem("items_density", next);
   }
 
+  function toggleProfitMode() {
+    const next = profitMode === "percentage" ? "number" : "percentage";
+    setProfitMode(next);
+    localStorage.setItem("items_profit_mode", next);
+  }
+
+  function profitInfo(purchase, sale) {
+    const p = Number(purchase || 0);
+    const s = Number(sale || 0);
+    if (!p || !s) return null;
+    const profitAmount = s - p;
+    const profitPct = (profitAmount / p) * 100;
+    if (profitMode === "number") {
+      return {
+        value: profitAmount,
+        label: formatMoney(profitAmount),
+        cls: profitAmount >= 0 ? "text-emerald-600 bg-emerald-50" : "text-rose-600 bg-rose-50",
+      };
+    }
+    return {
+      value: profitPct,
+      label: `${profitPct >= 0 ? "+" : ""}${profitPct.toFixed(1)}%`,
+      cls: profitPct >= 15 ? "text-emerald-600 bg-emerald-50" : profitPct >= 5 ? "text-amber-600 bg-amber-50" : profitPct >= 0 ? "text-slate-600 bg-slate-50" : "text-rose-600 bg-rose-50",
+    };
+  }
+
   const densityIcon = { compact: Monitor, normal: Monitor, spacious: Monitor };
 
   // ── next-code preview ─────────────────────────────────────────────────────
 
   const nextCodePreview = useMemo(
-    () => selectedCategory ? `${selectedCategory.sku_prefix}.${items.length + 1}` : "—",
-    [selectedCategory, items.length],
+    () => newRow.code || (selectedCategory ? `${selectedCategory.sku_prefix}.${items.length + 1}` : "—"),
+    [newRow.code, selectedCategory, items.length],
   );
 
   // ── draft / dirty ─────────────────────────────────────────────────────────
@@ -654,7 +730,7 @@ export default function ItemsListPage() {
     if (!newRow.name.trim() || !selectedCatId) return;
     setSavingRowId("new");
     try {
-      await api.post("/api/items", { ...buildPayload(newRow, null), code: "" });
+      await api.post("/api/items", { ...buildPayload(newRow, null), code: newRow.code || "" });
       setNewRow((prev) => ({ ...EMPTY_DRAFT, unit_id: prev.unit_id }));
       nameInputRef.current?.focus();
       await loadItems(selectedCatId, search, showDeleted);
@@ -916,11 +992,25 @@ export default function ItemsListPage() {
                <Plus className="h-3.5 w-3.5" /> فئة جديدة
             </button>
             <button
-               onClick={() => exportCsv(displayItems.rows, selectedCategory?.name)}
-               className="flex h-[42px] h-[42px] items-center justify-center rounded-sm border border-slate-200 bg-white px-3 text-slate-400 hover:text-slate-800 transition-all shadow-sm"
-               title="تصدير كجدول بيانات"
+               onClick={() => setImportOpen(true)}
+               className="flex h-[42px] items-center gap-2 rounded-sm border border-emerald-200 bg-emerald-50 px-4 text-[12px] font-black text-emerald-700 hover:bg-emerald-100 transition-all shadow-sm"
+               title="استيراد من Excel"
             >
-               <Download className="h-4 w-4" />
+               <Upload className="h-4 w-4" /> استيراد
+            </button>
+            <button
+               onClick={() => setExportOpen(true)}
+               className="flex h-[42px] items-center gap-2 rounded-sm border border-sky-200 bg-sky-50 px-4 text-[12px] font-black text-sky-700 hover:bg-sky-100 transition-all shadow-sm"
+               title="تصدير Excel"
+            >
+               <Download className="h-4 w-4" /> تصدير
+            </button>
+            <button
+               onClick={() => setSmartUpdateOpen(true)}
+               className="flex h-[42px] items-center gap-2 rounded-sm border border-amber-200 bg-amber-50 px-4 text-[12px] font-black text-amber-700 hover:bg-amber-100 transition-all shadow-sm"
+               title="تحديث ذكي من Excel"
+            >
+               <RefreshCw className="h-4 w-4" /> تحديث ذكي
             </button>
          </div>
       </div>
@@ -957,9 +1047,9 @@ export default function ItemsListPage() {
             </div>
             
             <div className="flex items-center gap-3">
-               <button onClick={cycleDensity}
-                  className="flex items-center gap-2 rounded-sm border border-slate-200 bg-white px-4 py-2.5 text-[11px] font-black text-slate-500 hover:text-slate-800 hover:bg-slate-50 transition-all shadow-sm uppercase tracking-widest">
-                  <Columns className="h-3.5 w-3.5" /> العرض
+               <button onClick={() => setShowSkuGaps((prev) => !prev)}
+                  className={`flex items-center gap-2 rounded-sm border px-4 py-2.5 text-[11px] font-black transition-all shadow-sm uppercase tracking-widest ${showSkuGaps ? "border-violet-300 bg-violet-50 text-violet-700" : "border-slate-200 bg-white text-slate-500 hover:text-slate-800 hover:bg-slate-50"}`}>
+                  <Box className="h-3.5 w-3.5" /> {showSkuGaps ? "إخفاء الفراغات" : "عرض فراغات SKU"}
                </button>
                <button onClick={() => setShowDeleted((p) => !p)}
                   className={`flex items-center gap-2 rounded-sm border px-4 py-2.5 text-[11px] font-black transition-all shadow-sm uppercase tracking-widest ${
@@ -1004,8 +1094,24 @@ export default function ItemsListPage() {
                    </th>
                    <SortTh label="الباركود" sortKey="barcode" sortConfig={sortConfig} onSort={toggleSort} resizableKey="barcode" width={colWidths.barcode} onResizeStart={onResizeStart} />
                    <SortTh label="شراء" sortKey="purchase_price" sortConfig={sortConfig} onSort={toggleSort} resizableKey="purchase_price" width={colWidths.purchase_price} onResizeStart={onResizeStart} />
-                   <SortTh label="مستهلك" sortKey="sale_price" sortConfig={sortConfig} onSort={toggleSort} resizableKey="sale_price" width={colWidths.sale_price} onResizeStart={onResizeStart} />
-                   <SortTh label="جملة" sortKey="wholesale_price" sortConfig={sortConfig} onSort={toggleSort} resizableKey="wholesale_price" width={colWidths.wholesale_price} onResizeStart={onResizeStart} />
+                   <th className="relative px-2 py-3 text-right text-[10px] font-black uppercase text-slate-500" style={{width: colWidths.sale_price, minWidth: colWidths.sale_price}}>
+                     <div className="flex items-center justify-between gap-2">
+                       <span>مستهلك</span>
+                       <button onClick={toggleProfitMode} className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-black bg-indigo-100 text-indigo-600 hover:bg-indigo-200 transition-colors" title="تبديل عرض الربح">
+                         {profitMode === "percentage" ? "%" : "ج.م"}
+                       </button>
+                     </div>
+                     <div onMouseDown={(e) => onResizeStart(e, "sale_price")} className="absolute left-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-sky-400 z-10 transition-colors opacity-0 hover:opacity-100" />
+                   </th>
+                   <th className="relative px-2 py-3 text-right text-[10px] font-black uppercase text-slate-500" style={{width: colWidths.wholesale_price, minWidth: colWidths.wholesale_price}}>
+                     <div className="flex items-center justify-between gap-2">
+                       <span>جملة</span>
+                       <button onClick={toggleProfitMode} className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-black bg-indigo-100 text-indigo-600 hover:bg-indigo-200 transition-colors" title="تبديل عرض الربح">
+                         {profitMode === "percentage" ? "%" : "ج.م"}
+                       </button>
+                     </div>
+                     <div onMouseDown={(e) => onResizeStart(e, "wholesale_price")} className="absolute left-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-sky-400 z-10 transition-colors opacity-0 hover:opacity-100" />
+                   </th>
                    <th className="relative px-2 py-3 text-center text-[10px] font-black uppercase text-slate-500" style={{width: colWidths.min_stock_qty, minWidth: colWidths.min_stock_qty}}>
                      الحد الأدنى
                      <div onMouseDown={(e) => onResizeStart(e, "min_stock_qty")} className="absolute left-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-sky-400 z-10 transition-colors opacity-0 hover:opacity-100" />
@@ -1021,15 +1127,41 @@ export default function ItemsListPage() {
              <tbody className="divide-y divide-slate-50">
                {loading ? (
                  <SkeletonRows cols={COLS} />
-               ) : displayItems.rows.length === 0 ? (
+              ) : tableRows.length === 0 ? (
                  <tr><td colSpan={COLS} className="py-24 text-center text-[13px] font-black text-slate-300 uppercase tracking-widest animate-pulse">لا يوجد بيانات لعرضها في هذه الفئة</td></tr>
                ) : (
-                 displayItems.rows.map((item) => {
+                 tableRows.map((item) => {
+                   if (item.__gap) {
+                     return (
+                       <tr key={item.id} className="bg-violet-50/60">
+                         <td colSpan={3} className="px-3 py-2 text-center text-[10px] font-black text-violet-500">فراغ SKU</td>
+                         <td className="px-4 py-2 border-l border-violet-100">
+                           <span className="font-mono text-[12px] font-black text-violet-700">{item.code}</span>
+                         </td>
+                         <td colSpan={9} className="px-4 py-2 text-[11px] font-bold text-violet-700">
+                           هذا الرقم فارغ. لا يتم إنشاء صنف هنا إلا بعد اختيار الرقم وكتابة بيانات الصف ثم الضغط على إضافة.
+                         </td>
+                         <td className="px-4 py-2 text-center">
+                           <button
+                             type="button"
+                             onClick={() => {
+                               setNewRow((prev) => ({ ...prev, code: item.code }));
+                               nameInputRef.current?.focus();
+                             }}
+                             className="rounded-sm bg-violet-700 px-3 py-2 text-[11px] font-black text-white"
+                           >
+                             استخدام هذا الرقم
+                           </button>
+                         </td>
+                       </tr>
+                     );
+                   }
                    const d = draftById[item.id] || {};
                    const isDirty = dirtyRows.has(item.id);
                    const isSelected = selectedIds.has(item.id);
                    const isDeleted = !!item.deleted_at;
-                   const margin = marginInfo(d.purchase_price, d.sale_price);
+                   const itemThreshold = item.min_margin_percent != null ? item.min_margin_percent : globalMinMargin;
+                   const margin = marginInfo(d.purchase_price, d.sale_price, itemThreshold);
                    const stock = stockBadge(item.stock_quantity, d.min_stock_qty);
                    const isDragTarget = dragOverId === item.id;
 
@@ -1103,15 +1235,27 @@ export default function ItemsListPage() {
                                <CalcPopover purchasePrice={d.purchase_price} onApply={(val) => { updateDraft(item.id, "sale_price", val); setCalcAnchor(null); }} />
                              </div>
                           )}
+                          {(() => {
+                            const profit = profitInfo(d.purchase_price, d.sale_price);
+                            return profit && <div className={`text-center mt-0.5 text-[9px] font-black ${profit.cls} rounded px-1`}>{profit.label}</div>;
+                          })()}
                        </td>
                        <td className="px-3 py-1 border-l border-slate-100">
                           <Cell type="number" value={d.wholesale_price} onChange={(e) => updateDraft(item.id, "wholesale_price", e.target.value)} dirty={isDirty} className="text-left font-black text-blue-800" />
+                          {(() => {
+                            const profit = profitInfo(d.purchase_price, d.wholesale_price);
+                            return profit && <div className={`text-center mt-0.5 text-[9px] font-black ${profit.cls} rounded px-1`}>{profit.label}</div>;
+                          })()}
                        </td>
                        <td className="px-3 py-1 border-l border-slate-100">
                           <Cell type="number" value={d.min_stock_qty} onChange={(e) => updateDraft(item.id, "min_stock_qty", e.target.value)} dirty={isDirty} className="text-left" />
                        </td>
                        <td className="px-2 py-1 text-center border-l border-slate-100">
-                          {margin && <span className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-black ${margin.cls} border border-transparent`}>{margin.label}</span>}
+                          {margin && (
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black ${margin.cls} border border-transparent`}>
+                              {margin.belowThreshold && <AlertTriangle className="h-3 w-3" />}{margin.label}
+                            </span>
+                          )}
                        </td>
                        <td className="px-2 py-1 text-center border-l border-slate-100">
                           <span className={`inline-block min-w-[36px] px-2 py-1 rounded-md text-[11px] font-black shadow-sm ${stock.cls}`}>{stock.label}</span>
@@ -1166,7 +1310,12 @@ export default function ItemsListPage() {
                   <tr className="bg-white">
                      <td colSpan="3" className="px-2 text-[10px] font-black text-slate-400 uppercase text-center border-l border-slate-100">+ جديد</td>
                      <td className="px-2">
-                        <span className="font-mono text-[11px] font-black text-slate-400 opacity-60 tracking-tighter">{nextCodePreview}</span>
+                        <div className="flex items-center justify-center gap-1">
+                          <span className={`font-mono text-[11px] font-black tracking-tighter ${newRow.code ? "text-violet-700" : "text-slate-400 opacity-60"}`}>{nextCodePreview}</span>
+                          {newRow.code ? (
+                            <button type="button" onClick={() => setNewRow((prev) => ({ ...prev, code: "" }))} className="rounded bg-violet-100 px-1 text-[10px] font-black text-violet-700">آخر</button>
+                          ) : null}
+                        </div>
                      </td>
                      <td className="px-4 py-3">
                         <Cell value={newRow.name} onChange={(e) => setNewRow({ ...newRow, name: e.target.value })} 
@@ -1183,9 +1332,17 @@ export default function ItemsListPage() {
                      </td>
                      <td className="px-3 py-2">
                         <Cell type="number" value={newRow.sale_price} onChange={(e) => setNewRow({ ...newRow, sale_price: e.target.value })} placeholder="المستهلك" className="text-emerald-700" />
+                        {(() => {
+                          const profit = profitInfo(newRow.purchase_price, newRow.sale_price);
+                          return profit && <div className={`text-center mt-0.5 text-[9px] font-black ${profit.cls} rounded px-1`}>{profit.label}</div>;
+                        })()}
                      </td>
                      <td className="px-3 py-2">
                         <Cell type="number" value={newRow.wholesale_price} onChange={(e) => setNewRow({ ...newRow, wholesale_price: e.target.value })} placeholder="الجملة" className="text-blue-700" />
+                        {(() => {
+                          const profit = profitInfo(newRow.purchase_price, newRow.wholesale_price);
+                          return profit && <div className={`text-center mt-0.5 text-[9px] font-black ${profit.cls} rounded px-1`}>{profit.label}</div>;
+                        })()}
                      </td>
                      <td className="px-3 py-2">
                         <Cell type="number" value={newRow.min_stock_qty} onChange={(e) => setNewRow({ ...newRow, min_stock_qty: e.target.value })} placeholder="الحد" />
@@ -1232,6 +1389,38 @@ export default function ItemsListPage() {
            </div>
         </form>
       </Modal>
+      <ItemImportModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        items={items}
+        categories={categories}
+        units={units}
+        selectedCategoryId={selectedCatId}
+        onImported={async () => {
+          await Promise.all([loadCategories(), loadUnits()]);
+          await loadItems(selectedCatId, search, showDeleted);
+        }}
+      />
+      <ItemExportModal
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        items={items}
+        filteredItems={displayItems.rows}
+        selectedItems={selectedItemsForExport}
+        selectedCategoryName={selectedCategory?.name}
+      />
+      <ItemSmartUpdateModal
+        open={smartUpdateOpen}
+        onClose={() => setSmartUpdateOpen(false)}
+        items={items}
+        categories={categories}
+        units={units}
+        selectedCategoryId={selectedCatId}
+        onUpdated={async () => {
+          await Promise.all([loadCategories(), loadUnits()]);
+          await loadItems(selectedCatId, search, showDeleted);
+        }}
+      />
     </div>
   );
 }

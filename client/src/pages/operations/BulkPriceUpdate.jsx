@@ -132,7 +132,7 @@ export default function BulkPriceUpdatePage() {
 
   // ── Column resizing ──
   const [colWidths, setColWidths] = useState({
-    name: 260, category: 140, purchase: 100, retail: 110, wholesale: 110, suggested: 120, diff: 90,
+    code: 100, name: 260, category: 140, purchase: 100, retail: 110, wholesale: 110, suggested: 120, diff: 90,
   });
   const resizingCol = useRef(null);
   const startX = useRef(0);
@@ -317,7 +317,7 @@ export default function BulkPriceUpdatePage() {
       </div>
 
       {/* Main Workspace */}
-      <div className="flex flex-col rounded-sm border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="flex flex-col rounded-sm border border-slate-200 bg-white shadow-sm">
 
         {/* Filters */}
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 bg-slate-50/50 px-6 py-4">
@@ -439,6 +439,7 @@ export default function BulkPriceUpdatePage() {
             )}
 
             <div className="max-h-[60vh] overflow-auto scrollbar-thin bg-white">
+              <div className="pb-4">
               <table className="w-max border-collapse table-fixed text-right min-w-full">
                 <thead className="sticky top-0 z-40 bg-slate-50/95 backdrop-blur-sm">
                   <tr className="border-b border-slate-200 shadow-sm">
@@ -447,6 +448,7 @@ export default function BulkPriceUpdatePage() {
                         ref={(el) => { if (el) el.indeterminate = somePageSelected && !allPageSelected; }}
                         onChange={togglePageAll} className="h-3.5 w-3.5 cursor-pointer rounded-sm accent-slate-800" />
                     </th>
+                    <ResizableTh label="الكود" sortKey="code" sortConfig={sortConfig} onSort={handleSort} colKey="code" colWidths={colWidths} onResizeStart={onResizeStart} className="text-center" />
                     <ResizableTh label="الصنف" sortKey="name" sortConfig={sortConfig} onSort={handleSort} colKey="name" colWidths={colWidths} onResizeStart={onResizeStart} />
                     <ResizableTh label="القسم" sortKey="category_name" sortConfig={sortConfig} onSort={handleSort} colKey="category" colWidths={colWidths} onResizeStart={onResizeStart} />
                     <ResizableTh label="سعر الشراء" sortKey="purchase_price" sortConfig={sortConfig} onSort={handleSort} colKey="purchase" colWidths={colWidths} onResizeStart={onResizeStart} className="text-slate-500" />
@@ -462,9 +464,9 @@ export default function BulkPriceUpdatePage() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {fetchLoading ? (
-                    <tr><td colSpan={8} className="py-24 text-center text-[13px] font-black text-slate-300 uppercase tracking-widest animate-pulse">يتم استدعاء الأصناف...</td></tr>
+                    <tr><td colSpan={9} className="py-24 text-center text-[13px] font-black text-slate-300 uppercase tracking-widest animate-pulse">يتم استدعاء الأصناف...</td></tr>
                   ) : pageItems.length === 0 ? (
-                    <tr><td colSpan={8} className="py-24 text-center text-[13px] font-black text-slate-300 uppercase tracking-widest animate-pulse">لا توجد أصناف مطابقة</td></tr>
+                    <tr><td colSpan={9} className="py-24 text-center text-[13px] font-black text-slate-300 uppercase tracking-widest animate-pulse">لا توجد أصناف مطابقة</td></tr>
                   ) : pageItems.map((item) => {
                     const isSelected = selected.has(item.id);
                     const currentPrice = parseFloat(item[fieldKey]) || 0;
@@ -485,6 +487,9 @@ export default function BulkPriceUpdatePage() {
                         <td className="px-1 py-1 text-center border-l border-slate-100">
                           <input type="checkbox" checked={isSelected} onChange={() => toggleRow(item.id)}
                             className="h-3.5 w-3.5 cursor-pointer rounded-sm accent-slate-800" />
+                        </td>
+                        <td className="px-4 py-2 border-l border-slate-100 text-center font-mono text-[12px] font-black text-slate-500">
+                          {item.code || "—"}
                         </td>
                         <td className="px-4 py-2 border-l border-slate-100">
                           <p className="font-black text-[13px] text-slate-800">{item.name}</p>
@@ -527,6 +532,7 @@ export default function BulkPriceUpdatePage() {
                   })}
                 </tbody>
               </table>
+              </div>
             </div>
 
             {/* Pagination */}

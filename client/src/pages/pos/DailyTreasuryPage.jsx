@@ -7,6 +7,7 @@ import {
   FileText, Coins, Banknote, History,
   Edit3, RotateCcw, Eye, Sparkles,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 import api from "../../services/api";
 import { motion, AnimatePresence } from "framer-motion";
 import toast from "react-hot-toast";
@@ -73,16 +74,7 @@ export default function DailyTreasuryPage() {
   const [globalAmountSearch, setGlobalAmountSearch] = useState("");
   const [showCancelled, setShowCancelled] = useState(false);
 
-  // Close day
-  const [actualCash, setActualCash] = useState("");
-  const [closeNotes, setCloseNotes] = useState("");
-  const [closing, setClosing] = useState(false);
 
-  // Withdrawal state
-  const [wdOpen, setWdOpen] = useState(false);
-  const [wdAmount, setWdAmount] = useState("");
-  const [wdNote, setWdNote] = useState("");
-  const [wdList, setWdList] = useState([]);
 
   // Money count modal
   const [moneyOpen, setMoneyOpen] = useState(false);
@@ -102,6 +94,8 @@ export default function DailyTreasuryPage() {
 
   // Slide-over
   const [slideOver, setSlideOver] = useState(null);
+  const [slideOverDetails, setSlideOverDetails] = useState(null);
+  const [slideOverLoading, setSlideOverLoading] = useState(false);
 
   // History drawer
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -112,7 +106,8 @@ export default function DailyTreasuryPage() {
   // Compare yesterday
   const [compareYesterday, setCompareYesterday] = useState(false);
   const [printOpen, setPrintOpen] = useState(false);
-  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
+  const [actualCash, setActualCash] = useState("");
+  const [closeNotes, setCloseNotes] = useState("");
   const [reopenReason, setReopenReason] = useState("");
   const [reopening, setReopening] = useState(false);
 
@@ -133,9 +128,6 @@ export default function DailyTreasuryPage() {
         await api.get("/api/daily-sessions/today");
         const r = await api.get("/api/daily-sessions/today/summary");
         setSummary(r.data.data);
-        if (r.data.data?.session?.id) {
-          loadWithdrawals(r.data.data.session.id);
-        }
       } else {
         const r = await api.get(`/api/daily-sessions/${date}/summary`).catch(() => ({ data: { data: null } }));
         setSummary(r.data.data);
@@ -147,14 +139,7 @@ export default function DailyTreasuryPage() {
     }
   }, [date, isToday]);
 
-  async function loadWithdrawals(sessionId) {
-    try {
-      const r = await api.get(`/api/daily-sessions/today/transactions?type=withdrawals`);
-      setWdList(r.data.data || []);
-    } catch {
-      setWdList([]);
-    }
-  }
+
 
   const loadTransactions = useCallback(async () => {
     setTxLoading(true);
@@ -203,6 +188,21 @@ export default function DailyTreasuryPage() {
   useEffect(() => { loadTransactions(); }, [loadTransactions]);
   useEffect(() => { loadYesterdayAlert(); }, []);
   useEffect(() => { if (historyOpen) loadPastSessions(); }, [historyOpen, historySearch, historyStatus]);
+
+  // Load invoice details when viewing a POS invoice
+  useEffect(() => {
+    if (slideOver?.doc_type === "pos_invoice" && slideOver?.id) {
+      setSlideOverLoading(true);
+      setSlideOverDetails(null);
+      api.get("/api/invoices/" + slideOver.id)
+        .then(r => setSlideOverDetails(r.data.data))
+        .catch(() => setSlideOverDetails(null))
+        .finally(() => setSlideOverLoading(false));
+    } else {
+      setSlideOverDetails(null);
+    }
+  }, [slideOver]);
+
   useEffect(() => {
     api.get("/api/expenses/categories").then(r => setExpenseCategories(r.data.data || [])).catch(()=>{});
     api.get("/api/revenues/categories").then(r => setRevenueCategories(r.data.data || [])).catch(()=>{});
@@ -213,41 +213,7 @@ export default function DailyTreasuryPage() {
   const expected = summary?.expected_cash ?? 0;
   const discrepancy = summary?.discrepancy;
 
-  async function handleClose() {
-    if (!actualCash) return;
-    setClosing(true);
-    try {
-      await api.post("/api/daily-sessions/today/close", {
-        actual_cash: Number(actualCash),
-        notes: closeNotes,
-      });
-      toast.success("تم إغلاق اليومية بنجاح");
-      loadSummary();
-    } catch (e) {
-      toast.error(e.response?.data?.message || "خطأ في الإغلاق");
-    } finally {
-      setClosing(false);
-    }
-  }
-
-  async function handleWithdrawal() {
-    if (!wdAmount) return;
-    try {
-      await api.post("/api/daily-sessions/today/withdrawals", {
-        amount: Number(wdAmount),
-        note: wdNote,
-      });
-      toast.success("تم تسجيل المسحوبات بنجاح");
-      setWdOpen(false);
-      setWdAmount("");
-      setWdNote("");
-      loadSummary();
-    } catch (e) {
-      toast.error(e.response?.data?.message || "خطأ");
-    }
-  }
-
-  async function handleQuickSave() {
+async function handleQuickSave() {
     if (!quickAmount) return;
     try {
       if (quickModal === "expense") {
@@ -323,43 +289,17 @@ export default function DailyTreasuryPage() {
   ];
   const discrepancySuggestions = (() => {
     const diff = draftDiscrepancy ?? discrepancy;
-    if (diff == null || Math.abs(diff) < 0.01) {
-      return ["الرصيد متطابق. أغلق اليومية بعد مراجعة آخر حركة فقط."];
-    }
+    if (diff == null || Math.abs(diff) < 0.01) return ["الرصيد متطابق. راجع آخر حركة فقط قبل الاعتماد."];
     const abs = fmt(Math.abs(diff));
-    if (diff < 0) {
-      return [
-        `يوجد عجز ${abs} ج.م. راجع المصروفات والمسحوبات ومدفوعات الموردين المسجلة اليوم.`,
-        "قارن آخر فواتير POS النقدية مع درج النقد، وتأكد من عدم تسجيل تحصيل كاش كبنك أو العكس.",
-        "إذا كان العجز حقيقياً، اكتب سبب واضح في ملاحظات الإغلاق قبل الاعتماد.",
-      ];
-    }
+    if (diff < 0) return [
+      `يوجد عجز ${abs} ج.م. راجع المصروفات والمسحوبات ومدفوعات الموردين المسجلة اليوم.`,
+      "قارن آخر فواتير POS النقدية مع درج النقد، وتأكد من عدم تسجيل تحصيل كاش كبنك أو العكس.",
+    ];
     return [
       `يوجد زيادة ${abs} ج.م. ابحث عن إيراد أو تحصيل عميل غير مسجل.`,
       "راجع مرتجعات المبيعات لأن أي رد نقدي ناقص التسجيل يظهر كزيادة في الدرج.",
-      "استخدم بحث المبلغ بنفس قيمة الفرق للوصول السريع لحركة محتملة.",
     ];
   })();
-
-  async function confirmCloseDay() {
-    if (!actualCash) return;
-    setClosing(true);
-    try {
-      await api.post(isToday ? "/api/daily-sessions/today/close" : `/api/daily-sessions/${date}/close`, {
-        actual_cash: Number(actualCash),
-        notes: closeNotes,
-      });
-      toast.success("تم إغلاق اليومية بنجاح");
-      setCloseConfirmOpen(false);
-      loadSummary();
-      loadPastSessions();
-    } catch (e) {
-      toast.error(e.response?.data?.message || "خطأ في الإغلاق");
-    } finally {
-      setClosing(false);
-    }
-  }
-
 
   async function reopenDay() {
     setReopening(true);
@@ -664,15 +604,13 @@ export default function DailyTreasuryPage() {
                     <div className="bg-white/20 p-1.5 rounded-xl"><Coins className="h-4 w-4" /></div>
                     عد العملة (جرد الخزينة)
                   </motion.button>
-                  <motion.button
-                    whileHover={{ y: -2 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => setWdOpen(true)}
+                  <Link
+                    to="/withdrawals"
                     className="flex items-center justify-center gap-3 rounded-3xl bg-slate-900 py-4 text-[14px] font-black text-white hover:bg-slate-800 transition-colors shadow-lg shadow-slate-900/20 border border-slate-800"
                   >
                     <div className="bg-white/20 p-1.5 rounded-xl"><Banknote className="h-4 w-4" /></div>
-                    تسجيل مسحوبات
-                  </motion.button>
+                    سجل المسحوبات
+                  </Link>
                   <motion.button
                     whileHover={{ y: -2 }}
                     whileTap={{ scale: 0.98 }}
@@ -756,9 +694,207 @@ export default function DailyTreasuryPage() {
                 ))}
               </motion.div>
 
-              <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
-                {/* Right Area: Transactions (8 columns) */}
-                <motion.div variants={fadeInUp} className="xl:col-span-8 flex flex-col gap-3">
+              <div className="flex flex-col gap-6">
+                {/* ═══════════════════════════════════════ */}
+                {/*  معادلة الخزينة  -  MAIN FOCUS         */}
+                {/* ═══════════════════════════════════════ */}
+                <motion.div variants={fadeInUp}>
+                  <div className="rounded-3xl bg-white border border-slate-200/80 shadow-lg overflow-hidden">
+                    {/* Prominent Header */}
+                    <div className="px-6 py-5 border-b border-slate-100 bg-slate-50/80 flex items-center gap-4">
+                      <div className="h-12 w-12 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center ring-2 ring-inset ring-indigo-200 shadow-sm">
+                        <Calculator className="h-6 w-6" />
+                      </div>
+                      <div>
+                        <h3 className="text-[22px] font-black text-zinc-900 leading-tight">معادلة الخزينة</h3>
+                        <p className="text-[13px] font-bold text-slate-500 mt-1">الرصيد المتوقع = الرصيد السابق + الداخل النقدي − الخارج النقدي</p>
+                      </div>
+                    </div>
+
+                    <div className="p-6">
+                      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+                        {/* Left: Breakdown (3 cols) */}
+                        <div className="lg:col-span-3 space-y-4">
+                          {/* Opening Balance */}
+                          <div className="flex items-center justify-between p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                            <div className="flex items-center gap-3">
+                              <div className="h-10 w-10 rounded-xl bg-slate-200 text-slate-600 flex items-center justify-center">
+                                <Lock className="h-5 w-5" />
+                              </div>
+                              <span className="text-[15px] font-black text-slate-700">رصيد سابق</span>
+                            </div>
+                            <span className="text-[22px] font-black font-mono text-zinc-900">{fmt(summary?.previous_balance ?? summary?.opening_balance)} <span className="text-[12px] text-slate-400">ج.م</span></span>
+                          </div>
+
+                          {/* Cash In */}
+                          <div className="rounded-2xl bg-emerald-50/80 border border-emerald-200 p-5">
+                            <div className="flex items-center justify-between mb-4">
+                              <div className="flex items-center gap-2">
+                                <div className="h-3 w-3 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/30" />
+                                <span className="text-[15px] font-black text-emerald-800">الداخل النقدي</span>
+                              </div>
+                              <span className="text-[24px] font-black font-mono text-emerald-700">+ {fmt(cashIn)}</span>
+                            </div>
+                            <div className="space-y-2">
+                              {cashInRows.map(({ label, value, tab }) => (
+                                <button
+                                  type="button"
+                                  key={label}
+                                  onClick={() => { if (tab) { setActiveTab(tab); setGlobalAmountSearch(""); } }}
+                                  className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-right transition-colors hover:bg-emerald-100/60 bg-white/60 border border-emerald-100/50"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <div className="h-2 w-2 rounded-full bg-emerald-400" />
+                                    <span className="text-[13px] text-slate-700 font-bold">{label}</span>
+                                  </div>
+                                  <span className="font-black text-[14px] font-mono text-emerald-700">{fmt(value)}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Cash Out */}
+                          <div className="rounded-2xl bg-rose-50/80 border border-rose-200 p-5">
+                            <div className="flex items-center justify-between mb-4">
+                              <div className="flex items-center gap-2">
+                                <div className="h-3 w-3 rounded-full bg-rose-500 shadow-sm shadow-rose-500/30" />
+                                <span className="text-[15px] font-black text-rose-800">الخارج النقدي</span>
+                              </div>
+                              <span className="text-[24px] font-black font-mono text-rose-700">− {fmt(cashOut)}</span>
+                            </div>
+                            <div className="space-y-2">
+                              {cashOutRows.map(({ label, value, tab }) => (
+                                <button
+                                  type="button"
+                                  key={label}
+                                  onClick={() => { if (tab) { setActiveTab(tab); setGlobalAmountSearch(""); } }}
+                                  className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-right transition-colors hover:bg-rose-100/60 bg-white/60 border border-rose-100/50"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <div className="h-2 w-2 rounded-full bg-rose-400" />
+                                    <span className="text-[13px] text-slate-700 font-bold">{label}</span>
+                                  </div>
+                                  <span className="font-black text-[14px] font-mono text-rose-700">{fmt(value)}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Non-cash */}
+                          <div className="rounded-2xl bg-slate-50 border border-slate-200 p-4">
+                            <div className="mb-2 text-[13px] font-black text-slate-600">حركات لا تؤثر على الخزنة نقدياً</div>
+                            <div className="space-y-1">
+                              {nonCashRows.map(({ label, value, tab }) => (
+                                <button
+                                  type="button"
+                                  key={label}
+                                  onClick={() => { if (tab) { setActiveTab(tab); setGlobalAmountSearch(""); } }}
+                                  className="flex w-full items-center justify-between rounded-lg px-3 py-1.5 text-right transition-colors hover:bg-white"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <Lock className="h-3.5 w-3.5 text-slate-300" />
+                                    <span className="text-[12px] font-bold text-slate-500">{label}</span>
+                                  </div>
+                                  <span className="font-black text-[13px] font-mono text-slate-600">{fmt(value)}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Right: Expected & Close (2 cols) */}
+                        <div className="lg:col-span-2 flex flex-col gap-5">
+                          {/* Big Expected Amount */}
+                          <div className="flex-1 rounded-3xl bg-slate-900 text-white p-8 flex flex-col justify-center items-center text-center shadow-xl shadow-slate-900/20">
+                            <div className="text-[14px] font-bold text-slate-400 mb-3 uppercase tracking-widest">المتوقع في الخزنة</div>
+                            <div className="text-[40px] font-black font-mono tracking-tighter leading-none">{fmt(expected)}</div>
+                            <div className="text-[14px] font-bold text-slate-500 mt-3">جنيه مصري</div>
+                            
+                            {sess.actual_cash != null && (
+                              <motion.div 
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className={"mt-6 w-full rounded-2xl p-4 border text-center " + (discrepancy >= 0 ? "bg-emerald-500/20 border-emerald-500/30" : "bg-rose-500/20 border-rose-500/30")}
+                              >
+                                <div className="text-[12px] font-bold text-slate-400 mb-1">الرصيد الفعلي المُغلق</div>
+                                <div className="text-[24px] font-black font-mono">{fmt(sess.actual_cash)}</div>
+                                <div className={"text-[13px] font-black mt-1 " + (discrepancy >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                                  الفرق: {discrepancy >= 0 ? "+" : ""}{fmt(discrepancy)} ج.م
+                                </div>
+                              </motion.div>
+                            )}
+                          </div>
+
+                          {/* الرصيد الفعلي — always visible, no close action */}
+                          <div className="rounded-2xl border-2 border-slate-200 bg-white p-6 shadow-sm">
+                            <h4 className="text-[16px] font-black text-zinc-900 mb-4 flex items-center gap-2">
+                              <Lock className="h-5 w-5 text-slate-600" /> إدخال الرصيد الفعلي
+                            </h4>
+                            <div className="flex flex-col gap-4">
+                              <div className="flex flex-col gap-2">
+                                <label className="text-[13px] font-black text-slate-700">الرصيد الفعلي (ج.م)</label>
+                                <div className="flex gap-3">
+                                  <input
+                                    type="number"
+                                    value={actualCash}
+                                    onChange={(e) => setActualCash(e.target.value)}
+                                    className="flex-1 h-14 bg-slate-50 rounded-2xl px-5 text-[20px] font-black text-zinc-900 outline-none transition-all placeholder:text-slate-300 border border-slate-200 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 text-center font-mono"
+                                    placeholder="0.00"
+                                  />
+                                  <SmartTooltip content="فتح آلة عد العملات">
+                                    <motion.button
+                                      whileHover={{ y: -1 }}
+                                      whileTap={{ scale: 0.95 }}
+                                      onClick={() => setMoneyOpen(true)}
+                                      className="h-14 w-14 flex shrink-0 items-center justify-center rounded-2xl border border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors shadow-sm"
+                                    >
+                                      <Coins className="h-5 w-5" />
+                                    </motion.button>
+                                  </SmartTooltip>
+                                </div>
+                              </div>
+                              {actualCash && (
+                                <motion.div
+                                  initial={{ opacity: 0, y: -10 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  className={"text-center rounded-2xl py-3 px-4 text-[14px] font-black border " + (Number(actualCash) - expected >= 0 ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-rose-50 border-rose-200 text-rose-700")}
+                                >
+                                  الفرق: {Number(actualCash) - expected >= 0 ? "+" : ""}{fmt(Number(actualCash) - expected)} ج.م
+                                </motion.div>
+                              )}
+                              {actualCash && (
+                                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                                  <div className="mb-2 flex items-center gap-2 text-[12px] font-black text-slate-700">
+                                    <Sparkles className="h-4 w-4 text-amber-500" /> مساعد العجز والزيادة
+                                  </div>
+                                  <div className="space-y-1">
+                                    {discrepancySuggestions.map((tip, idx) => (
+                                      <div key={idx} className="text-[12px] font-bold text-slate-500 leading-5">• {tip}</div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              <div className="flex flex-col gap-1.5">
+                                <label className="text-[12px] font-black uppercase tracking-widest text-slate-500">ملاحظات</label>
+                                <textarea
+                                  value={closeNotes}
+                                  onChange={(e) => setCloseNotes(e.target.value)}
+                                  className="w-full h-16 rounded-2xl bg-slate-50 border border-slate-200 px-4 py-3 text-[13px] font-bold text-zinc-800 outline-none resize-none focus:border-zinc-400 focus:ring-2 focus:ring-zinc-900/5 placeholder:text-slate-300 transition-all"
+                                  placeholder="ملاحظات حول الرصيد..."
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+
+                {/* ═══════════════════════════════════════ */}
+                {/*  حركات اليوم  -  TRANSACTIONS          */}
+                {/* ═══════════════════════════════════════ */}
+                <motion.div variants={fadeInUp} className="flex flex-col gap-3">
                   
                   {/* Search Bar */}
                   <div className="relative group w-full">
@@ -829,8 +965,8 @@ export default function DailyTreasuryPage() {
                         <table className="w-full text-right border-collapse">
                           <thead className="sticky top-0 z-10 bg-white/95 backdrop-blur-xl shadow-[0_1px_0_0_#f1f5f9]">
                             <tr>
-                              {["الكود", "النوع", "المبلغ", "الطرف / الوصف", "الوقت", "إجراءات"].map((h, i) => (
-                                <th key={h} className={`px-3 py-3 text-[10px] font-black uppercase text-slate-400 tracking-widest select-none ${i===0?'rounded-tr-xl':''} ${i===5?'rounded-tl-xl':''}`}>
+                              {["الكود", "النوع", "المبلغ", "الطرف / الوصف", "المستخدم", "الوقت", "إجراءات"].map((h, i) => (
+                                <th key={h} className={`px-3 py-3 text-[10px] font-black uppercase text-slate-400 tracking-widest select-none ${i===0?'rounded-tr-xl':''} ${i===6?'rounded-tl-xl':''}`}>
                                   {h}
                                 </th>
                               ))}
@@ -848,14 +984,24 @@ export default function DailyTreasuryPage() {
                                   whileHover={{ x: -2, backgroundColor: "rgba(248,250,252,0.8)" }}
                                   className="group transition-colors relative"
                                 >
-                                  <td className="px-3 py-3 font-black text-slate-500 text-[11px] tracking-wider">{t.doc_no || `#${t.id}`}</td>
+                                  <td className={`px-3 py-3 font-black text-[11px] tracking-wider ${t.is_cancelled ? "text-slate-300 line-through" : "text-slate-500"}`}>{t.doc_no || `#${t.id}`}</td>
                                   <td className="px-3 py-3">
-                                    <div className="flex items-center gap-1">
-                                      <span className={`inline-flex items-center justify-center rounded-lg border px-2 py-0.5 text-[9px] font-black ${t.is_reversal ? "text-rose-700 bg-rose-50 border-rose-200" : (DOC_TYPE_COLOR[t.doc_type] || "text-slate-600 bg-slate-100 border-slate-200")}`}>
-                                        {t.is_reversal ? "فاتورة ملغاة" : (DOC_TYPE_LABEL[t.doc_type] || t.doc_type)}
+                                    <div className="flex items-center gap-1 flex-wrap">
+                                      <span className={`inline-flex items-center justify-center rounded-lg border px-2 py-0.5 text-[9px] font-black ${(t.is_cancelled || t.doc_type === 'cancelled_invoice') ? "text-rose-700 bg-rose-50 border-rose-200 line-through opacity-60" : (DOC_TYPE_COLOR[t.doc_type] || "text-slate-600 bg-slate-100 border-slate-200")}`}>
+                                        {DOC_TYPE_LABEL[t.doc_type] || t.doc_type}
                                       </span>
-                                      {t.is_reversal && (
+                                      {(t.is_cancelled || t.doc_type === 'cancelled_invoice') && (
                                         <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-rose-100 text-rose-700 border border-rose-200">ملغي</span>
+                                      )}
+                                      {t.amended_by && (
+                                        <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-100 text-amber-700 border border-amber-200" title={`عُدِّلت بواسطة: ${t.amended_by_no || t.amended_by}`}>
+                                          مُعدَّلة {t.amended_by_no ? `← ${t.amended_by_no}` : ""}
+                                        </span>
+                                      )}
+                                      {t.amendment_of && (
+                                        <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-blue-100 text-blue-700 border border-blue-200" title={`تعديل على: ${t.amendment_of_no || t.amendment_of}`}>
+                                          تعديل {t.amendment_of_no ? `↑ ${t.amendment_of_no}` : "↑"}
+                                        </span>
                                       )}
                                     </div>
                                   </td>
@@ -869,6 +1015,9 @@ export default function DailyTreasuryPage() {
                                   </td>
                                   <td className="px-3 py-3 text-slate-600 text-[11px] font-bold max-w-[180px] truncate">
                                     {t.party || t.description || "—"}
+                                  </td>
+                                  <td className="px-3 py-3 text-slate-500 text-[10px] whitespace-nowrap font-bold">
+                                    {t.seller_name || t.cancelled_by_name || "—"}
                                   </td>
                                   <td className="px-3 py-3 text-slate-400 text-[10px] whitespace-nowrap font-medium">
                                     {t.created_at
@@ -914,206 +1063,6 @@ export default function DailyTreasuryPage() {
                   </div>
                 </motion.div>
 
-                {/* Left Area: Equation & Close Day (4 columns) */}
-                <motion.div variants={fadeInUp} className="xl:col-span-4 flex flex-col gap-4 sticky top-4">
-                  
-                  {/* Equation Card */}
-                  <div className="rounded-2xl bg-white/80 backdrop-blur-xl border border-slate-200/60 shadow-sm flex flex-col overflow-hidden">
-                    <div className="px-5 py-3 border-b border-slate-100/80 flex items-center gap-3 bg-slate-50/50">
-                      <div className="h-7 w-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center ring-1 ring-inset ring-indigo-100">
-                        <Calculator className="h-4 w-4" />
-                      </div>
-                      <h3 className="text-[14px] font-black text-zinc-900 tracking-tight">معادلة الخزينة</h3>
-                    </div>
-                    <div className="p-4 space-y-3">
-                      <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2">
-                        <div className="flex items-center gap-2">
-                          <Lock className="h-3 w-3 text-slate-300" />
-                          <span className="text-[12px] text-slate-700 font-black">رصيد سابق</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-black text-[12px] font-mono text-zinc-900">{fmt(summary?.previous_balance ?? summary?.opening_balance)}</span>
-                        </div>
-                      </div>
-
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between px-1">
-                          <span className="text-[10px] font-black text-emerald-700">الداخل النقدي</span>
-                          <span className="text-[10px] font-black font-mono text-emerald-700">+ {fmt(cashIn)}</span>
-                        </div>
-                        {cashInRows.map(({ label, value, tab }) => (
-                          <button
-                            type="button"
-                            key={label}
-                            onClick={() => { if (tab) { setActiveTab(tab); setGlobalAmountSearch(""); } }}
-                            className="flex w-full items-center justify-between rounded-xl px-2 py-1.5 text-right transition-colors hover:bg-emerald-50/60"
-                          >
-                            <div className="flex items-center gap-2">
-                              <div className="h-1 w-1 rounded-full bg-emerald-300" />
-                              <span className="text-[11px] text-slate-600 font-bold">+ {label}</span>
-                            </div>
-                            <span className="font-black text-[11px] font-mono text-emerald-700">{fmt(value)}</span>
-                          </button>
-                        ))}
-                      </div>
-
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between px-1">
-                          <span className="text-[10px] font-black text-rose-700">الخارج النقدي</span>
-                          <span className="text-[10px] font-black font-mono text-rose-700">- {fmt(cashOut)}</span>
-                        </div>
-                        {cashOutRows.map(({ label, value, tab }) => (
-                          <button
-                            type="button"
-                            key={label}
-                            onClick={() => { if (tab) { setActiveTab(tab); setGlobalAmountSearch(""); } }}
-                            className="flex w-full items-center justify-between rounded-xl px-2 py-1.5 text-right transition-colors hover:bg-rose-50/60"
-                          >
-                            <div className="flex items-center gap-2">
-                              <div className="h-1 w-1 rounded-full bg-rose-300" />
-                              <span className="text-[11px] text-slate-600 font-bold">- {label}</span>
-                            </div>
-                            <span className="font-black text-[11px] font-mono text-rose-700">{fmt(value)}</span>
-                          </button>
-                        ))}
-                      </div>
-
-                      <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-2">
-                        <div className="mb-1 text-[10px] font-black text-slate-600">حركات حسابية لا تغيّر الخزنة</div>
-                        {nonCashRows.map(({ label, value, tab }) => (
-                          <button
-                            type="button"
-                            key={label}
-                            onClick={() => { if (tab) { setActiveTab(tab); setGlobalAmountSearch(""); } }}
-                            className="flex w-full items-center justify-between rounded-lg px-2 py-1 text-right transition-colors hover:bg-white"
-                          >
-                            <div className="flex items-center gap-1.5">
-                              <Lock className="h-3 w-3 text-slate-300" />
-                              <span className="text-[10px] font-bold text-slate-500">{label}</span>
-                            </div>
-                            <span className="font-black text-[10px] font-mono text-slate-600">{fmt(value)}</span>
-                          </button>
-                        ))}
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2 border-t border-slate-100 pt-2 mt-2">
-                        <div className="rounded-xl bg-emerald-50 border border-emerald-100 p-2">
-                          <div className="text-[9px] font-black text-emerald-600">إجمالي الداخل</div>
-                          <div className="mt-0.5 text-[13px] font-black font-mono text-emerald-800">{fmt(cashIn)}</div>
-                        </div>
-                        <div className="rounded-xl bg-rose-50 border border-rose-100 p-2">
-                          <div className="text-[9px] font-black text-rose-600">إجمالي الخارج</div>
-                          <div className="mt-0.5 text-[13px] font-black font-mono text-rose-800">{fmt(cashOut)}</div>
-                        </div>
-                      </div>
-                      <div className="border-t border-slate-200/80 pt-3 mt-2 flex items-center justify-between px-1">
-                        <span className="text-[11px] font-black text-slate-500 uppercase tracking-widest">المتوقع في الخزنة</span>
-                        <span className="text-[18px] font-black font-mono text-emerald-600">{fmt(expected)} <span className="text-[10px] text-slate-400">ج.م</span></span>
-                      </div>
-                      
-                      {sess.actual_cash != null && (
-                        <motion.div 
-                          initial={{ opacity: 0, scale: 0.95 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          className={`flex flex-col rounded-xl p-3 mt-2 border ${discrepancy >= 0 ? "bg-emerald-50/50 border-emerald-100" : "bg-rose-50/50 border-rose-100"}`}
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="font-black text-[11px] text-slate-600">الرصيد الفعلي</span>
-                            <span className={`font-black text-[16px] font-mono ${discrepancy >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
-                              {fmt(sess.actual_cash)}
-                            </span>
-                          </div>
-                          <div className={`font-black text-[10px] ${discrepancy >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
-                            الفرق: {discrepancy >= 0 ? "+" : ""}{fmt(discrepancy)} ج.م
-                          </div>
-                        </motion.div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Day Close Section */}
-                  {isToday && !isClosed && (
-                    <div className="rounded-2xl bg-white/80 backdrop-blur-xl border border-slate-200/60 shadow-sm flex flex-col overflow-hidden">
-                      <div className="px-5 py-3 border-b border-slate-100/80 flex items-center gap-3 bg-slate-50/50">
-                        <div className="h-7 w-7 rounded-lg bg-slate-800 text-white flex items-center justify-center">
-                          <Lock className="h-4 w-4" />
-                        </div>
-                        <h3 className="text-[14px] font-black text-zinc-900 tracking-tight">إغلاق الجلسة</h3>
-                      </div>
-                      <div className="p-4 flex flex-col gap-4">
-                        <div className="space-y-3">
-                          <div className="flex flex-col gap-1.5">
-                            <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">
-                              الرصيد الفعلي (ج.م)
-                            </label>
-                            <div className="flex gap-2">
-                              <input
-                                type="number"
-                                value={actualCash}
-                                onChange={(e) => setActualCash(e.target.value)}
-                                className="flex-1 h-12 bg-white rounded-xl px-4 text-[16px] font-black text-zinc-900 outline-none transition-all placeholder:text-slate-300 border border-slate-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10 text-center font-mono"
-                                placeholder="0.00"
-                              />
-                              <SmartTooltip content="فتح آلة عد العملات">
-                                <motion.button
-                                  whileHover={{ y: -1 }}
-                                  whileTap={{ scale: 0.95 }}
-                                  onClick={() => setMoneyOpen(true)}
-                                  className="h-12 w-12 flex shrink-0 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors shadow-sm"
-                                >
-                                  <Coins className="h-4 w-4" />
-                                </motion.button>
-                              </SmartTooltip>
-                            </div>
-                          </div>
-                          
-                          {actualCash && (
-                            <motion.div 
-                              initial={{ opacity: 0, y: -10 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              className={`text-center rounded-xl py-2 px-3 text-[12px] font-black border ${Number(actualCash) - expected >= 0 ? "bg-emerald-50 border-emerald-100 text-emerald-700" : "bg-rose-50 border-rose-100 text-rose-700"}`}
-                            >
-                              الفرق: {Number(actualCash) - expected >= 0 ? "+" : ""}{fmt(Number(actualCash) - expected)} ج.م
-                            </motion.div>
-                          )}
-
-                          {actualCash && (
-                            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                              <div className="mb-1 flex items-center gap-2 text-[10px] font-black text-slate-700">
-                                <Sparkles className="h-3 w-3 text-amber-500" /> مساعد العجز والزيادة
-                              </div>
-                              <div className="space-y-0.5">
-                                {discrepancySuggestions.map((tip, idx) => (
-                                  <div key={idx} className="text-[10px] font-bold text-slate-500 leading-4">• {tip}</div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          
-                          <div className="flex flex-col gap-1.5">
-                            <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">ملاحظات الإغلاق</label>
-                            <textarea
-                              value={closeNotes}
-                              onChange={(e) => setCloseNotes(e.target.value)}
-                              className="w-full h-16 rounded-xl bg-white border border-slate-200 px-3 py-2 text-[12px] font-bold text-zinc-800 outline-none resize-none focus:border-zinc-400 focus:ring-2 focus:ring-zinc-900/5 placeholder:text-slate-300 transition-all"
-                              placeholder="أضف ملاحظات تبرر العجز أو الزيادة..."
-                            />
-                          </div>
-                        </div>
-
-                        <motion.button
-                          whileHover={{ y: -2 }}
-                          whileTap={{ scale: 0.98 }}
-                          onClick={() => setCloseConfirmOpen(true)}
-                          disabled={!actualCash || closing}
-                          className="w-full rounded-xl bg-zinc-950 py-3 text-[13px] font-black text-white hover:bg-zinc-800 disabled:opacity-40 transition-all shadow-lg shadow-zinc-950/20"
-                        >
-                          {closing ? "جاري الإغلاق والتشفير..." : "إغلاق اليومية واعتماد الأرصدة"}
-                        </motion.button>
-                      </div>
-                    </div>
-                  )}
-                </motion.div>
               </div>
             </>
           )}
@@ -1134,7 +1083,7 @@ export default function DailyTreasuryPage() {
               animate={{ opacity: 1, scale: 1, y: 0 }} 
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
               transition={{ type: "spring", stiffness: 300, damping: 25 }}
-              className="relative w-full max-w-xl bg-white shadow-2xl rounded-[2rem] flex flex-col overflow-hidden my-20 mx-auto"
+              className="relative w-full max-w-2xl bg-white shadow-2xl rounded-[2rem] flex flex-col overflow-hidden my-20 mx-auto"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 bg-slate-50/50">
@@ -1142,15 +1091,16 @@ export default function DailyTreasuryPage() {
                   <h2 className="text-[16px] font-black text-zinc-900">
                     {DOC_TYPE_LABEL[slideOver.doc_type] || "مستند مالية"}
                   </h2>
-                  <p className="text-[11px] text-slate-400 font-bold font-mono tracking-wider mt-0.5">{slideOver.doc_no || `#${slideOver.id}`}</p>
+                  <p className="text-[11px] text-slate-400 font-bold font-mono tracking-wider mt-0.5">{slideOver.doc_no || "#" + slideOver.id}</p>
                 </div>
-                <button onClick={() => setSlideOver(null)} className="h-8 w-8 flex items-center justify-center rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-zinc-900 hover:bg-slate-50 transition-colors shadow-sm">
+                <button onClick={() => { setSlideOver(null); setSlideOverDetails(null); }} className="h-8 w-8 flex items-center justify-center rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-zinc-900 hover:bg-slate-50 transition-colors shadow-sm">
                   <X className="h-4 w-4" />
                 </button>
               </div>
               <div className="flex-1 overflow-y-auto p-5 bg-[#fafafa]">
-                <div className="rounded-2xl bg-white border border-slate-200/60 shadow-sm overflow-hidden">
-                  <div className={`p-4 text-center border-b border-slate-100 ${DOC_TYPE_COLOR[slideOver.doc_type] || "bg-white"}`}>
+                {/* Header Summary */}
+                <div className="rounded-2xl bg-white border border-slate-200/60 shadow-sm overflow-hidden mb-4">
+                  <div className={"p-4 text-center border-b border-slate-100 " + (DOC_TYPE_COLOR[slideOver.doc_type] || "bg-white")}>
                     <div className="text-[10px] font-black uppercase tracking-widest opacity-60 mb-1">القيمة</div>
                     <div className="text-[28px] font-black font-mono leading-none tracking-tighter">
                       {fmt(slideOver.amount)}
@@ -1176,21 +1126,93 @@ export default function DailyTreasuryPage() {
                     ))}
                   </div>
                 </div>
+
+                {/* Invoice Lines for POS Invoice */}
+                {slideOver.doc_type === "pos_invoice" && (
+                  <div className="rounded-2xl bg-white border border-slate-200/60 shadow-sm overflow-hidden">
+                    <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/50 flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-slate-400" />
+                      <span className="text-[12px] font-black text-slate-700">تفاصيل الفاتورة</span>
+                    </div>
+                    {slideOverLoading ? (
+                      <div className="p-6 text-center text-[12px] text-slate-400 animate-pulse">جاري تحميل التفاصيل...</div>
+                    ) : slideOverDetails?.lines?.length ? (
+                      <div className="divide-y divide-slate-100">
+                        {/* Column Headers */}
+                        <div className="grid grid-cols-12 gap-2 px-3 py-2 bg-slate-50 text-[9px] font-black text-slate-400 uppercase tracking-wider">
+                          <div className="col-span-5">الصنف</div>
+                          <div className="col-span-2 text-center">الكمية</div>
+                          <div className="col-span-2 text-center">السعر</div>
+                          <div className="col-span-1 text-center">خصم</div>
+                          <div className="col-span-2 text-left">الإجمالي</div>
+                        </div>
+                        {/* Lines */}
+                        {slideOverDetails.lines.map((line, idx) => (
+                          <div key={idx} className="grid grid-cols-12 gap-2 px-3 py-2.5 items-center hover:bg-slate-50/50 transition-colors">
+                            <div className="col-span-5 flex flex-col min-w-0">
+                              <span className="text-[11px] font-black text-slate-800 truncate">{line.item_name || line.name}</span>
+                              <span className="text-[9px] font-mono text-slate-400 truncate">{line.code || line.item_code || "#" + line.item_id}</span>
+                            </div>
+                            <div className="col-span-2 text-center font-mono text-[11px] font-bold text-slate-700">{line.quantity}</div>
+                            <div className="col-span-2 text-center font-mono text-[11px] font-bold text-slate-700">{fmt(line.unit_price)}</div>
+                            <div className="col-span-1 text-center font-mono text-[10px] font-bold text-amber-600">{line.line_discount || line.discount || "—"}</div>
+                            <div className="col-span-2 text-left font-mono text-[11px] font-black text-emerald-700">{fmt((line.unit_price * line.quantity) - (line.line_discount || 0))}</div>
+                          </div>
+                        ))}
+                        {/* Totals */}
+                        <div className="bg-slate-900 text-white px-3 py-3">
+                          <div className="flex justify-between text-[10px] font-bold mb-1">
+                            <span className="text-slate-400">الفرعي</span>
+                            <span className="font-mono">{fmt(slideOverDetails.subtotal)}</span>
+                          </div>
+                          {Number(slideOverDetails.discount) > 0 && (
+                            <div className="flex justify-between text-[10px] font-bold mb-1">
+                              <span className="text-slate-400">الخصم</span>
+                              <span className="font-mono text-rose-300">- {fmt(slideOverDetails.discount)}</span>
+                            </div>
+                          )}
+                          {Number(slideOverDetails.increase) > 0 && (
+                            <div className="flex justify-between text-[10px] font-bold mb-1">
+                              <span className="text-slate-400">الإضافة</span>
+                              <span className="font-mono text-emerald-300">+ {fmt(slideOverDetails.increase)}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between text-[12px] font-black border-t border-slate-700 pt-2 mt-2">
+                            <span>الإجمالي</span>
+                            <span className="font-mono">{fmt(slideOverDetails.total)} ج.م</span>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-6 text-center text-[12px] text-slate-400">لا توجد تفاصيل متاحة</div>
+                    )}
+                  </div>
+                )}
               </div>
-              <div className="border-t border-slate-100 p-3 bg-white">
+              <div className="border-t border-slate-100 p-3 bg-white flex gap-2">
+                {slideOver.doc_type === "pos_invoice" && (
+                  <motion.button
+                    whileHover={{ y: -2 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => window.open("/invoices/" + slideOver.id, "_blank")}
+                    className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-blue-600 py-2.5 text-[12px] font-black text-white hover:bg-blue-700 shadow-lg shadow-blue-600/20"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" /> فتح الفاتورة الكاملة
+                  </motion.button>
+                )}
                 <motion.button
                   whileHover={{ y: -2 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={handlePrint}
-                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-zinc-950 py-2.5 text-[12px] font-black text-white hover:bg-zinc-800 shadow-lg shadow-zinc-950/20"
+                  className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-zinc-950 py-2.5 text-[12px] font-black text-white hover:bg-zinc-800 shadow-lg shadow-zinc-950/20"
                 >
-                  <Printer className="h-3.5 w-3.5" /> طباعة إيصال المستند
+                  <Printer className="h-3.5 w-3.5" /> طباعة
                 </motion.button>
               </div>
             </motion.div>
             <div 
               className="fixed inset-0 -z-10 bg-slate-900/50 backdrop-blur-md" 
-              onClick={() => setSlideOver(null)} 
+              onClick={() => { setSlideOver(null); setSlideOverDetails(null); }} 
             />
           </motion.div>
         )}
@@ -1220,11 +1242,11 @@ export default function DailyTreasuryPage() {
                     {pastSessions.map((s) => (
                       <tr key={s.id} className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/70">
                         <td className="rounded-r-2xl px-3 py-3 font-black text-zinc-900">{s.date}</td>
-                        <td className="px-3 py-3"><span className={`inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1 text-[10px] font-black ${s.status === "closed" ? "bg-slate-100 text-slate-600" : "bg-emerald-100 text-emerald-700"}`}>{s.status === "closed" ? <Lock className="h-3 w-3" /> : <CheckCircle2 className="h-3 w-3" />}{s.status === "closed" ? "مغلق" : "مفتوح"}</span></td>
+                        <td className="px-3 py-3"><span className={"inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1 text-[10px] font-black " + (s.status === "closed" ? "bg-slate-100 text-slate-600" : "bg-emerald-100 text-emerald-700")}>{s.status === "closed" ? <Lock className="h-3 w-3" /> : <CheckCircle2 className="h-3 w-3" />}{s.status === "closed" ? "مغلق" : "مفتوح"}</span></td>
                         <td className="px-3 py-3 font-mono text-[12px] font-black text-slate-600">{fmt(s.opening_balance)}</td>
                         <td className="px-3 py-3 font-mono text-[12px] font-black text-slate-600">{s.actual_cash == null ? "—" : fmt(s.actual_cash)}</td>
                         <td className="px-3 py-3 font-mono text-[12px] font-black text-slate-600">{s.closing_balance == null ? "—" : fmt(s.closing_balance)}</td>
-                        <td className={`px-3 py-3 font-mono text-[12px] font-black ${Number(s.discrepancy || 0) < 0 ? "text-rose-600" : "text-emerald-600"}`}>{s.discrepancy == null ? "—" : fmt(s.discrepancy)}</td>
+                        <td className={"px-3 py-3 font-mono text-[12px] font-black " + (Number(s.discrepancy || 0) < 0 ? "text-rose-600" : "text-emerald-600")}>{s.discrepancy == null ? "—" : fmt(s.discrepancy)}</td>
                         <td className="rounded-l-2xl px-3 py-3"><button onClick={() => { setDate(s.date); setHistoryOpen(false); setActiveTab("all"); }} className="inline-flex h-8 items-center gap-1.5 rounded-xl bg-slate-900 px-3 text-[11px] font-black text-white hover:bg-slate-800"><Eye className="h-3.5 w-3.5" /> معاينة</button></td>
                       </tr>
                     ))}
@@ -1252,7 +1274,7 @@ export default function DailyTreasuryPage() {
             >
               <div className="flex items-center justify-between mb-8">
                 <div className="flex items-center gap-3">
-                  <div className={`h-12 w-12 rounded-2xl flex items-center justify-center border ${quickModal === "expense" ? "bg-rose-50 text-rose-600 border-rose-100" : "bg-emerald-50 text-emerald-600 border-emerald-100"}`}>
+                  <div className={"h-12 w-12 rounded-2xl flex items-center justify-center border " + (quickModal === "expense" ? "bg-rose-50 text-rose-600 border-rose-100" : "bg-emerald-50 text-emerald-600 border-emerald-100")}>
                     {quickModal === "expense" ? <TrendingDown className="h-6 w-6" /> : <TrendingUp className="h-6 w-6" />}
                   </div>
                   <div>
@@ -1307,77 +1329,9 @@ export default function DailyTreasuryPage() {
                     whileTap={{ scale: 0.98 }}
                     onClick={handleQuickSave}
                     disabled={!quickAmount}
-                    className={`w-full h-14 flex items-center justify-center gap-2 rounded-2xl text-[15px] font-black text-white transition-all shadow-xl disabled:opacity-40 ${
-                      quickModal === "expense" ? "bg-rose-600 hover:bg-rose-700 shadow-rose-600/20" : "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20"
-                    }`}
+                    className={"w-full h-14 flex items-center justify-center gap-2 rounded-2xl text-[15px] font-black text-white transition-all shadow-xl disabled:opacity-40 " + (quickModal === "expense" ? "bg-rose-600 hover:bg-rose-700 shadow-rose-600/20" : "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20")}
                   >
                     <CheckCircle2 className="h-5 w-5" /> حفظ واعتماد
-                  </motion.button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Withdrawal Modal */}
-      <AnimatePresence>
-        {wdOpen && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" 
-              onClick={() => setWdOpen(false)} 
-            />
-            <motion.div 
-              variants={modalVariants} initial="hidden" animate="show" exit="exit"
-              className="relative w-full max-w-[420px] rounded-[2.5rem] bg-white shadow-2xl p-8 border border-slate-100" dir="rtl"
-            >
-              <div className="flex items-center justify-between mb-8">
-                <div className="flex items-center gap-3">
-                  <div className="h-12 w-12 rounded-2xl bg-slate-900 text-white flex items-center justify-center shadow-lg shadow-slate-900/20">
-                    <Banknote className="h-6 w-6" />
-                  </div>
-                  <div>
-                    <h2 className="text-[20px] font-black text-zinc-900 leading-tight">تسجيل مسحوبات</h2>
-                    <p className="text-[11px] font-bold text-slate-400 mt-1 uppercase tracking-widest">Withdrawal</p>
-                  </div>
-                </div>
-                <button onClick={() => setWdOpen(false)} className="h-10 w-10 flex items-center justify-center rounded-xl bg-slate-50 text-slate-400 hover:text-zinc-900 hover:bg-slate-100 transition-colors">
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-              <div className="space-y-5">
-                <div className="flex flex-col gap-2">
-                  <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">مبلغ السحب (ج.م)</label>
-                  <input
-                    type="number"
-                    value={wdAmount}
-                    onChange={(e) => setWdAmount(e.target.value)}
-                    autoFocus
-                    placeholder="0.00"
-                    className="w-full h-14 rounded-2xl bg-slate-50 border border-slate-200 px-4 text-[20px] font-black font-mono outline-none focus:border-zinc-400 focus:bg-white focus:ring-4 focus:ring-zinc-900/5 text-center transition-all shadow-inner"
-                  />
-                </div>
-                <div className="flex flex-col gap-2">
-                  <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">البيان / المسحوب له</label>
-                  <input
-                    type="text"
-                    value={wdNote}
-                    onChange={(e) => setWdNote(e.target.value)}
-                    placeholder="توضيح السبب..."
-                    className="w-full h-12 rounded-2xl bg-white border border-slate-200 px-4 text-[14px] font-bold text-zinc-800 outline-none focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 transition-all"
-                  />
-                </div>
-                <div className="pt-4">
-                  <motion.button
-                    whileHover={{ y: -2 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={handleWithdrawal}
-                    disabled={!wdAmount}
-                    className="w-full h-14 flex items-center justify-center gap-2 rounded-2xl bg-zinc-950 text-[15px] font-black text-white transition-all shadow-xl shadow-zinc-950/20 hover:bg-zinc-800 disabled:opacity-40"
-                  >
-                    <CheckCircle2 className="h-5 w-5" /> اعتماد السحب
                   </motion.button>
                 </div>
               </div>
@@ -1426,7 +1380,7 @@ export default function DailyTreasuryPage() {
                       <div key={d} className="grid grid-cols-3 items-center gap-3 bg-white p-2 rounded-2xl border border-slate-100 shadow-sm transition-colors hover:border-blue-200">
                         <span className="text-[14px] font-black text-slate-800 px-2 flex items-center gap-2">
                           <Banknote className="h-4 w-4 text-emerald-500 opacity-50" />
-                          {d >= 1 ? `${d} ج` : `${d * 100} قرش`}
+                          {d >= 1 ? d + " ج" : (d * 100) + " قرش"}
                         </span>
                         <input
                           type="number"
@@ -1459,7 +1413,7 @@ export default function DailyTreasuryPage() {
                   onClick={() => { setActualCash(String(moneyTotal)); setMoneyOpen(false); }}
                   className="w-full h-14 flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 text-[15px] font-black text-white hover:bg-emerald-700 shadow-xl shadow-emerald-600/20 transition-all"
                 >
-                  <CheckCircle2 className="h-5 w-5" /> ترحيل الرصيد للإغلاق
+                  <CheckCircle2 className="h-5 w-5" /> ترحيل الرصيد
                 </motion.button>
               </div>
             </motion.div>
@@ -1500,25 +1454,25 @@ export default function DailyTreasuryPage() {
                 <button onClick={calcClear} className="h-14 rounded-2xl bg-slate-200 text-slate-700 text-[18px] font-black hover:bg-slate-300 transition-colors">AC</button>
                 <button onClick={calcNegate} className="h-14 rounded-2xl bg-slate-200 text-slate-700 text-[18px] font-black hover:bg-slate-300 transition-colors">±</button>
                 <button onClick={calcPercent} className="h-14 rounded-2xl bg-slate-200 text-slate-700 text-[18px] font-black hover:bg-slate-300 transition-colors">%</button>
-                <button onClick={() => calcOperator("÷")} className={`h-14 rounded-2xl text-[20px] font-black transition-colors ${calcOp === "÷" ? "bg-indigo-600 text-white" : "bg-indigo-100 text-indigo-700 hover:bg-indigo-200"}`}>÷</button>
+                <button onClick={() => calcOperator("÷")} className={"h-14 rounded-2xl text-[20px] font-black transition-colors " + (calcOp === "÷" ? "bg-indigo-600 text-white" : "bg-indigo-100 text-indigo-700 hover:bg-indigo-200")}>÷</button>
 
                 {/* Row 2 */}
                 <button onClick={() => calcInput("7")} className="h-14 rounded-2xl bg-white text-slate-800 text-[20px] font-black hover:bg-slate-100 transition-colors border border-slate-200">7</button>
                 <button onClick={() => calcInput("8")} className="h-14 rounded-2xl bg-white text-slate-800 text-[20px] font-black hover:bg-slate-100 transition-colors border border-slate-200">8</button>
                 <button onClick={() => calcInput("9")} className="h-14 rounded-2xl bg-white text-slate-800 text-[20px] font-black hover:bg-slate-100 transition-colors border border-slate-200">9</button>
-                <button onClick={() => calcOperator("×")} className={`h-14 rounded-2xl text-[20px] font-black transition-colors ${calcOp === "×" ? "bg-indigo-600 text-white" : "bg-indigo-100 text-indigo-700 hover:bg-indigo-200"}`}>×</button>
+                <button onClick={() => calcOperator("×")} className={"h-14 rounded-2xl text-[20px] font-black transition-colors " + (calcOp === "×" ? "bg-indigo-600 text-white" : "bg-indigo-100 text-indigo-700 hover:bg-indigo-200")}>×</button>
 
                 {/* Row 3 */}
                 <button onClick={() => calcInput("4")} className="h-14 rounded-2xl bg-white text-slate-800 text-[20px] font-black hover:bg-slate-100 transition-colors border border-slate-200">4</button>
                 <button onClick={() => calcInput("5")} className="h-14 rounded-2xl bg-white text-slate-800 text-[20px] font-black hover:bg-slate-100 transition-colors border border-slate-200">5</button>
                 <button onClick={() => calcInput("6")} className="h-14 rounded-2xl bg-white text-slate-800 text-[20px] font-black hover:bg-slate-100 transition-colors border border-slate-200">6</button>
-                <button onClick={() => calcOperator("-")} className={`h-14 rounded-2xl text-[20px] font-black transition-colors ${calcOp === "-" ? "bg-indigo-600 text-white" : "bg-indigo-100 text-indigo-700 hover:bg-indigo-200"}`}>−</button>
+                <button onClick={() => calcOperator("-")} className={"h-14 rounded-2xl text-[20px] font-black transition-colors " + (calcOp === "-" ? "bg-indigo-600 text-white" : "bg-indigo-100 text-indigo-700 hover:bg-indigo-200")}>−</button>
 
                 {/* Row 4 */}
                 <button onClick={() => calcInput("1")} className="h-14 rounded-2xl bg-white text-slate-800 text-[20px] font-black hover:bg-slate-100 transition-colors border border-slate-200">1</button>
                 <button onClick={() => calcInput("2")} className="h-14 rounded-2xl bg-white text-slate-800 text-[20px] font-black hover:bg-slate-100 transition-colors border border-slate-200">2</button>
                 <button onClick={() => calcInput("3")} className="h-14 rounded-2xl bg-white text-slate-800 text-[20px] font-black hover:bg-slate-100 transition-colors border border-slate-200">3</button>
-                <button onClick={() => calcOperator("+")} className={`h-14 rounded-2xl text-[20px] font-black transition-colors ${calcOp === "+" ? "bg-indigo-600 text-white" : "bg-indigo-100 text-indigo-700 hover:bg-indigo-200"}`}>+</button>
+                <button onClick={() => calcOperator("+")} className={"h-14 rounded-2xl text-[20px] font-black transition-colors " + (calcOp === "+" ? "bg-indigo-600 text-white" : "bg-indigo-100 text-indigo-700 hover:bg-indigo-200")}>+</button>
 
                 {/* Row 5 */}
                 <button onClick={() => calcInput("0")} className="col-span-2 h-14 rounded-2xl bg-white text-slate-800 text-[20px] font-black hover:bg-slate-100 transition-colors border border-slate-200">0</button>
@@ -1539,46 +1493,6 @@ export default function DailyTreasuryPage() {
       </AnimatePresence>
 
 
-      <AnimatePresence>
-        {closeConfirmOpen && (
-          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" dir="rtl">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-slate-900/55 backdrop-blur-sm" onClick={() => setCloseConfirmOpen(false)} />
-            <motion.div variants={modalVariants} initial="hidden" animate="show" exit="exit" className="relative w-full max-w-2xl overflow-hidden rounded-[2rem] bg-white shadow-2xl border border-slate-100">
-              <div className="border-b border-slate-100 bg-slate-50 px-6 py-5">
-                <h3 className="text-[18px] font-black text-zinc-900">مراجعة إغلاق اليومية</h3>
-                <p className="mt-1 text-[12px] font-bold text-slate-500">راجع النتيجة قبل الاعتماد. بعد الإغلاق سيتم منع إدخال حركات على هذا اليوم حتى تعيد فتحه.</p>
-              </div>
-              <div className="grid grid-cols-2 gap-3 p-6">
-                {[
-                  ["رصيد سابق", summary?.previous_balance ?? summary?.opening_balance],
-                  ["إجمالي الداخل النقدي", cashIn],
-                  ["إجمالي الخارج النقدي", cashOut],
-                  ["المتوقع في الخزينة", expected],
-                  ["الرصيد الفعلي", actualCash],
-                  ["العجز / الزيادة", draftDiscrepancy],
-                ].map(([label, value]) => (
-                  <div key={label} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <div className="text-[10px] font-black text-slate-400">{label}</div>
-                    <div className={`mt-1 font-mono text-[18px] font-black ${label === "العجز / الزيادة" && Number(value) < 0 ? "text-rose-700" : "text-zinc-900"}`}>
-                      {label === "العجز / الزيادة" && Number(value) > 0 ? "+" : ""}{fmt(value)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="mx-6 mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
-                <div className="mb-2 flex items-center gap-2 text-[12px] font-black text-amber-800"><AlertCircle className="h-4 w-4" /> اقتراحات قبل الإغلاق</div>
-                {discrepancySuggestions.map((tip, idx) => <div key={idx} className="text-[11px] font-bold text-amber-700 leading-5">• {tip}</div>)}
-              </div>
-              <div className="flex items-center justify-end gap-3 border-t border-slate-100 px-6 py-4">
-                <button onClick={() => setCloseConfirmOpen(false)} className="rounded-xl border border-slate-200 px-4 py-2 text-[12px] font-black text-slate-600 hover:bg-slate-50">رجوع للمراجعة</button>
-                <button onClick={confirmCloseDay} disabled={closing} className="rounded-xl bg-zinc-950 px-6 py-2 text-[12px] font-black text-white hover:bg-zinc-800 disabled:opacity-40">
-                  {closing ? "جاري الإغلاق..." : "اعتماد الإغلاق النهائي"}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
 
       {printOpen && (
         <PrintPreviewModal
@@ -1587,7 +1501,7 @@ export default function DailyTreasuryPage() {
           docType="daily_treasury"
           renderContent={(settings) => (
             <div style={{ fontFamily: settings.print_font || "Cairo", direction: "rtl", padding: 24, fontSize: 12, color: "#1e293b" }}>
-              <div style={{ borderBottom: `3px solid ${settings.accent_color || "#0f172a"}`, paddingBottom: 16, marginBottom: 16 }}>
+              <div style={{ borderBottom: "3px solid " + (settings.accent_color || "#0f172a"), paddingBottom: 16, marginBottom: 16 }}>
                 <div style={{ fontSize: 22, fontWeight: 900 }}>تقرير الخزينة اليومية</div>
                 <div style={{ color: "#64748b" }}>التاريخ: {date}</div>
               </div>
@@ -1600,10 +1514,10 @@ export default function DailyTreasuryPage() {
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                 <thead><tr style={{ background: settings.accent_color || "#0f172a", color: "white" }}>{["التاريخ", "النوع", "المرجع", "الطرف", "المبلغ"].map((h) => <th key={h} style={{ padding: 8, textAlign: "right" }}>{h}</th>)}</tr></thead>
                 <tbody>{sortedTransactions.map((tx, i) => (
-                  <tr key={`${tx.doc_type}-${tx.id}-${i}`} style={{ background: i % 2 ? "white" : "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
+                  <tr key={tx.doc_type + "-" + tx.id + "-" + i} style={{ background: i % 2 ? "white" : "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
                     <td style={{ padding: 8 }}>{tx.created_at?.slice(0, 10) || date}</td>
                     <td style={{ padding: 8 }}>{DOC_TYPE_LABEL[tx.doc_type] || tx.doc_type}</td>
-                    <td style={{ padding: 8 }}>{tx.doc_no || `#${tx.id}`}</td>
+                    <td style={{ padding: 8 }}>{tx.doc_no || "#" + tx.id}</td>
                     <td style={{ padding: 8 }}>{tx.party || tx.description || "—"}</td>
                     <td style={{ padding: 8, fontWeight: 900 }}>{fmt(tx.amount)} ج.م</td>
                   </tr>

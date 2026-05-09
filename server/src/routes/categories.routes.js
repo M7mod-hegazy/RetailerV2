@@ -4,7 +4,7 @@ const { getDb } = require("../config/database");
 const router = express.Router();
 
 router.get("/", (req, res) => {
-  const showArchived = req.query.archived === 'true';
+  const showArchived = req.query.archived === "true";
   const query = showArchived
     ? "SELECT * FROM item_categories WHERE is_active = 0 ORDER BY CAST(COALESCE(sku_prefix, '0') AS INTEGER) ASC, id ASC"
     : "SELECT * FROM item_categories WHERE is_active = 1 OR is_active IS NULL ORDER BY CAST(COALESCE(sku_prefix, '0') AS INTEGER) ASC, id ASC";
@@ -14,13 +14,32 @@ router.get("/", (req, res) => {
 
 router.post("/", (req, res) => {
   const payload = req.body || {};
-  const maxRow = getDb()
+  const requestedPrefix = String(payload.sku_prefix || "").trim();
+  const nextPrefix = requestedPrefix || String(((getDb()
     .prepare("SELECT MAX(CAST(sku_prefix AS INTEGER)) AS m FROM item_categories WHERE sku_prefix GLOB '[0-9]*'")
-    .get();
-  const nextPrefix = String((maxRow?.m || 0) + 1);
+    .get())?.m || 0) + 1);
+
+  if (requestedPrefix) {
+    const existingPrefix = getDb().prepare("SELECT * FROM item_categories WHERE sku_prefix = ?").get(requestedPrefix);
+    if (existingPrefix) {
+      if (Number(existingPrefix.is_active) === 0) {
+        getDb()
+          .prepare("UPDATE item_categories SET name = ?, image_url = ?, is_active = 1 WHERE id = ?")
+          .run(payload.name || existingPrefix.name, payload.image_url !== undefined ? payload.image_url : existingPrefix.image_url, existingPrefix.id);
+        return res.json({
+          success: true,
+          restored: true,
+          data: getDb().prepare("SELECT * FROM item_categories WHERE id = ?").get(existingPrefix.id),
+        });
+      }
+      return res.status(409).json({ success: false, message: "كود الفئة مستخدم بالفعل.", data: existingPrefix });
+    }
+  }
+
   const info = getDb()
     .prepare("INSERT INTO item_categories (name, parent_id, sku_prefix, image_url) VALUES (?, ?, ?, ?)")
     .run(payload.name, payload.parent_id || null, nextPrefix, payload.image_url || null);
+
   res.status(201).json({
     success: true,
     data: getDb().prepare("SELECT * FROM item_categories WHERE id = ?").get(info.lastInsertRowid),
@@ -42,18 +61,16 @@ router.put("/:id", (req, res) => {
 router.delete("/:id", (req, res) => {
   const db = getDb();
   const countRow = db.prepare("SELECT COUNT(*) AS c FROM items WHERE category_id = ?").get(req.params.id);
-  
+
   if (Number(countRow?.c || 0) > 0) {
-    // Soft delete - mark as inactive
-    db.prepare("UPDATE item_categories SET is_active = 0 WHERE id = ?").run(req.params.id);
-    return res.json({ 
-      success: true, 
-      archived: true,
-      message: "تم أرشفة الفئة لأنها تحتوي على أصناف" 
+    return res.status(400).json({
+      success: false,
+      blocked: true,
+      items_count: Number(countRow.c || 0),
+      message: "لا يمكن حذف الفئة قبل نقل أو حذف كل الأصناف المرتبطة بها.",
     });
   }
-  
-  // Hard delete if no items
+
   db.prepare("DELETE FROM item_categories WHERE id = ?").run(req.params.id);
   res.json({ success: true });
 });

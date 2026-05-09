@@ -1,7 +1,6 @@
 import React from "react";
 import { Boxes, ArrowRightLeft, ClipboardList, Package2 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
-import PageWrapper from "../../components/ui/PageWrapper";
 import { Tabs } from "../../components/ui/Tabs";
 import StockLevelsPage from "../stock/StockLevelsPage";
 import StockMovementsPage from "../stock/StockMovementsPage";
@@ -26,9 +25,9 @@ export default function InventoryWorkspacePage() {
   };
 
   return (
-    <PageWrapper className="mx-auto max-w-[1440px] px-4 py-4">
-      <section className="space-y-5">
-        <div className="rounded-[28px] border border-slate-200 bg-white px-5 py-5 shadow-sm">
+    <div className="h-full flex flex-col p-4">
+      <section className="space-y-4 h-full flex flex-col">
+        <div className="rounded-[28px] border border-slate-200 bg-white px-5 py-5 shadow-sm shrink-0">
           <div className="flex items-center gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-50 text-amber-700">
               <Boxes className="h-5 w-5" />
@@ -49,13 +48,13 @@ export default function InventoryWorkspacePage() {
           </div>
         </div>
 
-        <div key={activeTab}>
+        <div key={activeTab} className="flex-1 min-h-0">
           {activeTab === "levels" ? <StockLevelsPage /> : null}
           {activeTab === "movements" ? <StockMovementsPage /> : null}
           {activeTab === "transfer" ? <StockTransferPage /> : null}
           {activeTab === "count" ? <PhysicalCountPage /> : null}
         </div>
       </section>
-    </PageWrapper>
+    </div>
   );
 }

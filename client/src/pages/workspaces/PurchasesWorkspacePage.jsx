@@ -3,9 +3,9 @@ import { PackageSearch, FileSpreadsheet, ArrowLeftRight } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import PageWrapper from "../../components/ui/PageWrapper";
 import { Tabs } from "../../components/ui/Tabs";
-import PurchasesListPage from "../purchases/PurchasesListPage";
+import PurchaseFormPage from "../purchases/PurchaseFormPage";
 import PurchaseOrdersPage from "../purchases/PurchaseOrdersPage";
-import PurchaseReturnPage from "../purchases/PurchaseReturnPage";
+import PurchaseReturnFormPage from "../purchases/PurchaseReturnFormPage";
 
 const tabs = [
   { value: "purchases", label: "المشتريات", icon: PackageSearch },
@@ -46,9 +46,9 @@ export default function PurchasesWorkspacePage() {
         </div>
 
         <div key={activeTab}>
-          {activeTab === "purchases" ? <PurchasesListPage /> : null}
+          {activeTab === "purchases" ? <PurchaseFormPage /> : null}
           {activeTab === "orders" ? <PurchaseOrdersPage /> : null}
-          {activeTab === "returns" ? <PurchaseReturnPage /> : null}
+          {activeTab === "returns" ? <PurchaseReturnFormPage /> : null}
         </div>
       </section>
     </PageWrapper>

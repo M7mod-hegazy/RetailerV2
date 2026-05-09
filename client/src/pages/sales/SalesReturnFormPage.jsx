@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Search, Trash2, Plus, Minus, History, CheckCircle2, AlertCircle, RotateCcw } from "lucide-react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { ArrowLeft, Search, Trash2, Plus, Minus, History, CheckCircle2, AlertCircle, RotateCcw, ExternalLink } from "lucide-react";
+import { useNavigate, useLocation, Link } from "react-router-dom";
 import api from "../../services/api";
+import { useInvoiceActivation } from "../../hooks/useInvoiceActivation";
 
 function formatMoney(v) {
   return Number(v || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2 });
@@ -33,6 +34,12 @@ export default function SalesReturnFormPage() {
   const [message, setMessage] = useState({ text: "", type: "" });
   const [originalDocNo, setOriginalDocNo] = useState(null);
   const [originalCreatedAt, setOriginalCreatedAt] = useState(null);
+  const [customerBalance, setCustomerBalance] = useState(null);
+  const [ajalDebt, setAjalDebt] = useState(0);
+  const [editActivation, setEditActivation] = useState(null);
+
+  const { docNo, createdAt: invoiceCreatedAt, isActive: invoiceIsActive, activate: activateInvoice, reset: resetActivation } =
+    useInvoiceActivation("sales_return", editActivation);
 
   const invoiceSearchRef = useRef(null);
 
@@ -60,6 +67,7 @@ export default function SalesReturnFormPage() {
       const sr = r.data.data;
       setOriginalDocNo(sr.doc_no);
       setOriginalCreatedAt(sr.created_at);
+      setEditActivation({ docNo: sr.doc_no || "", createdAt: sr.created_at || new Date().toISOString() });
       setRefundMethod(sr.refund_method || "cash_back");
       setReason(sr.reason || "");
       if (sr.warehouse_id) setSelectedWarehouse(String(sr.warehouse_id));
@@ -79,6 +87,16 @@ export default function SalesReturnFormPage() {
       }
     }).catch(() => {});
   }, [isEditMode, editReturnId]);
+
+  // Fetch customer balance + ajal debt when customer changes
+  useEffect(() => {
+    if (!customer?.id) { setCustomerBalance(null); setAjalDebt(0); return; }
+    api.get(`/api/customers/${customer.id}`).then(r => setCustomerBalance(Number(r.data.data?.opening_balance || 0))).catch(() => {});
+    api.get(`/api/ajal-debts?customer_id=${customer.id}&status=pending`).then(r => {
+      const rows = r.data.data || [];
+      setAjalDebt(rows.reduce((s, d) => s + Number(d.remaining_amount || 0), 0));
+    }).catch(() => {});
+  }, [customer?.id]);
 
   // Product search debounce
   useEffect(() => {
@@ -107,6 +125,7 @@ export default function SalesReturnFormPage() {
   }
 
   function loadInvoice(inv) {
+    activateInvoice();
     setLoadedInvoice(inv);
     setCart((inv.lines || []).map(l => ({
       key: `inv-${l.id}`,
@@ -124,6 +143,7 @@ export default function SalesReturnFormPage() {
   }
 
   function addProductToCart(item) {
+    activateInvoice();
     setCart(prev => {
       const existing = prev.find(l => l.item_id === item.id && !l.invoice_line_id);
       if (existing) return prev.map(l => l === existing ? { ...l, quantity: l.quantity + 1 } : l);
@@ -161,6 +181,7 @@ export default function SalesReturnFormPage() {
     setMessage({ text: "", type: "" });
     try {
       const payload = {
+        doc_no: docNo || undefined,
         customer_id: customer?.id || null,
         warehouse_id: Number(selectedWarehouse),
         refund_method: refundMethod,
@@ -173,17 +194,32 @@ export default function SalesReturnFormPage() {
           unit_price: l.unit_price,
         })),
       };
+      const savedDocNo = docNo;
       if (isEditMode) {
         await api.put(`/api/invoices/returns/${editReturnId}`, payload);
         setMessage({ text: "تم تعديل المرتجع بنجاح", type: "success" });
+        setTimeout(() => setMessage({ text: "", type: "" }), 3000);
       } else if (loadedInvoice) {
         await api.post(`/api/invoices/${loadedInvoice.id}/return`, payload);
-        setMessage({ text: "تم تسجيل المرتجع بنجاح", type: "success" });
+        // Reset to idle
+        setCart([]);
+        setLoadedInvoice(null);
+        setCustomer(null);
+        setReason("");
+        resetActivation();
+        setMessage({ text: `تم تسجيل المرتجع ${savedDocNo || ""} بنجاح`, type: "success" });
+        setTimeout(() => setMessage({ text: "", type: "" }), 4000);
       } else {
         await api.post("/api/invoices/general-return", payload);
-        setMessage({ text: "تم تسجيل المرتجع العام بنجاح", type: "success" });
+        // Reset to idle
+        setCart([]);
+        setLoadedInvoice(null);
+        setCustomer(null);
+        setReason("");
+        resetActivation();
+        setMessage({ text: `تم تسجيل المرتجع العام ${savedDocNo || ""} بنجاح`, type: "success" });
+        setTimeout(() => setMessage({ text: "", type: "" }), 4000);
       }
-      setTimeout(() => navigate("/sales/returns"), 1500);
     } catch (e) {
       setMessage({ text: e.response?.data?.message || "فشل تسجيل المرتجع", type: "error" });
     } finally { setIsSaving(false); }
@@ -224,15 +260,13 @@ export default function SalesReturnFormPage() {
               {message.text}
             </div>
           )}
-          {/* Locked fields in edit mode */}
-          {isEditMode && (
-            <div className="flex gap-1.5">
-              <input disabled value={originalDocNo || ""}
-                className="h-8 w-28 rounded-sm border border-emerald-200 bg-emerald-50 px-2 text-[11px] font-mono font-black text-emerald-600 cursor-not-allowed outline-none" />
-              <input disabled value={originalCreatedAt ? new Date(originalCreatedAt).toLocaleString("ar-EG") : ""}
-                className="h-8 w-48 rounded-sm border border-emerald-200 bg-emerald-50 px-2 text-[11px] font-mono font-black text-emerald-600 cursor-not-allowed outline-none" />
-            </div>
-          )}
+          {/* Doc number + date — always shown, idle = "—" */}
+          <div className="flex gap-1.5">
+            <input disabled value={invoiceIsActive ? (docNo || originalDocNo || "") : "—"}
+              className="h-8 w-28 rounded-sm border border-emerald-200 bg-emerald-50 px-2 text-[11px] font-mono font-black text-emerald-600 cursor-not-allowed outline-none" />
+            <input disabled value={invoiceIsActive && (invoiceCreatedAt || originalCreatedAt) ? new Date(invoiceCreatedAt || originalCreatedAt).toLocaleString("ar-EG") : "—"}
+              className="h-8 w-48 rounded-sm border border-emerald-200 bg-emerald-50 px-2 text-[11px] font-mono font-black text-emerald-600 cursor-not-allowed outline-none" />
+          </div>
           <button onClick={handleSave} disabled={isSaving || !cart.length}
             className="flex h-9 items-center gap-2 rounded-sm bg-emerald-700 px-6 text-[13px] font-black text-white hover:bg-emerald-600 disabled:opacity-40 transition-all active:scale-95 shadow-sm">
             {isSaving ? "جاري الحفظ..." : isEditMode ? "تأكيد التعديل" : "تأكيد المرتجع"}
@@ -253,12 +287,42 @@ export default function SalesReturnFormPage() {
               <label className="text-[10px] font-black text-emerald-700 uppercase tracking-widest">العميل</label>
               <select
                 value={customer?.id || ""}
-                onChange={e => setCustomer(customers.find(c => String(c.id) === e.target.value) || null)}
+                onChange={e => {
+                  const c = customers.find(c => String(c.id) === e.target.value) || null;
+                  setCustomer(c);
+                  if (c) activateInvoice();
+                }}
                 className="w-full border border-emerald-200 rounded-sm px-2 py-1.5 text-[12px] font-bold text-slate-800 outline-none focus:border-emerald-500 bg-white"
               >
                 <option value="">بدون عميل</option>
                 {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
+              {/* Customer balance panel */}
+              {customer && customerBalance !== null && (
+                <div className="space-y-1 mt-1">
+                  <div className="flex items-center justify-between rounded-sm bg-white border border-emerald-200 px-2.5 py-1.5">
+                    <span className="text-[10px] font-bold text-slate-500">رصيد العميل الحالي</span>
+                    <span className={`text-[12px] font-black font-mono ${customerBalance > 0 ? "text-rose-600" : "text-emerald-700"}`}>{customerBalance.toFixed(2)}</span>
+                  </div>
+                  {total > 0 && (
+                    <div className="flex items-center justify-between rounded-sm bg-emerald-50 border border-emerald-200 px-2.5 py-1.5">
+                      <span className="text-[10px] font-bold text-emerald-600">الرصيد بعد المرتجع</span>
+                      <span className={`text-[12px] font-black font-mono ${customerBalance - total > 0 ? "text-rose-600" : "text-emerald-700"}`}>{(customerBalance - total).toFixed(2)}</span>
+                    </div>
+                  )}
+                  {ajalDebt > 0 && (
+                    <div className="flex items-center justify-between rounded-sm bg-amber-50 border border-amber-200 px-2.5 py-1.5">
+                      <span className="text-[10px] font-bold text-amber-600">ديون آجل معلقة</span>
+                      <span className="text-[12px] font-black font-mono text-amber-700">{ajalDebt.toFixed(2)}</span>
+                    </div>
+                  )}
+                  {customer && (
+                    <Link to={`/definitions/customers/${customer.id}`} className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-emerald-700 pt-0.5">
+                      <ExternalLink className="h-3 w-3" /> عرض سجل العميل
+                    </Link>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Refund method */}

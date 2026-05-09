@@ -36,12 +36,12 @@ const NAV_MODULES = [
     id: "finance",
     icon: CircleDollarSign,
     items: [
-      { path: "/payments", label: "القبض والدفع", icon: Coins },
       { path: "/accounts/customers", label: "حسابات العملاء", icon: HeartHandshake },
       { path: "/accounts/suppliers", label: "حسابات الموردين", icon: Building },
       { path: "/operations/installments", label: "الأقساط والآجل", icon: Coins },
       { path: "/revenues", label: "تسجيل الإيرادات", icon: TrendingUp },
       { path: "/expenses", label: "تسجيل المصروفات", icon: TrendingDown },
+      { path: "/withdrawals", label: "تسجيل المسحوبات", icon: Banknote },
       { path: "/operations/payment-methods", label: "وسائل الدفع", icon: CreditCard },
       { path: "/operations/bank-operations", label: "البنوك والفيزا", icon: Landmark },
       { path: "/operations/cheques", label: "إدارة الشيكات", icon: Banknote },
@@ -53,7 +53,8 @@ const NAV_MODULES = [
     icon: Boxes,
     items: [
       { path: "/definitions/items", label: "قاعدة الأصناف", icon: Box },
-      { path: "/operations/bulk-price-update", label: "تحديث الأسعار", icon: Tags },
+      { path: "/definitions/categories", label: "أقسام الأصناف", icon: Tags },
+      { path: "/operations/bulk-price-update", label: "تحديث الأسعار", icon: TrendingUp },
       { path: "/stock/transfer", label: "تحويل مخزني", icon: ArrowRightLeft },
       { path: "/stock/physical-count", label: "الجرد الفعلي", icon: FileSpreadsheet },
       { path: "/definitions/promotions", label: "العروض والتخفيضات", icon: BadgePercent },
@@ -70,8 +71,7 @@ const NAV_MODULES = [
       { path: "/definitions/warehouses", label: "المخازن", icon: Warehouse },
       { path: "/definitions/banks", label: "البنوك", icon: Landmark },
       { path: "/definitions/units", label: "وحدات القياس", icon: Scale },
-      { path: "/definitions/expense-categories", label: "أقسام المصروفات", icon: TrendingDown },
-      { path: "/definitions/revenue-categories", label: "أقسام الإيرادات", icon: TrendingUp },
+      { path: "/definitions/financial-categories", label: "أقسام الحركات المالية", icon: Banknote },
     ],
   },
   {
@@ -129,7 +129,7 @@ export default function Sidebar({ collapsed, setCollapsed }) {
   }, [location.pathname, searchQuery, collapsed]);
 
   return (
-    <aside className={`relative z-40 flex shrink-0 h-screen flex-col border-l border-zinc-200/80 bg-white transition-all duration-300 ${collapsed ? 'w-[80px]' : 'w-[280px]'}`} dir="rtl">
+    <aside data-app-sidebar="true" className={`relative z-40 flex shrink-0 h-screen flex-col border-l border-zinc-200/80 bg-white transition-all duration-300 ${collapsed ? 'w-[80px]' : 'w-[280px]'}`} dir="rtl">
       {/* Brand */}
       <div className={`p-6 flex items-center justify-between border-b border-zinc-100 ${collapsed ? 'justify-center px-4' : ''}`}>
         <div className="flex items-center gap-3">

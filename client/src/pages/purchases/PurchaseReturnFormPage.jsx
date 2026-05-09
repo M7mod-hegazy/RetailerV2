@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Search, Trash2, Plus, Minus, History, CheckCircle2, AlertCircle, RotateCcw } from "lucide-react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { ArrowLeft, Search, Trash2, Plus, Minus, History, CheckCircle2, AlertCircle, RotateCcw, ExternalLink } from "lucide-react";
+import { useNavigate, useLocation, Link } from "react-router-dom";
 import api from "../../services/api";
+import { useInvoiceActivation } from "../../hooks/useInvoiceActivation";
 
 function formatMoney(v) {
   return Number(v || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2 });
@@ -32,6 +33,11 @@ export default function PurchaseReturnFormPage() {
   const [message, setMessage] = useState({ text: "", type: "" });
   const [originalDocNo, setOriginalDocNo] = useState(null);
   const [originalCreatedAt, setOriginalCreatedAt] = useState(null);
+  const [supplierBalance, setSupplierBalance] = useState(null);
+  const [editActivation, setEditActivation] = useState(null);
+
+  const { docNo, createdAt: invoiceCreatedAt, isActive: invoiceIsActive, activate: activateInvoice, reset: resetActivation } =
+    useInvoiceActivation("purchase_return", editActivation);
 
   const purchaseSearchRef = useRef(null);
 
@@ -59,6 +65,7 @@ export default function PurchaseReturnFormPage() {
       const pr = r.data.data;
       setOriginalDocNo(pr.doc_no);
       setOriginalCreatedAt(pr.created_at);
+      setEditActivation({ docNo: pr.doc_no || "", createdAt: pr.created_at || new Date().toISOString() });
       setSettlementType(pr.settlement_type || "account");
       if (pr.warehouse_id) setSelectedWarehouse(String(pr.warehouse_id));
       if (pr.treasury_id) setSelectedTreasury(String(pr.treasury_id));
@@ -77,6 +84,12 @@ export default function PurchaseReturnFormPage() {
       }
     }).catch(() => {});
   }, [isEditMode, editReturnId]);
+
+  // Fetch supplier balance when supplier changes
+  useEffect(() => {
+    if (!supplier?.id) { setSupplierBalance(null); return; }
+    api.get(`/api/suppliers/${supplier.id}`).then(r => setSupplierBalance(Number(r.data.data?.opening_balance || 0))).catch(() => {});
+  }, [supplier?.id]);
 
   // Product search debounce
   useEffect(() => {
@@ -105,6 +118,7 @@ export default function PurchaseReturnFormPage() {
   }
 
   function loadPurchase(p) {
+    activateInvoice();
     setLoadedPurchase(p);
     setCart((p.lines || []).map(l => ({
       key: `pur-${l.id}`,

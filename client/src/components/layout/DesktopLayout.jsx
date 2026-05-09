@@ -19,15 +19,15 @@ export default function DesktopLayout({ children, branding }) {
         
         {/* Dynamic App Environment Background Elements */}
         <div className="absolute inset-0 pointer-events-none z-0 overflow-hidden">
-          <div className="absolute top-[-10%] right-[-5%] w-[800px] h-[600px] bg-blue-100/30 rounded-full blur-[120px] mix-blend-multiply" />
-          <div className="absolute bottom-[-10%] left-[-5%] w-[600px] h-[600px] bg-emerald-100/30 rounded-full blur-[120px] mix-blend-multiply" />
+          <div className="pointer-events-none absolute top-[-10%] right-[-5%] w-[800px] h-[600px] bg-blue-100/30 rounded-full blur-[120px] mix-blend-multiply" />
+          <div className="pointer-events-none absolute bottom-[-10%] left-[-5%] w-[600px] h-[600px] bg-emerald-100/30 rounded-full blur-[120px] mix-blend-multiply" />
         </div>
 
         {/* Global Topbar - Native Flush Header */}
         <Topbar />
 
         {/* Dynamic Page Injection */}
-        <main className="relative z-10 flex-1 h-0 overflow-hidden flex flex-col">
+        <main className="relative z-10 flex-1 h-0 overflow-y-auto flex flex-col pointer-events-auto">
           {children}
         </main>
 

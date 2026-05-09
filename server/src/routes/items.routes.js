@@ -74,6 +74,17 @@ function storeItemImages(itemId, imageUrls) {
   tx();
 }
 
+function storeItemImagesInline(db, itemId, imageUrls) {
+  db.prepare("DELETE FROM item_images WHERE item_id = ?").run(itemId);
+  if (!imageUrls.length) return;
+  const stmt = db.prepare(
+    "INSERT INTO item_images (item_id, image_url, is_primary, sort_order) VALUES (?, ?, ?, ?)",
+  );
+  imageUrls.forEach((url, index) => {
+    stmt.run(itemId, url, index === 0 ? 1 : 0, index);
+  });
+}
+
 function getCategoryPrefix(categoryId) {
   if (!categoryId) return null;
   const category = getDb()
@@ -353,16 +364,281 @@ router.post("/:id/restore", (req, res) => {
   }
 });
 
+function normalizeLookup(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[إأآا]/g, "ا")
+    .replace(/[ىي]/g, "ي")
+    .replace(/[ة]/g, "ه")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function nextCategoryPrefix() {
+  const maxRow = getDb()
+    .prepare("SELECT MAX(CAST(sku_prefix AS INTEGER)) AS m FROM item_categories WHERE sku_prefix GLOB '[0-9]*'")
+    .get();
+  return String((maxRow?.m || 0) + 1);
+}
+
+function resolveCategoryId(db, payload, createCategories) {
+  if (payload.category_id) return Number(payload.category_id);
+  const name = String(payload.category_name || "").trim();
+  if (!name) return null;
+
+  const categories = db.prepare("SELECT id, name FROM item_categories").all();
+  const existing = categories.find((category) => normalizeLookup(category.name) === normalizeLookup(name));
+  if (existing) return existing.id;
+
+  if (!createCategories) return null;
+  const info = db
+    .prepare("INSERT INTO item_categories (name, sku_prefix) VALUES (?, ?)")
+    .run(name, nextCategoryPrefix());
+  return info.lastInsertRowid;
+}
+
+function resolveUnitId(db, payload) {
+  if (payload.unit_id) return Number(payload.unit_id);
+  const name = String(payload.unit_name || "").trim();
+  if (!name) return db.prepare("SELECT id FROM units ORDER BY id ASC LIMIT 1").get()?.id || null;
+
+  const units = db.prepare("SELECT id, name, symbol FROM units").all();
+  const existing = units.find((unit) => normalizeLookup(unit.name) === normalizeLookup(name) || normalizeLookup(unit.symbol) === normalizeLookup(name));
+  return existing?.id || db.prepare("SELECT id FROM units ORDER BY id ASC LIMIT 1").get()?.id || null;
+}
+
+function smartPayload(rawPayload, categoryId, unitId) {
+  const payload = rawPayload || {};
+  return {
+    code: String(payload.code || "").trim(),
+    name: String(payload.name || "").trim(),
+    name_en: payload.name_en || null,
+    barcode: String(payload.barcode || "").trim() || null,
+    category_id: categoryId || null,
+    unit_id: unitId || null,
+    sale_price: Number(payload.sale_price ?? payload.price ?? 0),
+    wholesale_price: Number(payload.wholesale_price ?? 0),
+    purchase_price: Number(payload.purchase_price ?? payload.cost_price ?? 0),
+    tax_rate: Number(payload.tax_rate ?? 0),
+    item_type: payload.item_type || "product",
+    description: payload.description || null,
+    is_active: payload.is_active === false ? 0 : 1,
+    min_stock_qty: Number(payload.min_stock_qty ?? 0),
+    stock_quantity: payload.stock_quantity === undefined || payload.stock_quantity === "" ? undefined : Number(payload.stock_quantity || 0),
+    store_name: payload.store_name || "",
+    warehouse_name: payload.warehouse_name || payload.store_name || "",
+    warehouse_id: payload.warehouse_id ? Number(payload.warehouse_id) : null,
+    image_urls: normalizeImageUrls(payload),
+  };
+}
+
+function resolveWarehouseId(db, payload, options = {}) {
+  const allowDefault = options.allowDefault !== false;
+  if (payload.warehouse_id) {
+    const existingById = db.prepare("SELECT id FROM warehouses WHERE id = ?").get(payload.warehouse_id);
+    if (existingById) return existingById.id;
+    if (!allowDefault) throw new Error("Invalid warehouse selected");
+  }
+  const name = String(payload.warehouse_name || payload.store_name || "").trim();
+  if (name) {
+    const warehouses = db.prepare("SELECT id, name FROM warehouses").all();
+    const existing = warehouses.find((warehouse) => normalizeLookup(warehouse.name) === normalizeLookup(name));
+    if (existing) return existing.id;
+  }
+  if (!allowDefault) throw new Error("Warehouse is required for warehouse stock import");
+  return db.prepare("SELECT id FROM warehouses ORDER BY id ASC LIMIT 1").get()?.id || null;
+}
+
+function setImportedStockLevel(db, itemId, payload, options = {}) {
+  if (payload.stock_quantity === undefined || !Number.isFinite(payload.stock_quantity)) return;
+  const warehouseId = resolveWarehouseId(db, payload, options);
+  if (!warehouseId) return;
+  const existing = db.prepare("SELECT quantity FROM stock_levels WHERE item_id = ? AND warehouse_id = ?").get(itemId, warehouseId);
+  const beforeQty = Number(existing?.quantity || 0);
+  const afterQty = Number(payload.stock_quantity || 0);
+  const delta = afterQty - beforeQty;
+  if (existing) {
+    db.prepare("UPDATE stock_levels SET quantity = ? WHERE item_id = ? AND warehouse_id = ?").run(afterQty, itemId, warehouseId);
+  } else {
+    db.prepare("INSERT INTO stock_levels (item_id, warehouse_id, quantity) VALUES (?, ?, ?)").run(itemId, warehouseId, afterQty);
+  }
+  if (delta !== 0) {
+    db.prepare(
+      "INSERT INTO stock_movements (item_id, warehouse_id, movement_type, quantity, before_qty, after_qty, reference_type, reference_id, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(itemId, warehouseId, "branch_receive", delta, beforeQty, afterQty, "item_import", itemId, "استيراد أصناف - استلام مخزون بدون خزنة", null);
+  }
+}
+
+function findExistingItem(db, payload, preferredId, matchField) {
+  if (preferredId) return db.prepare("SELECT * FROM items WHERE id = ?").get(Number(preferredId));
+  const allowedFields = new Set(["barcode", "code", "name"]);
+  const fields = matchField && allowedFields.has(matchField) ? [matchField] : ["barcode", "code", "name"];
+  for (const field of fields) {
+    const value = String(payload[field] || "").trim();
+    if (!value) continue;
+    const row = db.prepare(`SELECT * FROM items WHERE ${field} = ? AND deleted_at IS NULL`).get(value);
+    if (row) return row;
+  }
+  return null;
+}
+
+function insertSmartItem(db, rawPayload, createCategories) {
+  const categoryId = resolveCategoryId(db, rawPayload, createCategories);
+  const unitId = resolveUnitId(db, rawPayload);
+  const payload = smartPayload(rawPayload, categoryId, unitId);
+  if (!payload.name) throw new Error("Name is required");
+
+  const sku = computeCodeAndSequence({
+    categoryId: payload.category_id,
+    incomingCode: payload.code,
+    currentCode: null,
+  });
+  if (sku.code) {
+    const duplicate = db.prepare("SELECT id FROM items WHERE code = ? AND deleted_at IS NULL").get(sku.code);
+    if (duplicate) throw new Error("SKU already exists");
+  }
+
+  const info = db
+    .prepare(
+      `INSERT INTO items
+       (code, sku_sequence, name, name_en, barcode, category_id, unit_id, sale_price, wholesale_price, purchase_price, tax_rate, item_type, description, is_active, min_stock_qty)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      sku.code,
+      sku.skuSequence,
+      payload.name,
+      payload.name_en,
+      payload.barcode,
+      payload.category_id,
+      payload.unit_id,
+      payload.sale_price,
+      payload.wholesale_price,
+      payload.purchase_price,
+      payload.tax_rate,
+      payload.item_type,
+      payload.description,
+      payload.is_active,
+      payload.min_stock_qty,
+    );
+
+  storeItemImagesInline(db, info.lastInsertRowid, payload.image_urls);
+  setImportedStockLevel(db, info.lastInsertRowid, payload);
+  return info.lastInsertRowid;
+}
+
+function updateSmartItem(db, id, rawPayload, createCategories) {
+  const existing = db.prepare("SELECT * FROM items WHERE id = ?").get(Number(id));
+  if (!existing) throw new Error("Item not found");
+
+  const categoryId =
+    rawPayload.category_id !== undefined || rawPayload.category_name
+      ? resolveCategoryId(db, rawPayload, createCategories)
+      : existing.category_id;
+  const unitId =
+    rawPayload.unit_id !== undefined || rawPayload.unit_name
+      ? resolveUnitId(db, rawPayload)
+      : existing.unit_id;
+  const payload = smartPayload({ ...existing, ...rawPayload }, categoryId, unitId);
+
+  const sku = computeCodeAndSequence({
+    categoryId: payload.category_id,
+    incomingCode: rawPayload.code === undefined ? undefined : payload.code,
+    currentCode: existing.code,
+  });
+  if (sku.code) {
+    const duplicate = db.prepare("SELECT id FROM items WHERE code = ? AND id <> ? AND deleted_at IS NULL").get(sku.code, Number(id));
+    if (duplicate) throw new Error("SKU already exists");
+  }
+
+  db.prepare(
+    `UPDATE items
+     SET code = ?, sku_sequence = ?, name = ?, name_en = ?, barcode = ?, category_id = ?, unit_id = ?, sale_price = ?, wholesale_price = ?, purchase_price = ?, tax_rate = ?, item_type = ?, description = ?, is_active = ?, min_stock_qty = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+  ).run(
+    sku.code,
+    sku.skuSequence,
+    payload.name || existing.name,
+    payload.name_en,
+    payload.barcode,
+    payload.category_id,
+    payload.unit_id,
+    payload.sale_price,
+    payload.wholesale_price,
+    payload.purchase_price,
+    payload.tax_rate,
+    payload.item_type,
+    payload.description,
+    payload.is_active,
+    payload.min_stock_qty,
+    Number(id),
+  );
+
+  if (rawPayload.image_urls !== undefined || rawPayload.image_urls_text !== undefined) {
+    storeItemImagesInline(db, Number(id), payload.image_urls);
+  }
+  setImportedStockLevel(db, Number(id), payload);
+}
+
 router.post("/import", (req, res, next) => {
   const db = getDb();
   const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
   const overwriteExisting = req.body?.overwrite_existing === true;
+  const createCategories = req.body?.create_categories !== false;
+  const smartMode = req.body?.mode === "smart" || rows.some((row) => row && row.payload);
 
   if (!rows.length) {
     return res.status(400).json({ success: false, message: "No rows provided" });
   }
 
   try {
+    if (smartMode) {
+      const data = { inserted: 0, updated: 0, skipped: 0, failed: 0, errors: [] };
+      const warehouseImportItems = new Map();
+      const tx = db.transaction(() => {
+        rows.forEach((entry, index) => {
+          const action = entry.action || "insert";
+          const payload = entry.payload || entry;
+          const sourceRow = entry.source_row || index + 1;
+          try {
+            if (action === "skip") {
+              data.skipped += 1;
+              return;
+            }
+            if (action === "warehouse_stock") {
+              const itemKey = normalizeLookup(payload.code) || normalizeLookup(payload.barcode) || normalizeLookup(payload.name);
+              let itemId = warehouseImportItems.get(itemKey);
+              if (!itemId) {
+                const existing = findExistingItem(db, payload, entry.existing_id, entry.match_field);
+                itemId = existing?.id || insertSmartItem(db, { ...payload, stock_quantity: undefined }, createCategories);
+                warehouseImportItems.set(itemKey, itemId);
+                if (existing?.id) data.updated += 1;
+                else data.inserted += 1;
+              }
+              setImportedStockLevel(db, itemId, smartPayload(payload, payload.category_id || null, payload.unit_id || null), { allowDefault: false });
+              return;
+            }
+            if (action === "update") {
+              const existing = findExistingItem(db, payload, entry.existing_id, entry.match_field);
+              if (!existing) throw new Error("Matching item not found");
+              updateSmartItem(db, existing.id, payload, createCategories);
+              data.updated += 1;
+              return;
+            }
+            insertSmartItem(db, payload, createCategories);
+            data.inserted += 1;
+          } catch (error) {
+            data.failed += 1;
+            data.errors.push({ row: sourceRow, message: error.message });
+          }
+        });
+      });
+      tx();
+      return res.json({ success: true, data });
+    }
+
     let success = 0;
     let failed = 0;
     const errors = [];
@@ -444,6 +720,42 @@ router.post("/import", (req, res, next) => {
 
     tx();
     return res.json({ success: true, data: { success, failed, errors } });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.post("/bulk-update", (req, res, next) => {
+  const db = getDb();
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+  const createCategories = req.body?.create_categories !== false;
+
+  if (!rows.length) {
+    return res.status(400).json({ success: false, message: "No rows provided" });
+  }
+
+  try {
+    const data = { updated: 0, skipped: 0, failed: 0, errors: [] };
+    const tx = db.transaction(() => {
+      rows.forEach((entry, index) => {
+        const payload = entry.payload || {};
+        const sourceRow = entry.source_row || index + 1;
+        try {
+          const existing = findExistingItem(db, payload, entry.existing_id, entry.match_field);
+          if (!existing) {
+            data.skipped += 1;
+            return;
+          }
+          updateSmartItem(db, existing.id, payload, createCategories);
+          data.updated += 1;
+        } catch (error) {
+          data.failed += 1;
+          data.errors.push({ row: sourceRow, message: error.message });
+        }
+      });
+    });
+    tx();
+    return res.json({ success: true, data });
   } catch (error) {
     return next(error);
   }

@@ -1,11 +1,13 @@
 import React, { Suspense, lazy, useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import AppShell from "./components/layout/AppShell";
 import { useAuthStore } from "./stores/authStore";
 import api from "./services/api";
 import ScreenLock from "./components/auth/ScreenLock";
 import GlobalSearchPage from "./pages/search/GlobalSearchPage";
 import FullPageLoader from "./components/ui/FullPageLoader";
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } } });
 
 const SetupWizard = lazy(() => import("./pages/setup/SetupWizard"));
 const LoginPage = lazy(() => import("./pages/auth/LoginPage"));
@@ -119,6 +121,7 @@ export default function App() {
             <AuthGuard>
               <SetupGuard>
                 <AppShell>
+                  <QueryClientProvider client={queryClient}>
                   <Routes>
                     <Route path="dashboard" element={<DashboardPage />} />
                     <Route path="analytics" element={<AnalyticsPage />} />
@@ -194,6 +197,7 @@ export default function App() {
                     <Route path="stock/physical-count" element={<PhysicalCountPage />} />
                     <Route path="*" element={<Navigate to="/dashboard" replace />} />
                   </Routes>
+                  </QueryClientProvider>
                 </AppShell>
               </SetupGuard>
             </AuthGuard>

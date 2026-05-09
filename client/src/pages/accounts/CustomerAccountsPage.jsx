@@ -244,8 +244,8 @@ export default function CustomerAccountsPage() {
                     <div className="flex items-center justify-between gap-2">
                       <div className="text-[10px] text-slate-400 font-mono truncate">{c.phone || c.code || "—"}</div>
                       <div className="flex items-center gap-1 shrink-0">
-                        {b < 0 && <span className="text-[9px] font-black bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full">ندين له</span>}
-                        {b > 0 && <span className="text-[9px] font-black bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded-full">يديننا</span>}
+                        {b < 0 && <span className="text-[9px] font-black bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full">له رصيد</span>}
+                        {b > 0 && <span className="text-[9px] font-black bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded-full">عليه رصيد</span>}
                         <span className={`text-[12px] font-black font-mono ${b > 0 ? "text-rose-600" : b < 0 ? "text-emerald-600" : "text-slate-400"}`}>
                           {fmt(Math.abs(b))}
                         </span>
@@ -304,7 +304,7 @@ export default function CustomerAccountsPage() {
               }`}>
                 <div>
                   <div className={`text-[11px] font-black uppercase tracking-widest mb-1 ${bal > 0 ? "text-rose-500" : bal < 0 ? "text-emerald-600" : "text-slate-400"}`}>
-                    {bal > 0 ? "العميل يديننا — رصيد مدين" : bal < 0 ? "نحن ندين للعميل — رصيد دائن" : "الحساب مسوّى"}
+                    {bal > 0 ? "عليه رصيد" : bal < 0 ? "له رصيد" : "الحساب مسوّى"}
                   </div>
                   <div className={`text-[36px] font-black font-mono leading-none ${bal > 0 ? "text-rose-600" : bal < 0 ? "text-emerald-600" : "text-slate-400"}`}>
                     {fmt(Math.abs(bal))}
@@ -591,13 +591,13 @@ export default function CustomerAccountsPage() {
             </p>
             {bal > 0 && (
               <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 mb-4 text-[12px] font-bold text-rose-800">
-                العميل يديننا <span className="font-mono font-black">{fmt(bal)} ج.م</span> — هذا المبلغ سيُخصم من الرصيد بعد التحصيل.
-                {Number(payForm.amount) > bal && bal > 0 && <div className="mt-1 text-amber-700 font-black">⚠️ المبلغ المدخل ({fmt(Number(payForm.amount))}) أكبر من الرصيد — الفرق ({fmt(Number(payForm.amount) - bal)} ج.م) سيُسجَّل كرصيد دائن نحن ندين به للعميل.</div>}
+                عليه رصيد <span className="font-mono font-black">{fmt(bal)} ج.م</span>
+                {Number(payForm.amount) > bal && bal > 0 && <div className="mt-1 text-amber-700 font-black">⚠️ المبلغ المدخل أكبر من الرصيد — الفرق سيصبح له رصيد.</div>}
               </div>
             )}
             {bal < 0 && (
               <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 mb-4 text-[12px] font-bold text-emerald-800">
-                نحن ندين للعميل <span className="font-mono font-black">{fmt(Math.abs(bal))} ج.م</span> — هذا التحصيل سيُقلل ما ندين به.
+                له رصيد <span className="font-mono font-black">{fmt(Math.abs(bal))} ج.م</span>
               </div>
             )}
             {bal === 0 && (
@@ -657,9 +657,9 @@ export default function CustomerAccountsPage() {
               <span className={`font-mono font-black ${bal > 0 ? "text-rose-600" : bal < 0 ? "text-emerald-600" : "text-slate-500"}`}>
                 {fmt(Math.abs(bal))} ج.م
               </span>
-              {bal > 0 && <span className="text-rose-500 text-[10px]"> — العميل يديننا</span>}
-              {bal < 0 && <span className="text-emerald-600 text-[10px]"> — نحن ندين للعميل</span>}
-              {bal === 0 && <span className="text-slate-400 text-[10px]"> — الحساب مسوّى</span>}
+              {bal > 0 && <span className="text-rose-500 text-[10px]"> — عليه رصيد</span>}
+              {bal < 0 && <span className="text-emerald-600 text-[10px]"> — له رصيد</span>}
+              {bal === 0 && <span className="text-slate-400 text-[10px]"> — مسوّى</span>}
             </p>
 
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-5">
@@ -701,7 +701,7 @@ export default function CustomerAccountsPage() {
                     {fmt(Math.abs(newBal))} ج.م
                   </p>
                   <p className={`text-[10px] font-black mt-0.5 ${newBal > 0 ? "text-rose-400" : newBal < 0 ? "text-emerald-500" : "text-slate-400"}`}>
-                    {newBal > 0 ? "العميل يديننا" : newBal < 0 ? "نحن ندين للعميل" : "✓ الحساب مسوّى"}
+                    {newBal > 0 ? "عليه رصيد" : newBal < 0 ? "له رصيد" : "✓ مسوّى"}
                   </p>
                 </div>
                 );

@@ -19,7 +19,7 @@ function getSessionWithLines(db, sessionId) {
   const lines = db
     .prepare(
       `SELECT pcl.*,
-              i.name AS item_name, i.barcode,
+              i.name AS item_name, i.barcode, i.code AS item_code,
               u.name AS unit_name,
               ic.name AS category_name,
               w.name AS warehouse_name
@@ -41,11 +41,16 @@ router.get("/levels", (req, res) => {
   const params = [];
 
   let sql;
+  const db = getDb();
+  const globalMinMargin = db.prepare("SELECT min_margin_percent FROM settings LIMIT 1").get()?.min_margin_percent ?? 15;
+
   if (warehouseId) {
     sql = `
-      SELECT i.id AS item_id, i.name AS item_name, i.barcode, i.min_stock_qty, i.sale_price,
+      SELECT i.id AS item_id, i.name AS item_name, i.barcode, i.code, i.min_stock_qty, i.sale_price,
+             i.purchase_price, i.min_margin_percent AS item_min_margin,
              u.name AS unit_name, c.name AS category_name,
              COALESCE(sl.quantity, 0) AS quantity,
+             COALESCE(sl.wacc, i.purchase_price) AS wacc,
              ? AS warehouse_id, w.name AS warehouse_name
       FROM items i
       LEFT JOIN stock_levels sl ON sl.item_id = i.id AND sl.warehouse_id = ?
@@ -56,15 +61,17 @@ router.get("/levels", (req, res) => {
     `;
     params.push(warehouseId, warehouseId, warehouseId);
     if (search) {
-      sql += " AND (i.name LIKE ? OR i.barcode LIKE ?)";
-      params.push(`%${search}%`, `%${search}%`);
+      sql += " AND (i.name LIKE ? OR i.barcode LIKE ? OR i.code LIKE ?)";
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
     }
     sql += " ORDER BY i.name ASC";
   } else {
     sql = `
-      SELECT i.id AS item_id, i.name AS item_name, i.barcode, i.min_stock_qty, i.sale_price,
+      SELECT i.id AS item_id, i.name AS item_name, i.barcode, i.code, i.min_stock_qty, i.sale_price,
+             i.purchase_price, i.min_margin_percent AS item_min_margin,
              u.name AS unit_name, c.name AS category_name,
              COALESCE(sl.quantity, 0) AS quantity,
+             COALESCE(sl.wacc, i.purchase_price) AS wacc,
              sl.warehouse_id, w.name AS warehouse_name
       FROM items i
       LEFT JOIN stock_levels sl ON sl.item_id = i.id
@@ -74,13 +81,20 @@ router.get("/levels", (req, res) => {
       WHERE i.is_active = 1
     `;
     if (search) {
-      sql += " AND (i.name LIKE ? OR i.barcode LIKE ?)";
-      params.push(`%${search}%`, `%${search}%`);
+      sql += " AND (i.name LIKE ? OR i.barcode LIKE ? OR i.code LIKE ?)";
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
     }
     sql += " ORDER BY i.name ASC, w.name ASC";
   }
 
-  const data = getDb().prepare(sql).all(...params);
+  const raw = db.prepare(sql).all(...params);
+  const data = raw.map(r => {
+    const cost = r.wacc || r.purchase_price || 0;
+    const price = r.sale_price || 0;
+    const margin_pct = price > 0 ? ((price - cost) / price) * 100 : null;
+    const threshold = r.item_min_margin != null ? r.item_min_margin : globalMinMargin;
+    return { ...r, margin_pct: margin_pct != null ? Math.round(margin_pct * 10) / 10 : null, margin_threshold: threshold, below_margin: margin_pct != null && margin_pct < threshold };
+  });
   res.json({ success: true, data });
 });
 
@@ -113,16 +127,18 @@ router.get("/movements", (req, res) => {
   const sortCol = sortMap[sort_by] || sortMap.created_at;
   const sortDir = String(sort_dir).toLowerCase() === "asc" ? "ASC" : "DESC";
   let sql = `
-    SELECT sm.*, i.name AS item_name, i.barcode, w.name AS warehouse_name
+    SELECT sm.*, i.name AS item_name, i.barcode, i.code AS item_code, w.name AS warehouse_name,
+           u.username AS created_by_name
     FROM stock_movements sm
     LEFT JOIN items i ON i.id = sm.item_id
     LEFT JOIN warehouses w ON w.id = sm.warehouse_id
+    LEFT JOIN users u ON u.id = sm.created_by
     WHERE sm.deleted_at IS NULL
   `;
   if (warehouse_id) { sql += " AND sm.warehouse_id = ?"; params.push(Number(warehouse_id)); }
   if (item_id) { sql += " AND sm.item_id = ?"; params.push(Number(item_id)); }
   if (movement_type) { sql += " AND sm.movement_type = ?"; params.push(movement_type); }
-  if (search) { sql += " AND (i.name LIKE ? OR i.barcode LIKE ?)"; params.push(`%${search}%`, `%${search}%`); }
+  if (search) { sql += " AND (i.name LIKE ? OR i.barcode LIKE ? OR i.code LIKE ?)"; params.push(`%${search}%`, `%${search}%`, `%${search}%`); }
   if (date_from) { sql += " AND date(sm.created_at) >= date(?)"; params.push(String(date_from)); }
   if (date_to) { sql += " AND date(sm.created_at) <= date(?)"; params.push(String(date_to)); }
   sql += ` ORDER BY ${sortCol} ${sortDir}, sm.id DESC`;
@@ -210,11 +226,12 @@ router.post("/transfer/bulk", (req, res, next) => {
     if (!Array.isArray(items) || !items.length) {
       return res.status(400).json({ success: false, message: "يجب اختيار صنف واحد على الأقل" });
     }
+    const userId = req.user?.id || null;
     const results = [];
     const errors = [];
     for (const it of items) {
       try {
-        const r = transferStock({ item_id: it.item_id, from_warehouse_id, to_warehouse_id, quantity: it.quantity, notes });
+        const r = transferStock({ item_id: it.item_id, from_warehouse_id, to_warehouse_id, quantity: it.quantity, notes, user_id: userId });
         results.push(r);
       } catch (e) {
         errors.push({ item_id: it.item_id, message: e.message });
@@ -229,9 +246,15 @@ router.post("/transfer/bulk", (req, res, next) => {
 router.post("/adjust", (req, res, next) => {
   const db = getDb();
   try {
+    // Guard: ensure before_qty/after_qty columns exist
+    const smCols = db.prepare("PRAGMA table_info(stock_movements)").all().map(c => c.name);
+    if (!smCols.includes("before_qty")) db.exec("ALTER TABLE stock_movements ADD COLUMN before_qty INTEGER");
+    if (!smCols.includes("after_qty"))  db.exec("ALTER TABLE stock_movements ADD COLUMN after_qty INTEGER");
+
     const payload = req.body || {};
     const itemId = Number(payload.item_id);
     const warehouseId = Number(payload.warehouse_id);
+    const userId = req.user?.id || null;
     const current = db
       .prepare("SELECT quantity FROM stock_levels WHERE warehouse_id = ? AND item_id = ?")
       .get(warehouseId, itemId);
@@ -244,8 +267,8 @@ router.post("/adjust", (req, res, next) => {
     if (variance !== 0) {
       // Log the movement only — do NOT touch stock_levels here, adjustStock handles it
       db.prepare(
-        "INSERT INTO stock_movements (item_id, warehouse_id, movement_type, quantity, before_qty, after_qty, reference_type, reference_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-      ).run(itemId, warehouseId, "manual_adjustment", variance, currentQty, nextQty, "stock_adjustment", null, payload.notes || null);
+        "INSERT INTO stock_movements (item_id, warehouse_id, movement_type, quantity, before_qty, after_qty, reference_type, reference_id, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      ).run(itemId, warehouseId, "manual_adjustment", variance, currentQty, nextQty, "stock_adjustment", null, payload.notes || null, userId);
 
       // Now sync stock_levels to the desired absolute value
       if (current) {
