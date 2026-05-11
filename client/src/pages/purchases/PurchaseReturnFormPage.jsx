@@ -136,6 +136,7 @@ export default function PurchaseReturnFormPage() {
   }
 
   function addProductToCart(item) {
+    activateInvoice();
     setCart(prev => {
       const existing = prev.find(l => l.item_id === item.id && !l.purchase_line_id);
       if (existing) return prev.map(l => l === existing ? { ...l, quantity: l.quantity + 1 } : l);
@@ -173,6 +174,7 @@ export default function PurchaseReturnFormPage() {
     setMessage({ text: "", type: "" });
     try {
       const payload = {
+        doc_no: docNo || undefined,
         supplier_id: supplier?.id || null,
         warehouse_id: Number(selectedWarehouse),
         settlement_type: settlementType,
@@ -184,17 +186,28 @@ export default function PurchaseReturnFormPage() {
           unit_cost: l.unit_cost,
         })),
       };
+      const savedDocNo = docNo;
       if (isEditMode) {
         await api.put(`/api/purchases/returns/${editReturnId}`, payload);
         setMessage({ text: "تم تعديل المرتجع بنجاح", type: "success" });
+        setTimeout(() => setMessage({ text: "", type: "" }), 3000);
       } else if (loadedPurchase) {
         await api.post(`/api/purchases/${loadedPurchase.id}/return`, payload);
-        setMessage({ text: "تم تسجيل المرتجع بنجاح", type: "success" });
+        setCart([]);
+        setLoadedPurchase(null);
+        setSupplier(null);
+        resetActivation();
+        setMessage({ text: `تم تسجيل المرتجع ${savedDocNo || ""} بنجاح`, type: "success" });
+        setTimeout(() => setMessage({ text: "", type: "" }), 4000);
       } else {
         await api.post("/api/purchases/general-purchase-return", payload);
-        setMessage({ text: "تم تسجيل المرتجع العام بنجاح", type: "success" });
+        setCart([]);
+        setLoadedPurchase(null);
+        setSupplier(null);
+        resetActivation();
+        setMessage({ text: `تم تسجيل المرتجع العام ${savedDocNo || ""} بنجاح`, type: "success" });
+        setTimeout(() => setMessage({ text: "", type: "" }), 4000);
       }
-      setTimeout(() => navigate("/purchases/returns"), 1500);
     } catch (e) {
       setMessage({ text: e.response?.data?.message || "فشل تسجيل المرتجع", type: "error" });
     } finally { setIsSaving(false); }
@@ -234,14 +247,12 @@ export default function PurchaseReturnFormPage() {
               {message.text}
             </div>
           )}
-          {isEditMode && (
-            <div className="flex gap-1.5">
-              <input disabled value={originalDocNo || ""}
-                className="h-8 w-28 rounded-sm border border-amber-200 bg-amber-50 px-2 text-[11px] font-mono font-black text-amber-600 cursor-not-allowed outline-none" />
-              <input disabled value={originalCreatedAt ? new Date(originalCreatedAt).toLocaleString("ar-EG") : ""}
-                className="h-8 w-48 rounded-sm border border-amber-200 bg-amber-50 px-2 text-[11px] font-mono font-black text-amber-600 cursor-not-allowed outline-none" />
-            </div>
-          )}
+          <div className="flex gap-1.5">
+            <input disabled value={invoiceIsActive ? (docNo || originalDocNo || "") : "—"}
+              className="h-8 w-28 rounded-sm border border-amber-200 bg-amber-50 px-2 text-[11px] font-mono font-black text-amber-600 cursor-not-allowed outline-none" />
+            <input disabled value={invoiceIsActive && (invoiceCreatedAt || originalCreatedAt) ? new Date(invoiceCreatedAt || originalCreatedAt).toLocaleString("ar-EG") : "—"}
+              className="h-8 w-48 rounded-sm border border-amber-200 bg-amber-50 px-2 text-[11px] font-mono font-black text-amber-600 cursor-not-allowed outline-none" />
+          </div>
           <button onClick={handleSave} disabled={isSaving || !cart.length}
             className="flex h-9 items-center gap-2 rounded-sm bg-amber-600 px-6 text-[13px] font-black text-white hover:bg-amber-500 disabled:opacity-40 transition-all active:scale-95 shadow-sm">
             {isSaving ? "جاري الحفظ..." : isEditMode ? "تأكيد التعديل" : "تأكيد المرتجع"}
@@ -262,12 +273,34 @@ export default function PurchaseReturnFormPage() {
               <label className="text-[10px] font-black text-amber-700 uppercase tracking-widest">المورد</label>
               <select
                 value={supplier?.id || ""}
-                onChange={e => setSupplier(suppliers.find(s => String(s.id) === e.target.value) || null)}
+                onChange={e => {
+                  const s = suppliers.find(s => String(s.id) === e.target.value) || null;
+                  setSupplier(s);
+                  if (s) activateInvoice();
+                }}
                 className="w-full border border-amber-200 rounded-sm px-2 py-1.5 text-[12px] font-bold text-slate-800 outline-none focus:border-amber-500 bg-white"
               >
                 <option value="">بدون مورد</option>
                 {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
+              {/* Supplier balance panel */}
+              {supplier && supplierBalance !== null && (
+                <div className="space-y-1 mt-1">
+                  <div className="flex items-center justify-between rounded-sm bg-white border border-amber-200 px-2.5 py-1.5">
+                    <span className="text-[10px] font-bold text-slate-500">رصيد المورد الحالي</span>
+                    <span className={`text-[12px] font-black font-mono ${supplierBalance > 0 ? "text-rose-600" : "text-amber-700"}`}>{supplierBalance.toFixed(2)}</span>
+                  </div>
+                  {total > 0 && (
+                    <div className="flex items-center justify-between rounded-sm bg-amber-50 border border-amber-200 px-2.5 py-1.5">
+                      <span className="text-[10px] font-bold text-amber-600">الرصيد بعد المرتجع</span>
+                      <span className={`text-[12px] font-black font-mono ${supplierBalance - total > 0 ? "text-rose-600" : "text-emerald-700"}`}>{(supplierBalance - total).toFixed(2)}</span>
+                    </div>
+                  )}
+                  <Link to={`/definitions/suppliers/${supplier.id}`} className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-amber-700 pt-0.5">
+                    <ExternalLink className="h-3 w-3" /> عرض سجل المورد
+                  </Link>
+                </div>
+              )}
             </div>
 
             {/* Settlement type */}
