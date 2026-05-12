@@ -3,7 +3,7 @@ const path = require("path");
 const ExcelJS = require("exceljs");
 const PDFDocument = require("pdfkit");
 const fs = require("fs");
-const { Document, Packer, Paragraph, Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle, TextRun, HeadingLevel } = require("docx");
+const { Document, Packer, Paragraph, Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle, TextRun, HeadingLevel, Footer, PageNumber } = require("docx");
 
 // Windows system font paths for Arabic support in PDF
 const FONT_ARIAL = "C:\\Windows\\Fonts\\arial.ttf";
@@ -198,6 +198,9 @@ async function exportRowsToDocx({
   title = "Report",
   columns,
   rtl = true,
+  filters = null,
+  totals = {},
+  companyName = "",
 }) {
   const safeRows = Array.isArray(rows) ? rows : [];
   const keys = Array.isArray(columns) && columns.length
@@ -209,7 +212,7 @@ async function exportRowsToDocx({
 
   const tableRows = [];
 
-  // Header row with dark background
+  // Header row with dark background — repeats on every page
   if (headers.length) {
     tableRows.push(new TableRow({
       tableHeader: true,
@@ -221,22 +224,32 @@ async function exportRowsToDocx({
           right: { style: BorderStyle.SINGLE, size: 4, color: "0f172a" },
         },
         shading: { fill: "0f172a" },
+        width: { size: Math.round(100 / headers.length), type: WidthType.PERCENTAGE },
         children: [new Paragraph({
           alignment: AlignmentType.CENTER,
-          spacing: { before: 100, after: 100 },
-          children: [new TextRun({ text: String(header), bold: true, color: "FFFFFF", size: 24, rightToLeft: rtl })],
+          spacing: { before: 80, after: 80 },
+          children: [new TextRun({ text: String(header), bold: true, color: "FFFFFF", size: 22, rightToLeft: rtl })],
         })],
       })),
     }));
   }
 
+  // Determine column types for totals formatting
+  const colTypes = {};
+  if (Array.isArray(columns)) {
+    columns.forEach((c) => { colTypes[c.key] = c.type; });
+  }
+
   // Data rows with alternating colors
-  safeRows.slice(0, 1000).forEach((row, rowIdx) => {
+  safeRows.slice(0, 2000).forEach((row, rowIdx) => {
     const isEven = rowIdx % 2 === 0;
     tableRows.push(new TableRow({
       children: keys.map((k) => {
         const value = row?.[k] ?? "";
         const isNumeric = typeof value === "number" || (!isNaN(Number(value)) && value !== "");
+        const displayVal = isNumeric && colTypes[k] === "money"
+          ? Number(value).toLocaleString("ar-EG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+          : String(value);
         return new TableCell({
           borders: {
             top: { style: BorderStyle.SINGLE, size: 4, color: "e2e8f0" },
@@ -246,11 +259,11 @@ async function exportRowsToDocx({
           },
           shading: isEven ? { fill: "f8fafc" } : undefined,
           children: [new Paragraph({
-            alignment: isNumeric ? AlignmentType.LEFT : (rtl ? AlignmentType.RIGHT : AlignmentType.LEFT),
-            spacing: { before: 60, after: 60 },
+            alignment: AlignmentType.CENTER,
+            spacing: { before: 40, after: 40 },
             children: [new TextRun({
-              text: String(value),
-              size: 22,
+              text: displayVal,
+              size: 20,
               rightToLeft: rtl,
               color: "0f172a",
             })],
@@ -260,14 +273,88 @@ async function exportRowsToDocx({
     }));
   });
 
+  // Totals row
+  if (Object.keys(totals).length > 0 && keys.length > 0) {
+    tableRows.push(new TableRow({
+      children: keys.map((k) => {
+        const val = totals[k];
+        const hasVal = val != null && !isNaN(Number(val));
+        return new TableCell({
+          borders: {
+            top: { style: BorderStyle.SINGLE, size: 8, color: "0f172a" },
+            bottom: { style: BorderStyle.SINGLE, size: 8, color: "0f172a" },
+            left: { style: BorderStyle.SINGLE, size: 4, color: "0f172a" },
+            right: { style: BorderStyle.SINGLE, size: 4, color: "0f172a" },
+          },
+          shading: { fill: "f1f5f9" },
+          children: [new Paragraph({
+            alignment: AlignmentType.CENTER,
+            spacing: { before: 60, after: 60 },
+            children: [new TextRun({
+              text: hasVal
+                ? Number(val).toLocaleString("ar-EG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                : "",
+              bold: true,
+              size: 20,
+              rightToLeft: rtl,
+              color: "0f172a",
+            })],
+          })],
+        });
+      }),
+    }));
+  }
+
+  // Build date/time footer text
+  const now = new Date();
+  const dateStr = now.toLocaleDateString("ar-EG");
+  const timeStr = now.toLocaleTimeString("ar-EG");
+  const footerText = `تم التصدير: ${dateStr} ${timeStr}`;
+  const totalRowsText = `إجمالي الصفوف: ${safeRows.length.toLocaleString("ar-EG")}`;
+
   const doc = new Document({
     sections: [{
       properties: {
         page: {
-          margin: { top: 720, right: 720, bottom: 720, left: 720 }, // 0.5 inch margins
+          margin: { top: 720, right: 720, bottom: 960, left: 720 },
         },
       },
+      footers: {
+        default: new Footer({
+          children: [
+            new Paragraph({
+              alignment: AlignmentType.CENTER,
+              spacing: { before: 120 },
+              border: {
+                top: { style: BorderStyle.SINGLE, size: 4, color: "e2e8f0" },
+              },
+              children: [
+                new TextRun({ text: `${footerText} | ${totalRowsText} | `, size: 16, color: "94a3b8", italics: true, rightToLeft: rtl }),
+                new TextRun({ children: [PageNumber.CURRENT], size: 16, color: "94a3b8", italics: true }),
+                new TextRun({ text: " / ", size: 16, color: "94a3b8", italics: true }),
+                new TextRun({ children: [PageNumber.TOTAL_PAGES], size: 16, color: "94a3b8", italics: true }),
+              ],
+            }),
+          ],
+        }),
+      },
       children: [
+        // Company name header
+        ...(companyName ? [
+          new Paragraph({
+            alignment: rtl ? AlignmentType.RIGHT : AlignmentType.LEFT,
+            spacing: { after: 40 },
+            children: [new TextRun({ text: companyName, size: 20, color: "64748b", rightToLeft: rtl })],
+          }),
+        ] : []),
+        // Date range line
+        ...(filters?.from && filters?.to ? [
+          new Paragraph({
+            alignment: rtl ? AlignmentType.RIGHT : AlignmentType.LEFT,
+            spacing: { after: 40 },
+            children: [new TextRun({ text: `الفترة: ${filters.from} إلى ${filters.to}`, size: 18, color: "64748b", italics: true, rightToLeft: rtl })],
+          }),
+        ] : []),
         // Title with accent bar
         new Paragraph({
           alignment: rtl ? AlignmentType.RIGHT : AlignmentType.LEFT,
@@ -277,18 +364,21 @@ async function exportRowsToDocx({
           },
           children: [new TextRun({ text: title, bold: true, size: 36, rightToLeft: rtl, color: "0f172a" })],
         }),
-        new Paragraph({ text: "" }), // spacer
+        new Paragraph({ text: "", spacing: { after: 120 } }),
         new Table({
           width: { size: 100, type: WidthType.PERCENTAGE },
           rows: tableRows,
         }),
-        new Paragraph({ text: "" }),
-        new Paragraph({ text: "" }),
-        // Footer
+        new Paragraph({ text: "", spacing: { after: 120 } }),
+        // Row count summary
         new Paragraph({
-          alignment: rtl ? AlignmentType.LEFT : AlignmentType.RIGHT,
+          alignment: rtl ? AlignmentType.RIGHT : AlignmentType.LEFT,
+          spacing: { before: 100 },
+          border: {
+            top: { style: BorderStyle.SINGLE, size: 4, color: "e2e8f0" },
+          },
           children: [new TextRun({
-            text: `تم التصدير: ${new Date().toLocaleDateString("ar-EG")} - ${new Date().toLocaleTimeString("ar-EG")}`,
+            text: `تم التصدير: ${dateStr} - ${timeStr}`,
             size: 18,
             color: "64748b",
             rightToLeft: rtl,
@@ -313,13 +403,20 @@ async function exportRowsToPdfV3({
   title = "Report",
   columns,
   filters = null,
+  orientation = "portrait",
+  paperSize = "A4",
+  fontSize = "medium",
+  showTotals = true,
+  showPageNumbers = true,
+  totals = {},
 }) {
   const safeRows = Array.isArray(rows) ? rows : [];
   const filePath = path.join(os.tmpdir(), `${title}-${Date.now()}.pdf`);
+  const sizeMap = { A4: "A4", A5: "A5", Letter: "LETTER" };
   const doc = new PDFDocument({
     margin: 40,
-    size: "A4",
-    layout: "portrait",
+    size: sizeMap[paperSize] || "A4",
+    layout: orientation === "landscape" ? "landscape" : "portrait",
     autoFirstPage: true,
   });
   const stream = fs.createWriteStream(filePath);
@@ -373,6 +470,14 @@ async function exportRowsToPdfV3({
   }
 
   // Data rows (limit to fit page)
+  const fontSizeScale = fontSize === "small" ? 0.85 : fontSize === "large" ? 1.15 : 1;
+  const dataFontSize = Math.round(8 * fontSizeScale);
+  const headerFontSize = Math.round(9 * fontSizeScale);
+  const titleFontSize = Math.round(16 * fontSizeScale);
+  const rowHeight = Math.round(20 * fontSizeScale);
+  const headerRowHeight = Math.round(24 * fontSizeScale);
+
+  const hasTotals = showTotals && Object.keys(totals).length > 0;
   const maxRows = Math.min(safeRows.length, 500);
   const pageWidth = doc.page.width - 80;
   const colWidth = Math.min(100, pageWidth / keys.length);
@@ -383,44 +488,65 @@ async function exportRowsToPdfV3({
 
     // Check for page overflow
     if (rowY > doc.page.height - 80) {
-      // Footer for current page
-      doc.fontSize(8).font(FONT_ARIAL).fillColor("#94a3b8");
-      doc.text(`صفحة ${pageNum}`, 40, doc.page.height - 30, { align: "center" });
-      // New page
+      if (showPageNumbers) {
+        doc.fontSize(8).font(FONT_ARIAL).fillColor("#94a3b8");
+        doc.text(`صفحة ${pageNum}`, 40, doc.page.height - 30, { align: "center" });
+      }
       doc.addPage();
       pageNum++;
       drawHeader();
       // Redraw table header
-      doc.rect(40, doc.y, pageWidth, 24).fill("#0f172a");
-      doc.fillColor("#ffffff").fontSize(9).font(FONT_ARIAL_BOLD);
+      doc.rect(40, doc.y, pageWidth, headerRowHeight).fill("#0f172a");
+      doc.fillColor("#ffffff").fontSize(headerFontSize).font(FONT_ARIAL_BOLD);
       let xPos = doc.page.width - 40;
       headers.forEach((header) => {
-        doc.text(header, xPos - colWidth + 4, doc.y + 7, { width: colWidth - 8, align: "right" });
+        doc.text(header, xPos - colWidth + 4, doc.y + 7, { width: colWidth - 8, align: "center" });
         xPos -= colWidth;
       });
-      doc.y += 26;
+      doc.y += headerRowHeight + 2;
     }
 
     const currentY = doc.y;
 
     // Alternating row background
     if (rowIdx % 2 === 0) {
-      doc.rect(40, currentY, pageWidth, 20).fill("#f8fafc");
+      doc.rect(40, currentY, pageWidth, rowHeight).fill("#f8fafc");
     }
 
     // Row border
-    doc.rect(40, currentY, pageWidth, 20).stroke("#e2e8f0");
+    doc.rect(40, currentY, pageWidth, rowHeight).stroke("#e2e8f0");
 
-    doc.fillColor("#0f172a").fontSize(8).font(FONT_ARIAL);
+    doc.fillColor("#0f172a").fontSize(dataFontSize).font(FONT_ARIAL);
     let xPos = doc.page.width - 40;
     keys.forEach((k) => {
       const value = row?.[k] == null ? "" : String(row[k]);
-      doc.text(value, xPos - colWidth + 3, currentY + 6, { width: colWidth - 6, align: "right", ellipsis: true });
+      doc.text(value, xPos - colWidth + 3, currentY + 6, { width: colWidth - 6, align: "center", ellipsis: true });
       xPos -= colWidth;
     });
 
-    doc.y = currentY + 20;
+    doc.y = currentY + rowHeight;
   });
+
+  // Totals row
+  if (hasTotals) {
+    const totalY = doc.y;
+    if (totalY + rowHeight > doc.page.height - 60) {
+      doc.addPage();
+      pageNum++;
+    }
+    doc.fillColor("#f1f5f9").rect(40, doc.y, pageWidth, rowHeight).fill();
+    doc.fillColor("#0f172a").fontSize(dataFontSize).font(FONT_ARIAL_BOLD);
+    let xPos = doc.page.width - 40;
+    keys.forEach((k) => {
+      const val = totals[k];
+      const display = val != null && !isNaN(Number(val))
+        ? Number(val).toLocaleString("ar-EG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        : "";
+      doc.text(display, xPos - colWidth + 3, doc.y + 6, { width: colWidth - 6, align: "center", ellipsis: true });
+      xPos -= colWidth;
+    });
+    doc.y += rowHeight;
+  }
 
   // Footer
   doc.y = Math.max(doc.y + 10, doc.page.height - 60);
@@ -432,8 +558,9 @@ async function exportRowsToPdfV3({
     doc.text(`تم عرض ${maxRows} من أصل ${safeRows.length} صف. للتصدير الكامل استخدم Excel.`, { align: "center" });
   }
 
-  // Page number on last page
-  doc.text(`صفحة ${pageNum}`, 40, doc.page.height - 30, { align: "center" });
+  if (showPageNumbers) {
+    doc.text(`صفحة ${pageNum}`, 40, doc.page.height - 30, { align: "center" });
+  }
 
   doc.end();
   await new Promise((resolve) => stream.on("finish", resolve));

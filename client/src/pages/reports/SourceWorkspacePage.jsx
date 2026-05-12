@@ -12,7 +12,8 @@ import {
   LineChart as RechartsLine, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   BarChart as RechartsBar, Bar, PieChart as RechartsPie, Pie, Cell
 } from "recharts";
-import DataGrid from "../../components/ui/DataGrid";
+import A4PageView from "../../components/ui/A4PageView";
+import PDFExportDialog from "../../components/print/PDFExportDialog";
 import { reportsApi } from "../../services/reports";
 import { useReportsStore, buildPrefKey } from "../../stores/reportsStore";
 import PrintPreviewModal from "../../components/print/PrintPreviewModal";
@@ -134,7 +135,7 @@ const DATE_PRESETS = [
   { label: "الربع", days: 90 },
 ];
 
-const PAGE_SIZES = [25, 50, 100, 250];
+const FIXED_PAGE_SIZE = 200;
 
 function TableSkeleton({ colCount = 6 }) {
   return (
@@ -286,6 +287,7 @@ export default function SourceWorkspacePage() {
   const [costMethod, setCostMethod] = useState("wacc");
   const [exportProgress, setExportProgress] = useState(null);
   const [printOpen, setPrintOpen] = useState(false);
+  const [pdfDialogOpen, setPdfDialogOpen] = useState(false);
   const [columnVisibility, setColumnVisibilityState] = useState({});
   const [columnOrder, setColumnOrderState] = useState([]);
   const [columnVisibilityOpen, setColumnVisibilityOpen] = useState(false);
@@ -296,7 +298,7 @@ export default function SourceWorkspacePage() {
     if (clsDef?.supportsDates) { params.start_date = defaultFrom; params.end_date = defaultTo; }
     if (clsDef?.hasProfit) { params.cost_method = "wacc"; }
     params.page = 1;
-    params.pageSize = 50;
+    params.pageSize = FIXED_PAGE_SIZE;
     return params;
   });
 
@@ -429,24 +431,19 @@ export default function SourceWorkspacePage() {
     setFilters({ from: defaultFrom, to: defaultTo, q: "" });
     setScope({ type: "all", values: [] });
     setCostMethod("wacc");
-    setAppliedParams({ page: 1, pageSize: 50 });
+    setAppliedParams({ page: 1, pageSize: FIXED_PAGE_SIZE });
   }
 
   function handlePageChange(page) {
     setAppliedParams((prev) => ({ ...prev, page: Math.max(1, Math.min(page, totalPages)) }));
   }
 
-  function handlePageSizeChange(size) {
-    setAppliedParams((prev) => ({ ...prev, page: 1, pageSize: size }));
-  }
-
-  const handleExport = useCallback(async (format, exportColumns = visibleColumns) => {
-    if (format === "print") { setPrintOpen(true); return; }
+  const doDownload = useCallback(async (format, querySlug, exportColumns, extraParams = {}) => {
     setExportProgress({ format, percent: 0 });
     try {
-      const querySlug = dataMode === "summary" ? clsDef?.summaryQuery : clsDef?.detailedQuery;
       const blob = await reportsApi.exportReport(querySlug, format, {
         ...appliedParams,
+        ...extraParams,
         columns: exportColumns,
         onProgress: (e) => {
           if (e.total) setExportProgress((prev) => prev ? { ...prev, percent: Math.round((e.loaded / e.total) * 100) } : null);
@@ -467,7 +464,19 @@ export default function SourceWorkspacePage() {
       toast.error(error.message || "فشل التصدير");
       throw error;
     } finally { setTimeout(() => setExportProgress(null), 2000); }
-  }, [sourceKey, classificationId, clsDef, appliedParams, visibleColumns]);
+  }, [sourceKey, classificationId, appliedParams]);
+
+  const handleExport = useCallback(async (format, exportColumns = visibleColumns) => {
+    if (format === "print") { setPrintOpen(true); return; }
+    if (format === "pdf") { setPdfDialogOpen(true); return; }
+    const querySlug = dataMode === "summary" ? clsDef?.summaryQuery : clsDef?.detailedQuery;
+    await doDownload(format, querySlug, exportColumns);
+  }, [visibleColumns, dataMode, clsDef, doDownload]);
+
+  const handlePdfExport = useCallback(async (exportColumns, pdfParams) => {
+    const querySlug = dataMode === "summary" ? clsDef?.summaryQuery : clsDef?.detailedQuery;
+    await doDownload("pdf", querySlug, exportColumns, pdfParams);
+  }, [dataMode, clsDef, doDownload]);
 
   if (!sourceDef) {
     return (
@@ -487,7 +496,7 @@ export default function SourceWorkspacePage() {
   }
 
   const SourceIcon = sourceDef.icon;
-  const exportFormats = ["pdf", "excel", "print"];
+  const exportFormats = ["pdf", "excel", "word", "print"];
   const categoryColor = sourceDef.color;
 
   return (
@@ -495,13 +504,15 @@ export default function SourceWorkspacePage() {
       {/* Header */}
       <div className="bg-white rounded-[24px] border border-zinc-200 p-8 shadow-sm mb-6 relative overflow-visible">
         <div className="absolute -left-32 -top-32 w-96 h-96 rounded-full blur-[80px] opacity-10 pointer-events-none" style={{ backgroundColor: categoryColor }} />
-        <div className="flex items-start gap-4 mb-4">
+          <div className="flex items-start gap-4 mb-4">
           <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[18px] bg-zinc-50 border border-zinc-100" style={{ color: categoryColor }}>
             <SourceIcon size={26} strokeWidth={2} />
           </div>
           <div className="pt-1 flex-1">
             <div className="flex items-center gap-2 mb-1.5">
-              <Link to="/reports/center" className="text-[10px] font-black uppercase tracking-widest text-zinc-400 hover:text-emerald-600 transition-colors">{sourceDef.label}</Link>
+              <Link to="/reports/center" className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-zinc-400 hover:text-emerald-600 transition-colors">
+                <ArrowLeft size={12} /> {sourceDef.label}
+              </Link>
               <span className="w-1 h-1 rounded-full bg-zinc-300" />
               <span className="text-[11px] font-bold text-zinc-500">{a(classificationId)}</span>
               <span className="w-1 h-1 rounded-full bg-zinc-300" />
@@ -658,7 +669,7 @@ export default function SourceWorkspacePage() {
             <p className="text-[13px] text-zinc-500 max-w-xs">يرجى تغيير الفلاتر أو اختيار تصنيف آخر.</p>
           </div>
         ) : activeTab === "table" ? (
-          <>
+          <div className="flex flex-col h-full overflow-hidden">
             <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-100 bg-zinc-50/50 shrink-0">
               <div className="flex items-center gap-3">
                 <span className="text-[13px] font-black text-zinc-900">البيانات</span>
@@ -693,29 +704,32 @@ export default function SourceWorkspacePage() {
                 </div>
               </div>
             </div>
-            <DataGrid data={rows} virtualized={rows.length > 50}
-              columns={visibleColumns.map((c) => ({
-                id: c.id, header: c.header, width: Math.max(120, Math.min(200, 80 + c.header.length * 8)),
-                sortable: true,
-                headerClass: "text-right font-black text-[11px] text-zinc-500 uppercase tracking-wide bg-zinc-50/80 border-b border-zinc-200",
-                cellClass: "text-right border-b border-zinc-100 py-3",
-              }))} />
+            <div className="flex-1 overflow-hidden" style={{ minHeight: 0 }}>
+              <A4PageView
+                data={rows}
+                columns={visibleColumns}
+                title={`${sourceDef?.label || ''} - ${a(classificationId)}`}
+                filters={filters}
+                totalRows={totalRows}
+                pageSize={currentPageSize}
+                page={currentPage}
+                totalPages={totalPages}
+                columnTotals={columnTotals}
+              />
+            </div>
             {totalPages > 1 && (
               <div className="flex items-center justify-between px-6 py-3 border-t border-zinc-100 bg-zinc-50/50 shrink-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-bold text-zinc-500">صف لكل صفحة:</span>
-                  <select value={currentPageSize} onChange={(e) => handlePageSizeChange(Number(e.target.value))} className="text-[11px] font-bold border border-zinc-200 rounded-lg px-2 py-1 bg-white">
-                    {PAGE_SIZES.map((s) => (<option key={s} value={s}>{s}</option>))}
-                  </select>
+                <div className="flex items-center gap-2 text-[12px] font-bold text-zinc-500">
+                  <span>إجمالي الصفحات: {totalPages.toLocaleString("ar-EG")}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <button onClick={() => handlePageChange(currentPage - 1)} disabled={currentPage <= 1} className="p-1.5 rounded-lg border border-zinc-200 bg-white hover:bg-zinc-50 disabled:opacity-30"><ChevronRight size={16} /></button>
-                  <span className="text-[12px] font-bold text-zinc-700 px-2">{currentPage} / {totalPages}</span>
+                  <span className="text-[12px] font-bold text-zinc-700 px-2">{currentPage.toLocaleString("ar-EG")} / {totalPages.toLocaleString("ar-EG")}</span>
                   <button onClick={() => handlePageChange(currentPage + 1)} disabled={currentPage >= totalPages} className="p-1.5 rounded-lg border border-zinc-200 bg-white hover:bg-zinc-50 disabled:opacity-30"><ChevronLeft size={16} /></button>
                 </div>
               </div>
             )}
-          </>
+          </div>
         ) : (
           <div className="flex-1 p-6">
             {chartData.length > 0 && xKey && yKey ? (
@@ -750,9 +764,38 @@ export default function SourceWorkspacePage() {
       </div>
 
       {/* Print Modal */}
-      <PrintPreviewModal open={printOpen} onClose={() => setPrintOpen(false)} title={`${sourceDef?.label || ''} - ${a(classificationId)}`}>
-        <ReportPrintTemplate data={rows} columns={visibleColumns} title={`${sourceDef?.label || ''} - ${a(classificationId)}`} totals={columnTotals} />
-      </PrintPreviewModal>
+      <PrintPreviewModal
+        open={printOpen}
+        onClose={() => setPrintOpen(false)}
+        docType="reports_generic"
+        reportColumns={visibleColumns.map((c) => ({
+          key: c.key || c.id,
+          label: c.label || c.header,
+          type: c.type,
+          printPriority: c.printPriority,
+        }))}
+        totalRows={totalRows}
+        renderContent={(s) => (
+          <ReportPrintTemplate
+            rows={rows}
+            columns={visibleColumns}
+            title={`${sourceDef?.label || ''} - ${a(classificationId)}`}
+            filters={filters}
+            settings={s}
+            totals={columnTotals}
+            currentPage={s.currentPage || 1}
+          />
+        )}
+      />
+
+      {/* PDF Export Dialog */}
+      <PDFExportDialog
+        open={pdfDialogOpen}
+        onClose={() => setPdfDialogOpen(false)}
+        columns={allColumns}
+        title={`${sourceDef?.label || ''} - ${a(classificationId)}`}
+        onExport={handlePdfExport}
+      />
     </div>
   );
 }

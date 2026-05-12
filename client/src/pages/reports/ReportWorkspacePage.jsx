@@ -146,7 +146,7 @@ const COST_METHODS = [
   { value: "purchase_price", label_key: "reports_purchase_price" },
 ];
 
-const PAGE_SIZES = [25, 50, 100, 250];
+const FIXED_PAGE_SIZE = 200;
 
 const CHART_COLORS = ["#059669", "#2563EB", "#7C3AED", "#D97706", "#DC2626", "#0891B2", "#F59E0B", "#EC4899"];
 
@@ -379,7 +379,7 @@ export default function ReportWorkspacePage() {
     }
     params.q = searchParams.get("q") || "";
     params.page = 1;
-    params.pageSize = 50;
+    params.pageSize = FIXED_PAGE_SIZE;
     return params;
   });
 
@@ -415,7 +415,7 @@ export default function ReportWorkspacePage() {
     }
     params.q = "";
     params.page = 1;
-    params.pageSize = 50;
+    params.pageSize = FIXED_PAGE_SIZE;
     setAppliedParams(params);
     setScope(() => {
       const cat = searchParams.get("category_id");
@@ -619,7 +619,7 @@ export default function ReportWorkspacePage() {
 
   function handleApplyFilters() {
     if (invalidRange) { toast.error("تاريخ البداية يجب أن يكون أصغر أو يساوي تاريخ النهاية."); return; }
-    const params = { page: 1, pageSize: currentPageSize };
+    const params = { page: 1, pageSize: FIXED_PAGE_SIZE };
     if (definition?.supportsDates) { params.start_date = filters.from; params.end_date = filters.to; }
     if (definition?.hasProfit) { params.cost_method = costMethod; setCostMethodAction(reportSlug, costMethod); }
     if (definition?.filters) {
@@ -649,7 +649,7 @@ export default function ReportWorkspacePage() {
     }
     setFilters(reset);
     setScope({ type: "all", values: [] });
-    const params = { page: 1, pageSize: 50 };
+    const params = { page: 1, pageSize: FIXED_PAGE_SIZE };
     if (definition?.supportsDates) { params.start_date = defaultFrom; params.end_date = defaultTo; }
     if (definition?.hasProfit) { params.cost_method = "wacc"; setCostMethod("wacc"); }
     setAppliedParams(params);
@@ -657,10 +657,6 @@ export default function ReportWorkspacePage() {
 
   function handlePageChange(page) {
     setAppliedParams((prev) => ({ ...prev, page: Math.max(1, Math.min(page, totalPages)) }));
-  }
-
-  function handlePageSizeChange(size) {
-    setAppliedParams((prev) => ({ ...prev, page: 1, pageSize: size }));
   }
 
   function applyDatePreset(days) {
@@ -1001,11 +997,7 @@ export default function ReportWorkspacePage() {
             {!isLoading && totalPages > 1 && (
               <div className="flex items-center justify-between px-6 py-4 border-t border-zinc-200 bg-zinc-50 shrink-0">
                 <div className="flex items-center gap-2 text-[12px] font-bold text-zinc-500">
-                  <span>عرض</span>
-                  <select value={currentPageSize} onChange={(e) => handlePageSizeChange(Number(e.target.value))} className="h-8 px-2 rounded-lg border border-zinc-200 bg-white focus:outline-none focus:border-emerald-500">
-                    {PAGE_SIZES.map((s) => (<option key={s} value={s}>{s}</option>))}
-                  </select>
-                  <span>صف</span>
+                  <span>إجمالي الصفحات: {totalPages.toLocaleString("ar-EG")}</span>
                 </div>
                 <div className="flex items-center gap-1.5 bg-white border border-zinc-200 rounded-xl p-1 shadow-sm">
                   <button onClick={() => handlePageChange(currentPage - 1)} disabled={currentPage <= 1} className="h-8 w-8 flex items-center justify-center rounded-lg text-zinc-400 disabled:opacity-30 hover:bg-zinc-100 hover:text-zinc-900 transition-all"><ChevronRight size={16} /></button>

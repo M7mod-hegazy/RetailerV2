@@ -82,7 +82,7 @@ router.get("/last-price/:itemId", requirePagePermission("pos", "view"), (req, re
 router.get("/returns", requirePagePermission("pos", "view"), (req, res) => {
   try {
     const db = getDb();
-    const { search = "", customer_id, date_from, date_to } = req.query;
+    const { search = "", customer_id, date_from, date_to, sort = "created_at", dir = "desc", user_id = "" } = req.query;
     const conditions = ["1=1"];
     const params = [];
     if (search) {
@@ -92,15 +92,21 @@ router.get("/returns", requirePagePermission("pos", "view"), (req, res) => {
     if (customer_id) { conditions.push("sr.customer_id = ?"); params.push(customer_id); }
     if (date_from) { conditions.push("date(sr.created_at) >= date(?)"); params.push(date_from); }
     if (date_to) { conditions.push("date(sr.created_at) <= date(?)"); params.push(date_to); }
+    if (user_id) { conditions.push("sr.created_by = ?"); params.push(user_id); }
+    const allowedSort = ["created_at", "total", "doc_no", "refund_method", "status"];
+    const safeSort = allowedSort.includes(sort) ? sort : "created_at";
+    const safeDir = dir === "asc" ? "ASC" : "DESC";
     const returns = db.prepare(`
-      SELECT sr.*, c.name AS customer_name, i.invoice_no AS original_invoice_no
+      SELECT sr.*, c.name AS customer_name, i.invoice_no AS original_invoice_no, u.username AS created_by_username
       FROM sales_returns sr
       LEFT JOIN customers c ON c.id = sr.customer_id
       LEFT JOIN invoices i ON i.id = sr.invoice_id
+      LEFT JOIN users u ON u.id = sr.created_by
       WHERE ${conditions.join(" AND ")}
-      ORDER BY sr.id DESC
+      ORDER BY ${safeSort === "refund_method" ? "sr.refund_method" : `sr.${safeSort}`} ${safeDir}
     `).all(...params);
-    res.json({ success: true, data: returns });
+    const total = returns.reduce((s, x) => s + Number(x.total || 0), 0);
+    res.json({ success: true, data: returns, summary: { count: returns.length, total } });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

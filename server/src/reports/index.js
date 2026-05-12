@@ -1,3 +1,4 @@
+const users = require("./queries/users");
 const sales = require("./queries/sales");
 const purchases = require("./queries/purchases");
 const inventory = require("./queries/inventory");
@@ -123,6 +124,11 @@ const dispatcher = {
   "profit-by-category": profit.profitByCategory,
   "profit-by-customer": profit.profitByCustomer,
   "profit-by-period": profit.profitByPeriod,
+
+  // Users
+  "user-list": users.userList,
+  "user-performance": users.userPerformance,
+  "login-history": users.loginHistory,
 };
 
 function listRows(slug, startDate, endDate, opts = {}) {

@@ -181,11 +181,20 @@ router.get("/export-slug/:slug", requirePagePermission("reports", "print"), asyn
     const fmt = (format || "excel").toLowerCase();
 
     if (fmt === "word" || fmt === "docx") {
-      filePath = await exportRowsToDocx({ rows, title: reportTitle, columns, rtl: true });
+      const totals = computeTotals(rows, columns);
+      filePath = await exportRowsToDocx({ rows, title: reportTitle, columns, rtl: true, filters, totals, companyName: "ElHegazi Retailer" });
       contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
       extension = "docx";
     } else if (fmt === "pdf") {
-      filePath = await exportRowsToPdfV3({ rows, title: reportTitle, columns, filters });
+      const pdfOpts = {
+        orientation: req.query.orientation || "portrait",
+        paperSize: req.query.paperSize || "A4",
+        fontSize: req.query.fontSize || "medium",
+        showTotals: req.query.showTotals !== "false",
+        showPageNumbers: req.query.showPageNumbers !== "false",
+      };
+      const totals = computeTotals(rows, columns);
+      filePath = await exportRowsToPdfV3({ rows, title: reportTitle, columns, filters, totals, ...pdfOpts });
       contentType = "application/pdf";
       extension = "pdf";
     } else {

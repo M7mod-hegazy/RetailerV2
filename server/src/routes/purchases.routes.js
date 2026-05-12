@@ -84,7 +84,7 @@ router.get("/", requirePagePermission("purchases", "view"), (req, res) => {
 router.get("/returns", requirePagePermission("purchases", "view"), (req, res) => {
   const db = getDb();
   ensurePurchaseReturnSettlementSchema(db);
-  const { search = "", supplier_id, date_from, date_to } = req.query;
+  const { search = "", supplier_id, date_from, date_to, sort = "created_at", dir = "desc", user_id = "" } = req.query;
   const conditions = ["1=1"];
   const params = [];
   if (search) {
@@ -94,14 +94,20 @@ router.get("/returns", requirePagePermission("purchases", "view"), (req, res) =>
   if (supplier_id) { conditions.push("pr.supplier_id = ?"); params.push(supplier_id); }
   if (date_from) { conditions.push("date(pr.created_at) >= date(?)"); params.push(date_from); }
   if (date_to) { conditions.push("date(pr.created_at) <= date(?)"); params.push(date_to); }
+  if (user_id) { conditions.push("pr.created_by = ?"); params.push(user_id); }
+  const allowedSort = ["created_at", "total", "doc_no", "settlement_type", "status"];
+  const safeSort = allowedSort.includes(sort) ? sort : "created_at";
+  const safeDir = dir === "asc" ? "ASC" : "DESC";
   const returns = db.prepare(`
-    SELECT pr.*, s.name AS supplier_name
+    SELECT pr.*, s.name AS supplier_name, u.username AS created_by_username
     FROM purchase_returns pr
     LEFT JOIN suppliers s ON s.id = pr.supplier_id
+    LEFT JOIN users u ON u.id = pr.created_by
     WHERE ${conditions.join(" AND ")}
-    ORDER BY pr.id DESC
+    ORDER BY ${safeSort === "settlement_type" ? "pr.settlement_type" : `pr.${safeSort}`} ${safeDir}
   `).all(...params);
-  res.json({ success: true, data: returns });
+  const total = returns.reduce((s, x) => s + Number(x.total || 0), 0);
+  res.json({ success: true, data: returns, summary: { count: returns.length, total } });
 });
 
 router.get("/returns/:id", requirePagePermission("purchases", "view"), (req, res, next) => {

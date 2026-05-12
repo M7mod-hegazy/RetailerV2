@@ -7,7 +7,7 @@ import {
   FileText, Coins, Banknote, History,
   Edit3, RotateCcw, Eye, Sparkles,
 } from "lucide-react";
-import { Link } from "react-router-dom";
+
 import api from "../../services/api";
 import { motion, AnimatePresence } from "framer-motion";
 import toast from "react-hot-toast";
@@ -87,6 +87,14 @@ export default function DailyTreasuryPage() {
   const [quickCategoryId, setQuickCategoryId] = useState("");
   const [expenseCategories, setExpenseCategories] = useState([]);
   const [revenueCategories, setRevenueCategories] = useState([]);
+
+  // Withdrawal modal
+  const [withdrawalOpen, setWithdrawalOpen] = useState(false);
+  const [withdrawalAmount, setWithdrawalAmount] = useState("");
+  const [withdrawalNote, setWithdrawalNote] = useState("");
+  const [withdrawalCategoryId, setWithdrawalCategoryId] = useState("");
+  const [withdrawalPaymentMethod, setWithdrawalPaymentMethod] = useState("cash");
+  const [withdrawalCategories, setWithdrawalCategories] = useState([]);
 
   // Alerts
   const [yesterdayAlert, setYesterdayAlert] = useState(null);
@@ -206,6 +214,7 @@ export default function DailyTreasuryPage() {
   useEffect(() => {
     api.get("/api/expenses/categories").then(r => setExpenseCategories(r.data.data || [])).catch(()=>{});
     api.get("/api/revenues/categories").then(r => setRevenueCategories(r.data.data || [])).catch(()=>{});
+    api.get("/api/withdrawals/categories").then(r => setWithdrawalCategories(r.data.data || [])).catch(()=>{});
   }, []);
 
   const moneyTotal = DENOMS.reduce((s, d) => s + Number(counts[d] || 0) * d, 0);
@@ -236,6 +245,28 @@ async function handleQuickSave() {
       setQuickAmount("");
       setQuickNote("");
       setQuickCategoryId("");
+      loadSummary();
+      loadTransactions();
+    } catch (e) {
+      toast.error(e.response?.data?.message || "خطأ");
+    }
+  }
+
+  async function handleWithdrawalSave() {
+    if (!withdrawalAmount) return;
+    try {
+      await api.post("/api/withdrawals", {
+        amount: Number(withdrawalAmount),
+        note: withdrawalNote,
+        category_id: withdrawalCategoryId ? Number(withdrawalCategoryId) : null,
+        payment_method: withdrawalPaymentMethod,
+      });
+      toast.success("تم تسجيل المسحوبات بنجاح");
+      setWithdrawalOpen(false);
+      setWithdrawalAmount("");
+      setWithdrawalNote("");
+      setWithdrawalCategoryId("");
+      setWithdrawalPaymentMethod("cash");
       loadSummary();
       loadTransactions();
     } catch (e) {
@@ -604,13 +635,15 @@ async function handleQuickSave() {
                     <div className="bg-white/20 p-1.5 rounded-xl"><Coins className="h-4 w-4" /></div>
                     عد العملة (جرد الخزينة)
                   </motion.button>
-                  <Link
-                    to="/withdrawals"
+                  <motion.button
+                    whileHover={{ y: -2 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => setWithdrawalOpen(true)}
                     className="flex items-center justify-center gap-3 rounded-3xl bg-slate-900 py-4 text-[14px] font-black text-white hover:bg-slate-800 transition-colors shadow-lg shadow-slate-900/20 border border-slate-800"
                   >
                     <div className="bg-white/20 p-1.5 rounded-xl"><Banknote className="h-4 w-4" /></div>
                     سجل المسحوبات
-                  </Link>
+                  </motion.button>
                   <motion.button
                     whileHover={{ y: -2 }}
                     whileTap={{ scale: 0.98 }}
@@ -1330,6 +1363,97 @@ async function handleQuickSave() {
                     onClick={handleQuickSave}
                     disabled={!quickAmount}
                     className={"w-full h-14 flex items-center justify-center gap-2 rounded-2xl text-[15px] font-black text-white transition-all shadow-xl disabled:opacity-40 " + (quickModal === "expense" ? "bg-rose-600 hover:bg-rose-700 shadow-rose-600/20" : "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20")}
+                  >
+                    <CheckCircle2 className="h-5 w-5" /> حفظ واعتماد
+                  </motion.button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Withdrawal Modal */}
+      <AnimatePresence>
+        {withdrawalOpen && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+              onClick={() => setWithdrawalOpen(false)}
+            />
+            <motion.div
+              variants={modalVariants} initial="hidden" animate="show" exit="exit"
+              className="relative w-full max-w-[420px] rounded-[2.5rem] bg-white shadow-2xl p-8 border border-slate-100" dir="rtl"
+            >
+              <div className="flex items-center justify-between mb-8">
+                <div className="flex items-center gap-3">
+                  <div className="h-12 w-12 rounded-2xl bg-slate-100 text-slate-700 flex items-center justify-center border border-slate-200">
+                    <Banknote className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-[20px] font-black text-zinc-900 leading-tight">تسجيل مسحوبات</h2>
+                    <p className="text-[11px] font-bold text-slate-400 mt-1 uppercase tracking-widest">Cash Withdrawal</p>
+                  </div>
+                </div>
+                <button onClick={() => setWithdrawalOpen(false)} className="h-10 w-10 flex items-center justify-center rounded-xl bg-slate-50 text-slate-400 hover:text-zinc-900 hover:bg-slate-100 transition-colors">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="space-y-5">
+                <div className="flex flex-col gap-2">
+                  <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">القيمة (ج.م)</label>
+                  <input
+                    type="number"
+                    value={withdrawalAmount}
+                    onChange={(e) => setWithdrawalAmount(e.target.value)}
+                    autoFocus
+                    placeholder="0.00"
+                    className="w-full h-14 rounded-2xl bg-slate-50 border border-slate-200 px-4 text-[20px] font-black font-mono outline-none focus:border-zinc-400 focus:bg-white focus:ring-4 focus:ring-zinc-900/5 text-center transition-all shadow-inner"
+                  />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">البيان / الوصف</label>
+                  <input
+                    type="text"
+                    value={withdrawalNote}
+                    onChange={(e) => setWithdrawalNote(e.target.value)}
+                    placeholder="سبب المسحوبات..."
+                    className="w-full h-12 rounded-2xl bg-white border border-slate-200 px-4 text-[14px] font-bold text-zinc-800 outline-none focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 transition-all"
+                  />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">التصنيف</label>
+                  <select
+                    value={withdrawalCategoryId}
+                    onChange={(e) => setWithdrawalCategoryId(e.target.value)}
+                    className="w-full h-12 rounded-2xl bg-white border border-slate-200 px-4 text-[13px] font-bold text-zinc-800 outline-none focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 transition-all appearance-none"
+                  >
+                    <option value="">غير مصنف</option>
+                    {withdrawalCategories.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <label className="text-[11px] font-black uppercase tracking-widest text-slate-500">طريقة الدفع</label>
+                  <select
+                    value={withdrawalPaymentMethod}
+                    onChange={(e) => setWithdrawalPaymentMethod(e.target.value)}
+                    className="w-full h-12 rounded-2xl bg-white border border-slate-200 px-4 text-[13px] font-bold text-zinc-800 outline-none focus:border-zinc-400 focus:ring-4 focus:ring-zinc-900/5 transition-all appearance-none"
+                  >
+                    <option value="cash">نقدي</option>
+                    <option value="bank_transfer">تحويل بنكي</option>
+                    <option value="InstaPay">إنستاباي</option>
+                  </select>
+                </div>
+                <div className="pt-4">
+                  <motion.button
+                    whileHover={{ y: -2 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={handleWithdrawalSave}
+                    disabled={!withdrawalAmount}
+                    className="w-full h-14 flex items-center justify-center gap-2 rounded-2xl text-[15px] font-black text-white transition-all shadow-xl disabled:opacity-40 bg-slate-900 hover:bg-slate-800 shadow-slate-900/20"
                   >
                     <CheckCircle2 className="h-5 w-5" /> حفظ واعتماد
                   </motion.button>

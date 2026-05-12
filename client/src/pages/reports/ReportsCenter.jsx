@@ -3,11 +3,11 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Star, Play, Settings2, Filter, Trash2, CalendarDays, LayoutTemplate } from "lucide-react";
+import { Search, Star, Play, Settings2, Filter, Trash2, CalendarDays, LayoutTemplate, Percent } from "lucide-react";
 import { reportsApi } from "../../services/reports";
 import { useReportsStore, buildPrefKey } from "../../stores/reportsStore";
-import { CATEGORIES, SOURCES, SCOPE_OPTIONS, COST_METHODS, fmtDate, FORMAT_ICONS } from "./reportsCenterConfig";
-import { RSelect, RDate, DatePresets, ScopeSelector, ColumnPreviewStrip, GhostPreviewRows, ColumnToggleList, ClassificationSelector, DataModeToggle } from "./reportsCenterParts";
+import { CATEGORIES, SOURCES, SCOPE_OPTIONS, COST_METHODS, fmtDate, FORMAT_ICONS, FILTER_DIMENSIONS } from "./reportsCenterConfig";
+import { RSelect, RDate, DatePresets, ScopeSelector, ColumnPreviewStrip, GhostPreviewRows, ColumnToggleList, ClassificationSelector, DataModeToggle, DimensionFilter } from "./reportsCenterParts";
 import PermissionGate from "../../components/ui/PermissionGate";
 
 const SOURCE_CAT_MAP = {
@@ -153,6 +153,14 @@ export default function ReportsCenter() {
   // Per-source classification/mode state (sidebar only)
   const [sourceState, setSourceState] = useState({});
 
+  // Workspace-style filter state (dimension lookups, cost method)
+  const [workspaceFilters, setWorkspaceFilters] = useState({});
+  const [costMethod, setCostMethod] = useState("wacc");
+
+  function handleWorkspaceFilter(key, value) {
+    setWorkspaceFilters((prev) => ({ ...prev, [key]: value }));
+  }
+
   useEffect(() => {
     if (SOURCES.length > 0 && !selectedId) setSelectedId(SOURCES[0].id);
   }, [selectedId]);
@@ -191,7 +199,19 @@ export default function ReportsCenter() {
     if (!classification) return;
     const prefKey = buildPrefKey(source.id, classification, dataMode);
     store.pushRecent(prefKey);
-    navigate(`/reports/source/${source.id}/${classification}/${dataMode}`);
+    const params = new URLSearchParams();
+    if (dateRange.from) params.set("from", dateRange.from);
+    if (dateRange.to) params.set("to", dateRange.to);
+    if (scope.type !== "all" && scope.values?.[0]) {
+      params.set("scope_type", scope.type);
+      params.set("scope_value", scope.values[0]);
+    }
+    if (workspaceFilters.q) params.set("q", workspaceFilters.q);
+    if (selectedClsDef?.hasProfit) params.set("cost_method", costMethod);
+    const dimKeys = ["category_id","item_id","customer_id","supplier_id","user_id","warehouse_id","cashier_id","status","payment_type","movement_type","role"];
+    dimKeys.forEach((k) => { if (workspaceFilters[k]) params.set(k, workspaceFilters[k]); });
+    const qs = params.toString();
+    navigate(`/reports/source/${source.id}/${classification}/${dataMode}${qs ? `?${qs}` : ""}`);
   }
 
   function toggleFav(e, sourceId) {
@@ -204,9 +224,15 @@ export default function ReportsCenter() {
 
   const selectedClassifications = selectedSource ? (classificationsBySource[selectedSource.id] || []) : [];
   const selectedClsState = selectedSource ? (sourceState[selectedSource.id] || {}) : {};
-  const selectedClassification = selectedClsState.classification || getDefaultClassification(selectedSource?.id);
+  const selectedClassification = selectedClsState.classification || getDefaultClassification(selectedSource?.id) || "";
   const selectedMode = selectedClsState.dataMode || getDefaultMode(selectedSource?.id, selectedClassification);
   const selectedClsDef = selectedClassifications.find((c) => c.id === selectedClassification);
+  const sourceCatId = SOURCE_CAT_MAP[selectedSource?.id] || "sales";
+  const dimensions = useMemo(() => {
+    if (!selectedClsDef?.dimensions || !selectedSource?.id) return [];
+    const pool = FILTER_DIMENSIONS[selectedSource.id] || [];
+    return selectedClsDef.dimensions.map((key) => pool.find((d) => d.key === key)).filter(Boolean);
+  }, [selectedClsDef, selectedSource?.id]);
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-[#fafafa] text-zinc-900" dir="rtl" style={{ fontFamily: "Satoshi, sans-serif" }}>
@@ -340,7 +366,7 @@ export default function ReportsCenter() {
                       <div className="mt-auto pt-4 border-t border-zinc-100">
                         <div className="text-[10px] font-bold text-zinc-400 mb-2">أعمدة التقرير ومعاينة:</div>
                         <ColumnPreviewStrip catId={SOURCE_CAT_MAP[source.id] || "sales"} colVisibility={colVisibility} report={null} />
-                        <GhostPreviewRows catId={SOURCE_CAT_MAP[source.id] || "sales"} colVisibility={colVisibility} report={null} />
+                        <GhostPreviewRows catId={SOURCE_CAT_MAP[source.id] || "sales"} colVisibility={colVisibility} report={null} dateRange={dateRange} scope={scope} />
                       </div>
 
                       {/* Export Hints */}
@@ -456,7 +482,39 @@ export default function ReportsCenter() {
                 </div>
               )}
 
-              {/* 5. Column Toggles */}
+              {/* 5. Search + Dimension Filters */}
+              <div className="space-y-3">
+                <h3 className="text-[12px] font-black text-zinc-900 flex items-center gap-2">
+                  <span className="h-5 w-1 rounded-full bg-emerald-500"></span> <Search size={13} /> فلاتر التقرير
+                </h3>
+                <div className="rounded-2xl border border-zinc-200 bg-zinc-50/50 p-3 space-y-3">
+                  <div className="relative">
+                    <Search size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+                    <input type="text" value={workspaceFilters.q || ""}
+                      onChange={(e) => handleWorkspaceFilter("q", e.target.value)}
+                      placeholder="بحث عام..."
+                      className="w-full h-9 pr-9 pl-3 rounded-xl border border-zinc-200 bg-white text-[12px] font-bold text-zinc-900 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all placeholder:text-zinc-400"
+                    />
+                  </div>
+                  {dimensions.map((dim) => (
+                    <DimensionFilter key={dim.key} dimension={dim} value={workspaceFilters[dim.key]}
+                      onChange={(key, val) => handleWorkspaceFilter(key, val)} formatLabel={(x) => CLS_ARABIC[x] || x}
+                    />
+                  ))}
+                  {selectedClsDef?.hasProfit && (
+                    <div className="space-y-1">
+                      <label className="block text-[10px] font-bold text-zinc-500">طريقة التكلفة</label>
+                      <select value={costMethod} onChange={(e) => setCostMethod(e.target.value)}
+                        className="w-full h-9 px-3 rounded-xl border border-zinc-200 bg-white text-[12px] font-bold text-zinc-900 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all"
+                      >
+                        {COST_METHODS.map((m) => (<option key={m.value} value={m.value}>{m.label}</option>))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 6. Column Toggles */}
               <div className="space-y-3">
                 <h3 className="text-[12px] font-black text-zinc-900 flex items-center gap-2">
                   <span className="h-5 w-1 rounded-full bg-emerald-500"></span> أعمدة التقرير
@@ -466,7 +524,7 @@ export default function ReportsCenter() {
                 </div>
               </div>
 
-              {/* 6. Multi-select filters */}
+              {/* 7. Multi-select filters */}
               {selectedClsDef?.multiSelectFilters?.map((msf) => (
                 <div key={msf.key} className="space-y-3">
                   <h3 className="text-[12px] font-black text-zinc-900 flex items-center gap-2">

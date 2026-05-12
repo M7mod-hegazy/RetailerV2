@@ -47,6 +47,7 @@ import { LayoutGrid, List, Package } from "lucide-react";
 import WarehouseStockMatrix from "../../components/pos/WarehouseStockMatrix";
 import Modal from "../../components/ui/Modal";
 import PrintPreviewModal from "../../components/print/PrintPreviewModal";
+import POSTodayModal from "../../components/pos/POSTodayModal";
 import DataGrid from "../../components/ui/DataGrid";
 import { usePageTour } from "../../hooks/usePageTour";
 import { usePosStore } from "../../stores/posStore";
@@ -488,19 +489,7 @@ export default function POSPage() {
   const [pendingSave, setPendingSave] = useState(null);
 
   // Today's receipts
-  const [receiptsOpen, setReceiptsOpen]       = useState(false);
-  const [receipts, setReceipts]               = useState([]);
-  const [receiptSummary, setReceiptSummary]   = useState({ count: 0, total: 0 });
-  const [receiptDateFrom, setReceiptDateFrom] = useState(toDateInput());
-  const [receiptDateTo, setReceiptDateTo]     = useState(toDateInput());
-  const [receiptSort, setReceiptSort]         = useState("created_at");
-  const [receiptDir, setReceiptDir]           = useState("desc");
-  const [receiptUserId, setReceiptUserId]     = useState("");
-  const [receiptUsersList, setReceiptUsersList] = useState([]);
-  const [receiptsLoading, setReceiptsLoading] = useState(false);
-  const [invoiceSearchNo, setInvoiceSearchNo] = useState("");
-  const [searchedInvoice, setSearchedInvoice] = useState(null);
-  const [searchLoading, setSearchLoading] = useState(false);
+  const [receiptsOpen, setReceiptsOpen] = useState(false);
 
   // Staging area
   const [selectedItem, setSelectedItem] = useState(null);
@@ -1042,28 +1031,7 @@ export default function POSPage() {
     resetStaging();
   }
 
-  // Today's receipts
-  async function loadReceipts() {
-    setReceiptsLoading(true);
-    try {
-      const params = new URLSearchParams({ date_from: receiptDateFrom, date_to: receiptDateTo, sort: receiptSort, dir: receiptDir });
-      if (receiptUserId) params.set("user_id", receiptUserId);
-      const r = await api.get(`/api/invoices?${params}`);
-      setReceipts(r.data.data || []);
-      setReceiptSummary(r.data.summary || { count: 0, total: 0 });
-    } catch { /* silent */ }
-    finally { setReceiptsLoading(false); }
-  }
-
-  useEffect(() => {
-    if (receiptsOpen) {
-      loadReceipts();
-      if (!receiptUsersList.length) {
-        api.get("/api/users").then(r => setReceiptUsersList(r.data.data || [])).catch(() => {});
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [receiptsOpen, receiptDateFrom, receiptDateTo, receiptSort, receiptDir, receiptUserId]);
+  // Today's receipts (handled by POSTodayModal component)
 
   // ── Save invoice ──────────────────────────────────────────────────────────────
 
@@ -1180,27 +1148,7 @@ export default function POSPage() {
     await saveInvoice(printAfter, { ...opts, supervisorOverride: true });
   }
 
-  async function searchByInvoiceNo() {
-    if (!invoiceSearchNo.trim()) return;
-    setSearchLoading(true);
-    try {
-      const r = await api.get(`/api/invoices?search=${invoiceSearchNo.trim()}&limit=5`);
-      const list = r.data.data || r.data || [];
-      const found = list.find(inv => inv.invoice_no === invoiceSearchNo.trim()) || list[0];
-      setSearchedInvoice(found || null);
-      if (!found) setSaveMessage("لم يتم العثور على الفاتورة");
-    } catch { setSaveMessage("خطأ في البحث"); } finally { setSearchLoading(false); }
-  }
-
-  async function handleVoidInvoice(inv) {
-    if (!window.confirm(`إلغاء الفاتورة ${inv.invoice_no}؟ سيتم عكس التأثير على المخزون والخزينة.`)) return;
-    try {
-      await api.post(`/api/invoices/${inv.id}/void`, { reason: "إلغاء من قبل الكاشير" });
-      setSaveMessage("تم إلغاء الفاتورة");
-      setTimeout(() => setSaveMessage(""), 3000);
-      loadReceipts();
-    } catch (e) { setSaveMessage(e.response?.data?.message || "خطأ"); setTimeout(() => setSaveMessage(""), 4000); }
-  }
+  // Invoice void and search are handled by POSTodayModal component
 
   async function createQuickCustomer() {
     if (!customerDraft.name.trim()) {
@@ -2257,110 +2205,7 @@ export default function POSPage() {
           setZoom={setGalleryZoom}
         />
 
-        {/* Today's Receipts Modal for list view */}
-        <Modal open={receiptsOpen} onClose={() => setReceiptsOpen(false)} title="فواتير اليوم" maxWidth="max-w-5xl">
-          <div className="flex flex-col gap-4">
-            {/* Invoice search by number */}
-            <div className="flex items-center gap-2 p-3 bg-slate-900 rounded-sm border border-slate-700">
-              <span className="text-[11px] font-black text-slate-400 shrink-0">بحث برقم فاتورة:</span>
-              <input
-                value={invoiceSearchNo}
-                onChange={e => setInvoiceSearchNo(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && searchByInvoiceNo()}
-                placeholder="INV-0001..."
-                className="flex-1 rounded-sm border border-slate-600 bg-slate-800 px-3 py-1.5 text-[12px] font-bold text-white outline-none focus:border-slate-400"
-              />
-              <button onClick={searchByInvoiceNo} disabled={searchLoading} className="flex items-center gap-1.5 rounded-sm bg-slate-700 px-3 py-1.5 text-[11px] font-black text-white hover:bg-slate-600">
-                {searchLoading ? "..." : "بحث"}
-              </button>
-              {searchedInvoice && <button onClick={() => setSearchedInvoice(null)} className="text-slate-400 hover:text-slate-200"><X className="h-4 w-4" /></button>}
-            </div>
-            {/* Searched invoice highlight */}
-            {searchedInvoice && (
-              <div className="rounded-sm border border-blue-400 bg-blue-50 p-3 text-[12px] font-bold text-blue-900 flex items-center gap-4 flex-wrap">
-                <span className="font-mono font-black">{searchedInvoice.invoice_no}</span>
-                <span>{searchedInvoice.customer_name || "زبون نقدي"}</span>
-                <span className="font-mono text-emerald-700">{formatMoney(searchedInvoice.total)}</span>
-                <span className="text-slate-500">{searchedInvoice.created_at ? formatArabicDateTime(new Date(searchedInvoice.created_at)) : ""}</span>
-                <div className="flex gap-1 mr-auto">
-                  <button onClick={() => navigate(`/invoices/${searchedInvoice.id}`)} className="flex h-7 w-7 items-center justify-center rounded text-blue-600 hover:bg-blue-100" title="فتح الفاتورة"><Pencil className="h-4 w-4" /></button>
-                  <button onClick={() => handleVoidInvoice(searchedInvoice)} className="flex h-7 w-7 items-center justify-center rounded text-rose-600 hover:bg-rose-100" title="إلغاء"><Trash2 className="h-4 w-4" /></button>
-                </div>
-              </div>
-            )}
-            {/* Filters */}
-            <div className="flex items-center gap-3 flex-wrap">
-              <div className="flex items-center gap-1.5">
-                <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest">من</label>
-                <input type="date" value={receiptDateFrom} onChange={(e) => setReceiptDateFrom(e.target.value)}
-                  className="rounded-sm border border-slate-200 px-2 py-1.5 text-[12px] font-bold outline-none focus:border-slate-800" />
-              </div>
-              <div className="flex items-center gap-1.5">
-                <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest">إلى</label>
-                <input type="date" value={receiptDateTo} onChange={(e) => setReceiptDateTo(e.target.value)}
-                  className="rounded-sm border border-slate-200 px-2 py-1.5 text-[12px] font-bold outline-none focus:border-slate-800" />
-              </div>
-              {receiptUsersList.length > 0 && (
-                <div className="flex items-center gap-1.5">
-                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest">المستخدم</label>
-                  <select value={receiptUserId} onChange={(e) => setReceiptUserId(e.target.value)}
-                    className="rounded-sm border border-slate-200 px-2 py-1.5 text-[12px] font-bold outline-none focus:border-slate-800">
-                    <option value="">الكل</option>
-                    {receiptUsersList.map(u => <option key={u.id} value={u.id}>{u.username}</option>)}
-                  </select>
-                </div>
-              )}
-              <button onClick={loadReceipts}
-                className="flex items-center gap-1.5 rounded-sm border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-black text-slate-600 hover:border-slate-800 hover:text-slate-900 transition-colors">
-                <RefreshCw className={`h-3.5 w-3.5 ${receiptsLoading ? "animate-spin" : ""}`} /> تحديث
-              </button>
-            </div>
-
-            {/* Summary strip */}
-            <div className="flex items-center gap-4 rounded-sm bg-slate-950 px-4 py-3">
-              <div className="flex flex-col">
-                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">عدد الفواتير</span>
-                <span className="font-mono text-[20px] font-black text-white leading-none">{receiptSummary.count}</span>
-              </div>
-              <div className="h-8 w-px bg-slate-800" />
-              <div className="flex flex-col">
-                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">إجمالي الإيرادات</span>
-                <span className="font-mono text-[20px] font-black text-emerald-400 leading-none">{formatMoney(receiptSummary.total)}</span>
-              </div>
-            </div>
-
-            {/* Table */}
-            <div className="max-h-[420px] overflow-auto rounded-sm border border-slate-200">
-              <DataGrid
-                data={receiptsLoading ? [] : receipts}
-                rowKey="id"
-                emptyMessage={receiptsLoading ? "جاري التحميل..." : "لا توجد فواتير في هذه الفترة"}
-                className="border-0"
-                columns={[
-                  { id: "invoice_no", header: "رقم الفاتورة", width: 140, cellClass: "px-3 font-mono text-[12px] font-black text-slate-700", render: (inv) => inv.invoice_no },
-                  { id: "customer_name", header: "العميل", width: 140, cellClass: "px-3 text-[12px] font-bold text-slate-800", render: (inv) => inv.customer_name || "زبون نقدي" },
-                  { id: "total", header: "الإجمالي", width: 110, cellClass: "px-3 font-mono text-[13px] font-black text-emerald-700", render: (inv) => formatMoney(inv.total) },
-                  { id: "payment_type", header: "الدفع", width: 90, cellClass: "px-3 text-[12px] font-bold text-slate-600", render: (inv) => PAYMENT_TYPES.find((p) => p.type === inv.payment_type)?.label || inv.payment_type },
-                  { id: "amendment", header: "تعديل", width: 110, cellClass: "px-3", render: (inv) => (
-                    <div className="flex flex-col gap-0.5">
-                      {inv.amended_by && <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-100 text-amber-700 border border-amber-200 whitespace-nowrap">مُعدَّلة ← {inv.amended_by_no || inv.amended_by}</span>}
-                      {inv.amendment_of && <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-blue-100 text-blue-700 border border-blue-200 whitespace-nowrap">تعديل ↑ {inv.amendment_of_no || inv.amendment_of}</span>}
-                      {!inv.amended_by && !inv.amendment_of && <span className="text-slate-300 text-[10px]">—</span>}
-                    </div>
-                  )},
-                  { id: "created_by", header: "المستخدم", width: 100, cellClass: "px-3 text-[11px] font-bold text-slate-600 whitespace-nowrap", render: (inv) => inv.created_by_username || "—" },
-                  { id: "created_at", header: "الوقت", width: 140, cellClass: "px-3 text-[11px] font-bold text-slate-500 font-mono whitespace-nowrap", render: (inv) => formatArabicDateTime(new Date(inv.created_at)) },
-                  { id: "actions", header: "", width: 80, cellClass: "px-3", render: (inv) => (
-                    <div className="flex gap-1">
-                      <button onClick={() => navigate(`/invoices/${inv.id}`)} className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-blue-50 hover:text-blue-600" title="فتح الفاتورة"><Pencil className="h-3.5 w-3.5" /></button>
-                      <button onClick={() => handleVoidInvoice(inv)} className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="إلغاء"><Trash2 className="h-3.5 w-3.5" /></button>
-                    </div>
-                  )}
-                ]}
-              />
-            </div>
-          </div>
-        </Modal>
+        <POSTodayModal open={receiptsOpen} onClose={() => setReceiptsOpen(false)} />
 
         {/* Quick customer creation modal for list view */}
         <Modal open={customerCreateOpen} onClose={() => setCustomerCreateOpen(false)} title="إنشاء عميل جديد">
@@ -3296,188 +3141,7 @@ export default function POSPage() {
         setZoom={setGalleryZoom}
       />
 
-      {/* ── Today's Receipts Modal ── */}
-      <Modal open={receiptsOpen} onClose={() => setReceiptsOpen(false)} title="فواتير اليوم" maxWidth="max-w-5xl">
-        <div className="flex flex-col gap-4">
-          {/* Invoice search by number */}
-          <div className="flex items-center gap-2 p-3 bg-slate-900 rounded-sm border border-slate-700">
-            <span className="text-[11px] font-black text-slate-400 shrink-0">بحث برقم فاتورة:</span>
-            <input
-              value={invoiceSearchNo}
-              onChange={e => setInvoiceSearchNo(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && searchByInvoiceNo()}
-              placeholder="INV-0001..."
-              className="flex-1 rounded-sm border border-slate-600 bg-slate-800 px-3 py-1.5 text-[12px] font-bold text-white outline-none focus:border-slate-400"
-            />
-            <button onClick={searchByInvoiceNo} disabled={searchLoading} className="flex items-center gap-1.5 rounded-sm bg-slate-700 px-3 py-1.5 text-[11px] font-black text-white hover:bg-slate-600">
-              {searchLoading ? "..." : "بحث"}
-            </button>
-            {searchedInvoice && <button onClick={() => setSearchedInvoice(null)} className="text-slate-400 hover:text-slate-200"><X className="h-4 w-4" /></button>}
-          </div>
-          {/* Searched invoice highlight */}
-          {searchedInvoice && (
-            <div className="rounded-sm border border-blue-400 bg-blue-50 p-3 text-[12px] font-bold text-blue-900 flex items-center gap-4 flex-wrap">
-              <span className="font-mono font-black">{searchedInvoice.invoice_no}</span>
-              <span>{searchedInvoice.customer_name || "زبون نقدي"}</span>
-              <span className="font-mono text-emerald-700">{formatMoney(searchedInvoice.total)}</span>
-              <span className="text-slate-500">{searchedInvoice.created_at ? formatArabicDateTime(new Date(searchedInvoice.created_at)) : ""}</span>
-              <div className="flex gap-1 mr-auto">
-                <button onClick={() => openEditInvoice(searchedInvoice)} className="flex h-7 w-7 items-center justify-center rounded text-blue-600 hover:bg-blue-100" title="تعديل"><Pencil className="h-4 w-4" /></button>
-                <button onClick={() => handleVoidInvoice(searchedInvoice)} className="flex h-7 w-7 items-center justify-center rounded text-rose-600 hover:bg-rose-100" title="إلغاء"><Trash2 className="h-4 w-4" /></button>
-              </div>
-            </div>
-          )}
-          {/* Filters */}
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-1.5">
-              <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest">من</label>
-              <input type="date" value={receiptDateFrom} onChange={(e) => setReceiptDateFrom(e.target.value)}
-                className="rounded-sm border border-slate-200 px-2 py-1.5 text-[12px] font-bold outline-none focus:border-slate-800" />
-            </div>
-            <div className="flex items-center gap-1.5">
-              <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest">إلى</label>
-              <input type="date" value={receiptDateTo} onChange={(e) => setReceiptDateTo(e.target.value)}
-                className="rounded-sm border border-slate-200 px-2 py-1.5 text-[12px] font-bold outline-none focus:border-slate-800" />
-            </div>
-            <div className="flex items-center gap-1.5">
-              <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest">ترتيب</label>
-              <select value={receiptSort} onChange={(e) => setReceiptSort(e.target.value)}
-                className="rounded-sm border border-slate-200 px-2 py-1.5 text-[12px] font-bold outline-none focus:border-slate-800">
-                <option value="created_at">الوقت</option>
-                <option value="total">الإجمالي</option>
-                <option value="invoice_no">رقم الفاتورة</option>
-                <option value="payment_type">طريقة الدفع</option>
-              </select>
-              <button onClick={() => setReceiptDir((d) => d === "asc" ? "desc" : "asc")}
-                className="flex h-8 w-8 items-center justify-center rounded-sm border border-slate-200 bg-white hover:bg-slate-50 transition-colors">
-                <ArrowUpDown className="h-3.5 w-3.5 text-slate-500" />
-              </button>
-            </div>
-            {receiptUsersList.length > 0 && (
-              <div className="flex items-center gap-1.5">
-                <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest">المستخدم</label>
-                <select value={receiptUserId} onChange={(e) => setReceiptUserId(e.target.value)}
-                  className="rounded-sm border border-slate-200 px-2 py-1.5 text-[12px] font-bold outline-none focus:border-slate-800">
-                  <option value="">الكل</option>
-                  {receiptUsersList.map(u => <option key={u.id} value={u.id}>{u.username}</option>)}
-                </select>
-              </div>
-            )}
-            <button onClick={loadReceipts}
-              className="flex items-center gap-1.5 rounded-sm border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-black text-slate-600 hover:border-slate-800 hover:text-slate-900 transition-colors">
-              <RefreshCw className={`h-3.5 w-3.5 ${receiptsLoading ? "animate-spin" : ""}`} /> تحديث
-            </button>
-          </div>
-
-          {/* Summary strip */}
-          <div className="flex items-center gap-4 rounded-sm bg-slate-950 px-4 py-3">
-            <div className="flex flex-col">
-              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">عدد الفواتير</span>
-              <span className="font-mono text-[20px] font-black text-white leading-none">{receiptSummary.count}</span>
-            </div>
-            <div className="h-8 w-px bg-slate-800" />
-            <div className="flex flex-col">
-              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">إجمالي الإيرادات</span>
-              <span className="font-mono text-[20px] font-black text-emerald-400 leading-none">{formatMoney(receiptSummary.total)}</span>
-            </div>
-          </div>
-
-          {/* Table */}
-          <div className="max-h-[420px] overflow-auto rounded-sm border border-slate-200">
-            <DataGrid
-              data={receiptsLoading ? [] : receipts}
-              rowKey="id"
-              emptyMessage={receiptsLoading ? "جاري التحميل..." : "لا توجد فواتير في هذه الفترة"}
-              className="border-0"
-              columns={[
-                {
-                  id: "invoice_no", header: "رقم الفاتورة", width: 140, sortable: true,
-                  headerClass: "text-right px-3 font-black uppercase tracking-widest text-slate-500",
-                  cellClass: "px-3 font-mono text-[12px] font-black text-slate-700",
-                  render: (inv) => inv.invoice_no
-                },
-                {
-                  id: "customer_name", header: "العميل", width: 160, sortable: true,
-                  headerClass: "text-right px-3 font-black uppercase tracking-widest text-slate-500",
-                  cellClass: "px-3 text-[12px] font-bold text-slate-800",
-                  render: (inv) => inv.customer_name || "زبون نقدي"
-                },
-                {
-                  id: "items_count", header: "الأصناف", width: 80, sortable: true,
-                  headerClass: "text-center px-3 font-black uppercase tracking-widest text-slate-500",
-                  cellClass: "px-3 text-center text-[12px] font-bold text-slate-600",
-                  render: (inv) => inv.items_count
-                },
-                {
-                  id: "total", header: "الإجمالي", width: 120, sortable: true,
-                  headerClass: "text-right px-3 font-black uppercase tracking-widest text-slate-500",
-                  cellClass: "px-3 font-mono text-[13px] font-black text-emerald-700",
-                  render: (inv) => formatMoney(inv.total)
-                },
-                {
-                  id: "payment_type", header: "طريقة الدفع", width: 120, sortable: true,
-                  headerClass: "text-right px-3 font-black uppercase tracking-widest text-slate-500",
-                  cellClass: "px-3 text-[12px] font-bold text-slate-600",
-                  render: (inv) => PAYMENT_TYPES.find((p) => p.type === inv.payment_type)?.label || inv.payment_type
-                },
-                {
-                  id: "status", header: "الحالة", width: 100, sortable: true,
-                  headerClass: "text-right px-3 font-black uppercase tracking-widest text-slate-500",
-                  cellClass: "px-3",
-                  render: (inv) => {
-                    const statusInfo = PAYMENT_STATUS_LABELS[inv.status] || PAYMENT_STATUS_LABELS.paid;
-                    return <span className={`inline-flex items-center rounded-sm border px-1.5 py-0.5 text-[10px] font-black ${statusInfo.cls}`}>{statusInfo.label}</span>;
-                  }
-                },
-                {
-                  id: "amendment", header: "تعديل", width: 120, sortable: false,
-                  headerClass: "text-right px-3 font-black uppercase tracking-widest text-slate-500",
-                  cellClass: "px-3",
-                  render: (inv) => (
-                    <div className="flex flex-col gap-0.5">
-                      {inv.amended_by && <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-100 text-amber-700 border border-amber-200 whitespace-nowrap">مُعدَّلة ← {inv.amended_by_no || inv.amended_by}</span>}
-                      {inv.amendment_of && <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-blue-100 text-blue-700 border border-blue-200 whitespace-nowrap">تعديل ↑ {inv.amendment_of_no || inv.amendment_of}</span>}
-                      {!inv.amended_by && !inv.amendment_of && <span className="text-slate-300 text-[10px]">—</span>}
-                    </div>
-                  )
-                },
-                {
-                  id: "created_by", header: "المستخدم", width: 110, sortable: false,
-                  headerClass: "text-right px-3 font-black uppercase tracking-widest text-slate-500",
-                  cellClass: "px-3 text-[11px] font-bold text-slate-600 whitespace-nowrap",
-                  render: (inv) => inv.created_by_username || "—"
-                },
-                {
-                  id: "created_at", header: "الوقت", width: 150, sortable: true,
-                  headerClass: "text-right px-3 font-black uppercase tracking-widest text-slate-500",
-                  cellClass: "px-3 text-[11px] font-bold text-slate-500 font-mono whitespace-nowrap",
-                  render: (inv) => formatArabicDateTime(new Date(inv.created_at))
-                },
-                {
-                  id: "actions", header: "", width: 90,
-                  headerClass: "px-3",
-                  cellClass: "px-3",
-                  render: (inv) => (
-                    <div className="flex gap-1">
-                      <button
-                        onClick={() => openEditInvoice(inv)}
-                        className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-blue-50 hover:text-blue-600"
-                        title="تعديل"
-                      ><Pencil className="h-3.5 w-3.5" /></button>
-                      <button
-                        onClick={() => handleVoidInvoice(inv)}
-                        className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-rose-50 hover:text-rose-600"
-                        title="إلغاء"
-                      ><Trash2 className="h-3.5 w-3.5" /></button>
-                    </div>
-                  )
-                }
-              ]}
-            />
-          </div>
-        </div>
-        {/* Edit Invoice sub-modal */}
-      </Modal>
+      <POSTodayModal open={receiptsOpen} onClose={() => setReceiptsOpen(false)} />
 
       {/* ── Detailed item search ── */}
       <Modal open={detailedSearchOpen} onClose={() => setDetailedSearchOpen(false)} title="بحث تفصيلي عن الأصناف">

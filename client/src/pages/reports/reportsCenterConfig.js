@@ -8,6 +8,7 @@ export const CATEGORIES = [
   { id: "treasury",  label: "الخزينة",    icon: Receipt,    color: "#06b6d4" },
   { id: "tax",       label: "الضرائب",    icon: FileText,   color: "var(--error-DEFAULT,#ef4444)" },
   { id: "audit",     label: "التدقيق",    icon: Shield,     color: "var(--text-secondary,#94a3b8)" },
+  { id: "users",     label: "المستخدمين", icon: Users,      color: "#6366f1" },
 ];
 
 export const SOURCES = [
@@ -27,6 +28,7 @@ export const SOURCES = [
   { id: "treasury",        label: "الخزينة",             icon: Wallet,        color: "#06b6d4" },
   { id: "profit-loader",   label: "محمل ربح المبيعات",  icon: Percent,       color: "#d946ef" },
   { id: "net-profit",      label: "صافي الربح",          icon: LineChart,     color: "#1e40af" },
+  { id: "users",           label: "المستخدمين",          icon: Users,         color: "#6366f1" },
 ];
 
 export const FORMAT_ICONS = {
@@ -56,6 +58,7 @@ export const SCOPE_OPTIONS = {
   suppliers:       [{ type:"all",label:"الكل"}],
   customers:       [{ type:"all",label:"الكل"}],
   employees:       [{ type:"all",label:"الكل"}],
+  users:           [{ type:"all",label:"الكل"}],
   installments:    [{ type:"all",label:"الكل"}],
   expenses:        [{ type:"all",label:"الكل"}],
   revenues:        [{ type:"all",label:"الكل"}],
@@ -97,6 +100,10 @@ export const CAT_PREVIEW_COLUMNS = {
     {k:"created_at",l:"التاريخ",t:"date"},{k:"full_name",l:"المستخدم",t:"text"},
     {k:"action",l:"العملية",t:"text"},{k:"resource",l:"المورد",t:"text"},
   ],
+  users: [
+    {k:"full_name",l:"المستخدم",t:"text"},{k:"role",l:"الصلاحية",t:"text"},
+    {k:"status",l:"الحالة",t:"text"},{k:"last_login",l:"آخر دخول",t:"date"},
+  ],
 };
 
 export const CAT_GHOST_ROWS = {
@@ -130,6 +137,10 @@ export const CAT_GHOST_ROWS = {
     {created_at:"١٤:٢٢ ٠٤/٠٥",full_name:"محمد السيد",action:"تعديل سعر",resource:"items/٨٨٢"},
     {created_at:"١٦:٠٥ ٠٣/٠٥",full_name:"سارة الحسن",action:"إنشاء فاتورة",resource:"invoices/٩١٢"},
   ],
+  users: [
+    {full_name:"محمد السيد",role:"مدير",status:"نشط",last_login:"٠٤/٠٥ ٠٩:١٥"},
+    {full_name:"سارة الحسن",role:"كاشير",status:"نشط",last_login:"٠٤/٠٥ ٠٨:٣٠"},
+  ],
 };
 
 export const PREVIEW_COLUMNS = {
@@ -149,6 +160,7 @@ export const PREVIEW_COLUMNS = {
   treasury:   [{k:"date",l:"التاريخ",t:"date"},{k:"type",l:"النوع",t:"text"},{k:"total",l:"المبلغ",t:"cur"},{k:"tx_count",l:"الحركات",t:"num"},{k:"name",l:"الخزينة",t:"text"},{k:"balance",l:"الرصيد",t:"cur"}],
   "profit-loader": [{k:"item_code",l:"كود الصنف",t:"text"},{k:"item_name",l:"الصنف",t:"text"},{k:"revenue",l:"الإيراد",t:"cur"},{k:"cost",l:"التكلفة",t:"cur"},{k:"profit_margin",l:"الربح",t:"cur"},{k:"margin_percent",l:"% الربح",t:"percent"}],
   "net-profit": [{k:"label",l:"البيان",t:"text"},{k:"amount",l:"المبلغ",t:"cur"},{k:"pct",l:"%",t:"percent"}],
+  users:      [{k:"full_name",l:"المستخدم",t:"text"},{k:"role",l:"الصلاحية",t:"text"},{k:"status",l:"الحالة",t:"text"},{k:"last_login",l:"آخر دخول",t:"date"}],
 };
 
 export const GHOST_ROWS = {
@@ -215,6 +227,10 @@ export const GHOST_ROWS = {
   "net-profit": [
     {label:"إجمالي الإيرادات",amount:"١٥٠٬٠٠٠",pct:"١٠٠٪"},
     {label:"تكلفة البضاعة",amount:"٩٠٬٠٠٠",pct:"٦٠٪"},
+  ],
+  users: [
+    {full_name:"محمد السيد",role:"مدير",status:"نشط",last_login:"٠٤/٠٥ ٠٩:١٥"},
+    {full_name:"سارة الحسن",role:"كاشير",status:"نشط",last_login:"٠٤/٠٥ ٠٨:٣٠"},
   ],
 };
 
@@ -289,6 +305,10 @@ export const FILTER_DIMENSIONS = {
   "net-profit": [],
   treasury: [],
   installments: [],
+  users: [
+    { key: "user_id", type: "lookup", entity: "user", label: "المستخدم" },
+    { key: "role", type: "select", label: "الصلاحية", options: [{ value: "admin", label: "مدير" }, { value: "cashier", label: "كاشير" }, { value: "manager", label: "مشرف" }] },
+  ],
 };
 
 export function fmtDate(d) { return d.toISOString().slice(0,10); }

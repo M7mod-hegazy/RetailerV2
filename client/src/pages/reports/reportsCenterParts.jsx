@@ -325,11 +325,21 @@ function getPreviewColumns(report, catId) {
   return (PREVIEW_COLUMNS[catId] || []).map(normalizeCol).filter(Boolean);
 }
 
-function sampleValueForColumn(col, rowIndex) {
+function fmtSampleDate(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString("ar-EG");
+}
+
+function sampleValueForColumn(col, rowIndex, dateRange) {
   const key = col.key;
   const type = col.type;
+  const dt = dateRange?.from || dateRange?.to;
+  const sampleDate = dt ? fmtSampleDate(dt) : null;
+  const sampleDate2 = dateRange?.to && dateRange?.from && dateRange.from !== dateRange.to ? fmtSampleDate(dateRange.to) : null;
   const samples = {
-    date:        rowIndex === 0 ? "٠٤/٠٥/٢٠٢٦" : "٠٣/٠٥/٢٠٢٦",
+    date:        sampleDate ? (rowIndex === 0 ? sampleDate : (sampleDate2 || sampleDate)) : (rowIndex === 0 ? "٠٤/٠٥/٢٠٢٦" : "٠٣/٠٥/٢٠٢٦"),
     cur:         rowIndex === 0 ? "١٢٬٤٥٠" : "٨٬٣٠٠",
     num:         rowIndex === 0 ? "٢٤" : "٨",
     percent:     rowIndex === 0 ? "١٤٫٥٪" : "٨٫٢٪",
@@ -353,45 +363,84 @@ export function ColumnPreviewStrip({ catId, colVisibility, report }) {
   if (!visible.length) return null;
   return (
     <div className="flex gap-1.5 overflow-x-auto scrollbar-hide py-0.5">
-      {visible.map((c) => (
-        <span
-          key={c.key}
-          className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold ${COL_TYPE_STYLE[c.type] || COL_TYPE_STYLE.text}`}
-        >
-          {c.label}
-        </span>
-      ))}
+      <AnimatePresence mode="popLayout">
+        {visible.map((c) => (
+          <motion.span
+            key={c.key}
+            layout
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            transition={{ duration: 0.15 }}
+            className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold ${COL_TYPE_STYLE[c.type] || COL_TYPE_STYLE.text}`}
+          >
+            {c.label}
+          </motion.span>
+        ))}
+      </AnimatePresence>
     </div>
   );
 }
 
 // ─── Ghost Preview Rows (card) ────────────────────────────────────────────────
-export function GhostPreviewRows({ catId, colVisibility, report }) {
+export function GhostPreviewRows({ catId, colVisibility, report, dateRange, scope }) {
   const cols = getPreviewColumns(report, catId);
   const visible = cols.filter((c) => colVisibility[c.key] !== false);
   const ghostRows = CAT_GHOST_ROWS[catId] || GHOST_ROWS[catId] || [];
 
+  // Reflect scope name in ghost data if available
+  const scopeLabel = scope?.valueLabels?.[0];
+  const scopeType = scope?.type;
+  const scopeKey = scopeType === "customer" ? "customer_name"
+    : scopeType === "supplier" ? "supplier_name"
+    : scopeType === "product" ? "item_name"
+    : scopeType === "category" ? "category_name"
+    : null;
+
   // Generate rows: use GHOST_ROWS objects if available, otherwise build from columns
   const rows = ghostRows.length
-    ? [0, 1, 2].slice(0, Math.min(ghostRows.length, 3)).map((ri) => visible.map((c) => ghostRows[ri]?.[c.key] ?? sampleValueForColumn(c, ri)))
-    : [0, 1, 2].map((ri) => visible.map((c) => sampleValueForColumn(c, ri)));
+    ? [0, 1, 2].slice(0, Math.min(ghostRows.length, 3)).map((ri) => visible.map((c) => {
+        if (scopeLabel && scopeKey === c.key) return scopeLabel;
+        if (c.type === "date" || c.key === "date" || c.key.endsWith("_date")) return sampleValueForColumn(c, ri, dateRange);
+        return ghostRows[ri]?.[c.key] ?? sampleValueForColumn(c, ri, dateRange);
+      }))
+    : [0, 1, 2].map((ri) => visible.map((c) => sampleValueForColumn(c, ri, dateRange)));
 
   if (!visible.length) return null;
   return (
     <div className="mt-2 space-y-1 opacity-40">
       <div className="flex gap-2 mb-1">
-        {visible.slice(0, 5).map((c) => (
-          <span key={c.key} className="flex-1 text-[9px] font-black text-text-muted uppercase truncate">{c.label}</span>
-        ))}
+        <AnimatePresence mode="popLayout">
+          {visible.slice(0, 5).map((c) => (
+            <motion.span
+              key={c.key}
+              layout
+              initial={{ opacity: 0, width: 0 }}
+              animate={{ opacity: 1, width: "auto" }}
+              exit={{ opacity: 0, width: 0 }}
+              transition={{ duration: 0.15 }}
+              className="flex-1 text-[9px] font-black text-text-muted uppercase truncate"
+            >
+              {c.label}
+            </motion.span>
+          ))}
+        </AnimatePresence>
       </div>
       {rows.map((row, ri) => (
-        <div key={ri} className="flex gap-2 rounded-[4px] bg-bg-overlay px-1.5 py-1">
+        <motion.div
+          key={ri}
+          layout
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.15 }}
+          className="flex gap-2 rounded-[4px] bg-bg-overlay px-1.5 py-1"
+        >
           {visible.slice(0, 5).map((c, ci) => (
             <span key={c.key} className={`flex-1 text-[10px] truncate font-bold ${c.type === "cur" || c.type === "num" ? "font-mono text-text-primary" : "text-text-secondary"}`}>
               {row[ci] ?? "—"}
             </span>
           ))}
-        </div>
+        </motion.div>
       ))}
       <p className="text-[9px] text-text-muted text-left mt-1">* بيانات عينة للمعاينة فقط</p>
     </div>

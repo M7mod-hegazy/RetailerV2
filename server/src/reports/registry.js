@@ -7,6 +7,7 @@ const REPORT_REGISTRY = {
     { id: "treasury", label_key: "category_treasury" },
     { id: "tax", label_key: "category_tax" },
     { id: "audit", label_key: "category_audit" },
+    { id: "users", label_key: "category_users" },
   ],
 
   sources: [
@@ -26,6 +27,7 @@ const REPORT_REGISTRY = {
     { id: "treasury", label_key: "source_treasury", cat: "treasury", icon: "Wallet" },
     { id: "profit-loader", label_key: "source_profit_loader", cat: "sales", icon: "Percent" },
     { id: "net-profit", label_key: "source_net_profit", cat: "accounts", icon: "LineChart" },
+    { id: "users", label_key: "source_users", cat: "users", icon: "Users" },
   ],
 
   // ── Filter Dimensions Pool (shared per source) ────────────────
@@ -89,9 +91,25 @@ const REPORT_REGISTRY = {
     "net-profit": [],
     treasury: [],
     installments: [],
+    users: [
+      { key: "user_id", type: "lookup", entity: "user", label_key: "user" },
+      { key: "role", type: "select", label_key: "role", options: [{ value: "admin", label_key: "admin" }, { value: "cashier", label_key: "cashier" }, { value: "manager", label_key: "manager" }] },
+    ],
   },
 
   classifications: {
+    // ── المستخدمون (Users) ──
+    users: [
+      { id: "user-list", label_key: "cls_users_list", detailedQuery: "user-list", summaryQuery: null, availableModes: ["detailed"], supportsDates: false, hasProfit: false, supportsScope: false, dimensions: ["role"], filters: [
+        { key: "role", type: "select", label_key: "role", options: [{ value: "admin", label_key: "admin" }, { value: "cashier", label_key: "cashier" }, { value: "manager", label_key: "manager" }] },
+      ], multiSelectFilters: [] },
+      { id: "performance", label_key: "cls_users_performance", detailedQuery: "user-performance", summaryQuery: null, availableModes: ["detailed", "summary"], supportsDates: true, hasProfit: false, supportsScope: false, dimensions: ["user_id"], filters: [
+        { key: "user_id", type: "lookup", label_key: "user", entity: "user" },
+      ], multiSelectFilters: [] },
+      { id: "login-history", label_key: "cls_users_login_history", detailedQuery: "login-history", summaryQuery: null, availableModes: ["detailed"], supportsDates: true, hasProfit: false, supportsScope: false, dimensions: ["user_id"], filters: [
+        { key: "user_id", type: "lookup", label_key: "user", entity: "user" },
+      ], multiSelectFilters: [] },
+    ],
     // ── مبيعات (Sales) ──
     sales: [
       { id: "daily-summary", label_key: "cls_sales_daily", detailedQuery: null, summaryQuery: "daily-sales", availableModes: ["summary"], supportsDates: true, hasProfit: true, supportsScope: true, dimensions: ["payment_type", "cashier_id"], filters: [], multiSelectFilters: [] },
@@ -382,6 +400,9 @@ const slugSourceMap = {
   "exceptions": "employees",
   "audit-log": "employees",
   "user-activity": "employees",
+  "user-list": "users",
+  "user-performance": "users",
+  "login-history": "users",
 };
 
 const clsMap = {
@@ -436,6 +457,9 @@ const clsMap = {
   "exceptions": { classification: "shifts", dataMode: "detailed" },
   "audit-log": { classification: "user-activity", dataMode: "detailed" },
   "user-activity": { classification: "user-activity", dataMode: "detailed" },
+  "user-list": { classification: "user-list", dataMode: "detailed" },
+  "user-performance": { classification: "performance", dataMode: "detailed" },
+  "login-history": { classification: "login-history", dataMode: "detailed" },
 };
 
 // Register backward-compat maps
@@ -600,6 +624,16 @@ REPORT_REGISTRY.reports = [
   { id: "R52", cat: "audit", slug: "user-activity", title_key: "r52_title", desc_key: "r52_desc", supportsDates: true, exportFormats: ["pdf", "excel", "print"], filters: [
     { key: "user_id", type: "lookup", label_key: "user", entity: "user" },
     { key: "action", type: "select", label_key: "action", options: [] },
+  ]},
+  // Users
+  { id: "R53", cat: "users", slug: "user-list", title_key: "r53_title", desc_key: "r53_desc", supportsDates: false, exportFormats: ["pdf", "excel", "word", "print"], filters: [
+    { key: "role", type: "select", label_key: "role", options: [{ value: "admin", label_key: "admin" }, { value: "cashier", label_key: "cashier" }, { value: "manager", label_key: "manager" }] },
+  ]},
+  { id: "R54", cat: "users", slug: "user-performance", title_key: "r54_title", desc_key: "r54_desc", supportsDates: true, exportFormats: ["pdf", "excel", "word", "print"], filters: [
+    { key: "user_id", type: "lookup", label_key: "user", entity: "user" },
+  ]},
+  { id: "R55", cat: "users", slug: "login-history", title_key: "r55_title", desc_key: "r55_desc", supportsDates: true, exportFormats: ["pdf", "excel", "print"], filters: [
+    { key: "user_id", type: "lookup", label_key: "user", entity: "user" },
   ]},
 ];
 

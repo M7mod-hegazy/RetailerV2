@@ -2,12 +2,14 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft, Search, Trash2, Plus, Minus, RotateCcw, Clock,
   CheckCircle2, AlertCircle, Lock, Pencil, Printer, X, ExternalLink,
-  Package, RefreshCw, ChevronRight, UserPlus, Phone,
+  Package, RefreshCw, ChevronRight, UserPlus, Phone, Calendar,
 } from "lucide-react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import api from "../../services/api";
 import { useInvoiceActivation } from "../../hooks/useInvoiceActivation";
 import Modal from "../../components/ui/Modal";
+import SalesReturnTodayModal from "../../components/sales/SalesReturnTodayModal";
+import InvoicePickerTodayModal from "../../components/sales/InvoicePickerTodayModal";
 
 function formatMoney(v) {
   return Number(v || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2 });
@@ -31,221 +33,6 @@ const REASONS = [
   { value: "other", label: "أخرى" },
 ];
 
-const STATUS_OPTIONS = [
-  { value: "", label: "كل الحالات" },
-  { value: "not_returned", label: "غير مُرتجع" },
-  { value: "partially_returned", label: "مرتجع جزئياً" },
-];
-
-// ── Invoice Picker Modal ──────────────────────────────────────────────────────
-function InvoicePickerModal({ open, onClose, onSelectInvoice, customers }) {
-  const [search, setSearch] = useState("");
-  const [dateFrom, setDateFrom] = useState(last30Days().from);
-  const [dateTo, setDateTo] = useState(last30Days().to);
-  const [customerId, setCustomerId] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [results, setResults] = useState([]);
-  const [loading, setLoading] = useState(false);
-
-  async function load() {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({ limit: 100 });
-      if (search.trim()) params.set("search", search.trim());
-      if (dateFrom) params.set("date_from", dateFrom);
-      if (dateTo) params.set("date_to", dateTo);
-      if (customerId) params.set("customer_id", customerId);
-      const r = await api.get(`/api/invoices?${params}`);
-      let rows = (r.data.data || []).filter(i => i.status !== "cancelled" && !i.amended_by);
-      if (statusFilter === "not_returned") rows = rows.filter(i => !i.status?.includes("returned"));
-      if (statusFilter === "partially_returned") rows = rows.filter(i => i.status === "partially_returned");
-      setResults(rows);
-    } catch {
-      setResults([]);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => { if (open) load(); }, [open]);
-  useEffect(() => {
-    if (!open) return;
-    const t = setTimeout(load, 300);
-    return () => clearTimeout(t);
-  }, [search, dateFrom, dateTo, customerId, statusFilter]);
-
-  if (!open) return null;
-
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm" dir="rtl">
-      <div className="w-[960px] max-h-[88vh] rounded-2xl bg-white shadow-2xl flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-600">
-              <Search className="h-5 w-5 text-white" />
-            </div>
-            <div>
-              <h2 className="text-[16px] font-black text-slate-900">اختيار فاتورة للمرتجع</h2>
-              <p className="text-[11px] font-bold text-slate-400">{results.length} نتيجة</p>
-            </div>
-          </div>
-          <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-slate-200">
-            <X className="h-5 w-5 text-slate-500" />
-          </button>
-        </div>
-
-        <div className="flex items-center gap-3 px-6 py-3 border-b border-slate-100 bg-white shrink-0 flex-wrap">
-          <div className="flex items-center gap-2 flex-1 min-w-[180px]">
-            <Search className="h-4 w-4 text-slate-400 shrink-0" />
-            <input value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="رقم الفاتورة أو اسم العميل..."
-              className="flex-1 text-[13px] outline-none placeholder:text-slate-400" />
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-black text-slate-500">من:</span>
-            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-              className="rounded-lg border border-slate-200 px-3 py-1.5 text-[12px] font-bold outline-none focus:border-emerald-400" />
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-black text-slate-500">إلى:</span>
-            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-              className="rounded-lg border border-slate-200 px-3 py-1.5 text-[12px] font-bold outline-none focus:border-emerald-400" />
-          </div>
-          <select value={customerId} onChange={e => setCustomerId(e.target.value)}
-            className="rounded-lg border border-slate-200 px-3 py-1.5 text-[12px] font-bold outline-none focus:border-emerald-400">
-            <option value="">كل العملاء</option>
-            {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-            className="rounded-lg border border-slate-200 px-3 py-1.5 text-[12px] font-bold outline-none focus:border-emerald-400">
-            {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-          <button onClick={load}
-            className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-black text-white hover:bg-emerald-700">
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> تحديث
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-auto">
-          {loading ? (
-            <div className="flex items-center justify-center h-40 text-slate-400 font-black animate-pulse">جاري التحميل...</div>
-          ) : results.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-40 text-slate-300 gap-2">
-              <Search className="h-10 w-10" />
-              <span className="font-black">لا توجد فواتير</span>
-            </div>
-          ) : (
-            <table className="w-full text-[12px] border-collapse">
-              <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
-                <tr>
-                  {["رقم الفاتورة", "العميل", "التاريخ", "الإجمالي", "الحالة", ""].map(h => (
-                    <th key={h} className="px-4 py-3 text-right font-black text-slate-500 text-[11px] uppercase tracking-wider whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {results.map((inv, i) => (
-                  <tr key={inv.id} onClick={() => onSelectInvoice(inv)}
-                    className={`border-b border-slate-50 hover:bg-emerald-50 cursor-pointer transition-colors ${i % 2 === 0 ? "" : "bg-slate-50/40"}`}>
-                    <td className="px-4 py-3 font-mono text-[12px] font-black text-slate-700">{inv.invoice_no || inv.doc_no}</td>
-                    <td className="px-4 py-3 font-bold text-slate-800 max-w-[160px] truncate">{inv.customer_name || "—"}</td>
-                    <td className="px-4 py-3 text-slate-500 whitespace-nowrap">{formatDate(inv.created_at)}</td>
-                    <td className="px-4 py-3 font-mono font-black text-emerald-700">{formatMoney(inv.total)} ج.م</td>
-                    <td className="px-4 py-3">
-                      {inv.status === "partially_returned"
-                        ? <span className="rounded-full bg-amber-100 border border-amber-200 px-2 py-0.5 text-[10px] font-black text-amber-700">مرتجع جزئياً</span>
-                        : <span className="rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-black text-emerald-700">نشط</span>}
-                    </td>
-                    <td className="px-4 py-3 text-slate-400"><ChevronRight className="h-4 w-4" /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Invoice Detail Modal ──────────────────────────────────────────────────────
-function InvoiceDetailModal({ invoice, onClose, onConfirm }) {
-  const [detail, setDetail] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!invoice) return;
-    setLoading(true);
-    api.get(`/api/invoices/${invoice.id}`)
-      .then(r => setDetail(r.data.data))
-      .catch(() => setDetail(invoice))
-      .finally(() => setLoading(false));
-  }, [invoice?.id]);
-
-  if (!invoice) return null;
-
-  return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 backdrop-blur-sm" dir="rtl">
-      <div className="w-[780px] max-h-[88vh] rounded-2xl bg-white shadow-2xl flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-emerald-50 shrink-0">
-          <div>
-            <h2 className="text-[16px] font-black text-slate-900">فاتورة #{invoice.invoice_no || invoice.doc_no}</h2>
-            <p className="text-[11px] font-bold text-slate-500">
-              {invoice.customer_name || "—"} · {formatDate(invoice.created_at)} · {formatMoney(invoice.total)} ج.م
-            </p>
-          </div>
-          <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-slate-200">
-            <X className="h-5 w-5 text-slate-500" />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-auto p-4">
-          {loading ? (
-            <div className="flex items-center justify-center h-40 text-slate-400 font-black animate-pulse">جاري التحميل...</div>
-          ) : (
-            <table className="w-full text-[12px] border-collapse rounded-lg overflow-hidden border border-slate-200">
-              <thead className="bg-slate-50 border-b border-slate-200">
-                <tr>
-                  <th className="px-4 py-2.5 text-right font-black text-slate-500">الصنف</th>
-                  <th className="px-3 py-2.5 text-center font-black text-slate-500">الكمية</th>
-                  <th className="px-3 py-2.5 text-center font-black text-slate-500">سعر البيع</th>
-                  <th className="px-3 py-2.5 text-center font-black text-slate-500">مُرتجع سابقاً</th>
-                  <th className="px-3 py-2.5 text-center font-black text-slate-500">قابل للإرجاع</th>
-                </tr>
-              </thead>
-              <tbody>
-                {((detail || invoice).lines || []).map((l, i) => {
-                  const returned = Number(l.returned_quantity || 0);
-                  const returnable = Math.max(0, Number(l.quantity) - returned);
-                  return (
-                    <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
-                      <td className="px-4 py-2.5 font-bold text-slate-800">{l.item_name_ar || l.item_name || l.name}</td>
-                      <td className="px-3 py-2.5 text-center text-slate-600">{l.quantity}</td>
-                      <td className="px-3 py-2.5 text-center text-slate-600">{formatMoney(l.unit_price)}</td>
-                      <td className="px-3 py-2.5 text-center text-amber-600 font-bold">{returned || "—"}</td>
-                      <td className={`px-3 py-2.5 text-center font-black ${returnable === 0 ? "text-slate-300" : "text-emerald-700"}`}>{returnable}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </div>
-
-        <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200 bg-slate-50 shrink-0">
-          <button onClick={onClose}
-            className="rounded-lg border border-slate-200 px-5 py-2 text-[13px] font-bold text-slate-600 hover:bg-slate-100">
-            رجوع للقائمة
-          </button>
-          <button onClick={() => onConfirm(detail || invoice)}
-            className="flex items-center gap-2 rounded-lg bg-emerald-700 px-6 py-2 text-[13px] font-black text-white hover:bg-emerald-800 transition-colors">
-            <CheckCircle2 className="h-4 w-4" /> اختيار هذه الفاتورة
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ── Customer Create Modal ─────────────────────────────────────────────────────
 function CustomerCreateModal({ open, onClose, onCreated }) {
@@ -379,13 +166,13 @@ export default function SalesReturnFormPage() {
   const [units, setUnits] = useState([]);
 
   const [invoicePickerOpen, setInvoicePickerOpen] = useState(false);
-  const [pickerSelectedInvoice, setPickerSelectedInvoice] = useState(null);
 
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState({ text: "", type: "" });
   const [showWarningModal, setShowWarningModal] = useState(false);
   const [showEditWarnModal, setShowEditWarnModal] = useState(false);
   const [showSwitchInvoiceWarning, setShowSwitchInvoiceWarning] = useState(false);
+  const [todayReturnsOpen, setTodayReturnsOpen] = useState(false);
 
   const itemInputRef = useRef(null);
   const stagingWHRef = useRef(null);
@@ -541,8 +328,7 @@ export default function SalesReturnFormPage() {
     setMode(null); setCart([]); setInvoiceLines([]); setLoadedInvoice(null);
     setCustomer(null); setCustomerLockedFromInvoice(false); setReason("other"); setReasonOther("");
     setItemQuery(""); setItemResults([]); setStagingItem(null); setStagingQty("1");
-    setStagingPrice(""); setStagingPurchasePrice(""); setInvoicePickerOpen(false);
-    setPickerSelectedInvoice(null); resetActivation();
+    setStagingPrice(""); setStagingPurchasePrice(""); setInvoicePickerOpen(false); resetActivation();
   }
 
   function handleBack() {
@@ -569,7 +355,7 @@ export default function SalesReturnFormPage() {
   }
 
   function handleDetailConfirm(inv) {
-    loadInvoice(inv); setInvoicePickerOpen(false); setPickerSelectedInvoice(null); activateInvoice();
+    loadInvoice(inv); setInvoicePickerOpen(false); activateInvoice();
   }
 
   function toggleInvoiceLine(invoice_line_id) {
@@ -674,8 +460,7 @@ export default function SalesReturnFormPage() {
             </div>
           )}
         </div>
-        <InvoicePickerModal open={invoicePickerOpen} onClose={() => { setInvoicePickerOpen(false); setMode(null); }} onSelectInvoice={p => setPickerSelectedInvoice(p)} customers={customers} />
-        {pickerSelectedInvoice && <InvoiceDetailModal invoice={pickerSelectedInvoice} onClose={() => setPickerSelectedInvoice(null)} onConfirm={handleDetailConfirm} />}
+        <InvoicePickerTodayModal open={invoicePickerOpen} onClose={() => { setInvoicePickerOpen(false); setMode(null); }} onSelectInvoice={handleDetailConfirm} customers={customers} />
         <CustomerCreateModal open={customerCreateOpen} onClose={() => setCustomerCreateOpen(false)} onCreated={c => { setCustomers(prev => [c, ...prev]); setCustomer({ id: c.id, name: c.name }); setCustomerCreateOpen(false); }} />
       </div>
     );
@@ -720,6 +505,10 @@ export default function SalesReturnFormPage() {
               {message.type === "success" ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />} {message.text}
             </div>
           )}
+          <button onClick={() => setTodayReturnsOpen(true)}
+            className="flex h-9 items-center gap-2 rounded-sm border border-emerald-200 bg-emerald-50 px-4 text-[13px] font-black text-emerald-700 hover:bg-emerald-100 transition-all">
+            <Calendar className="h-4 w-4" /> مرتجعات اليوم
+          </button>
           <button disabled className="flex h-9 items-center gap-2 rounded-sm border border-slate-200 bg-white px-4 text-[13px] font-black text-slate-400 cursor-not-allowed opacity-50">
             <Printer className="h-4 w-4" /> طباعة
           </button>
@@ -1071,6 +860,7 @@ export default function SalesReturnFormPage() {
       <InvoicePickerModal open={invoicePickerOpen && !isEditMode} onClose={() => { setInvoicePickerOpen(false); if (!loadedInvoice) setMode(null); }} onSelectInvoice={p => setPickerSelectedInvoice(p)} customers={customers} />
       {pickerSelectedInvoice && <InvoiceDetailModal invoice={pickerSelectedInvoice} onClose={() => setPickerSelectedInvoice(null)} onConfirm={handleDetailConfirm} />}
       <CustomerCreateModal open={customerCreateOpen} onClose={() => setCustomerCreateOpen(false)} onCreated={c => { setCustomers(prev => [c, ...prev]); setCustomer({ id: c.id, name: c.name }); setCustomerCreateOpen(false); }} />
+      <SalesReturnTodayModal open={todayReturnsOpen} onClose={() => setTodayReturnsOpen(false)} />
     </div>
   );
 }

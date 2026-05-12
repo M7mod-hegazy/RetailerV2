@@ -78,6 +78,9 @@ const REPORT_TITLES = {
   "warehouse-levels": "أرصدة المخازن",
   "warehouse-levels-summary": "ملخص أرصدة المخازن",
   "employee-adjustments": "حوافز الموظفين",
+  "user-list": "قائمة المستخدمين",
+  "user-performance": "أداء المستخدمين",
+  "login-history": "سجل تسجيل الدخول",
   "profit-by-category": "الربح حسب الفئة",
   "profit-by-customer": "الربح حسب العميل",
   "profit-by-period": "الربح حسب الفترة",
@@ -324,6 +327,15 @@ const AR_LABELS = {
   unit_name: "اسم الوحدة",
   weekday_name: "اسم اليوم",
   full_name: "الاسم الكامل",
+  username: "اسم المستخدم",
+  role: "الصلاحية",
+  admin: "مدير",
+  cashier: "كاشير",
+  manager: "مشرف",
+  status: "الحالة",
+  last_login: "آخر تسجيل دخول",
+  shift_count: "عدد الورديات",
+  details: "التفاصيل",
   phone: "رقم الهاتف",
   invoice_no: "رقم الفاتورة",
   doc_no: "رقم المستند",
@@ -460,6 +472,9 @@ const REPORT_COLUMN_KEYS = {
   "warehouse-levels": ["item_code", "item_name", "warehouse", "quantity", "min_stock_qty", "stock_status", "total_value"],
   "warehouse-levels-summary": ["warehouse", "item_count", "total_quantity", "total_value"],
   "employee-adjustments": ["date", "employee_name", "adjustment_type", "amount", "reason", "status"],
+  "user-list": ["id", "username", "full_name", "role", "status", "created_at", "last_login"],
+  "user-performance": ["full_name", "invoice_count", "total_sales", "total_discount", "avg_invoice_value", "returns_handled", "returns_amount", "shift_count"],
+  "login-history": ["id", "full_name", "action", "date", "details", "resource"],
   "profit-by-category": ["category_name", "revenue", "cost", "profit_margin", "margin_percent", "quantity_sold"],
   "profit-by-customer": ["customer_name", "revenue", "cost", "profit_margin", "margin_percent", "invoice_count"],
   "profit-by-period": ["period", "revenue", "cost", "profit_margin", "margin_percent", "invoice_count"],
@@ -468,7 +483,7 @@ const REPORT_COLUMN_KEYS = {
 const CODE_KEYS = new Set(["id", "item_code", "code", "sku", "barcode", "invoice_no", "doc_no", "purchase_no", "ref_no", "return_ref", "reference_id", "shift_id", "user_id", "warehouse_id", "batch_no", "section"]);
 const DATE_KEYS = new Set(["date", "created_at", "opened_date", "closed_at", "purchase_date", "last_purchase_date", "last_invoice_date", "last_sale_date", "last_movement_date", "expiry_date", "updated_at"]);
 const PERCENT_KEYS = new Set(["pct", "margin_percent", "current_margin_percent", "min_margin_percent", "avg_discount_percent", "collection_rate", "percentage", "tax_rate", "avg_discount_percent", "collection_rate"]);
-const NUMBER_KEYS = new Set(["quantity", "quantity_sold", "quantity_purchased", "stock_quantity", "system_quantity", "total_quantity", "before_qty", "after_qty", "min_stock_qty", "item_count", "invoice_count", "purchase_count", "returns_count", "return_count", "items_returned", "transaction_count", "action_count", "total_invoices", "total_items_sold", "distinct_suppliers", "supplier_count", "customer_count", "tx_count", "days_until_expiry", "days_since_last_movement", "days_since_last_sale", "days_to_collect", "weekday_num", "cancelled_count", "loyalty_points", "suggested_order_qty", "returns_handled", "weekday_num"]);
+const NUMBER_KEYS = new Set(["quantity", "quantity_sold", "quantity_purchased", "stock_quantity", "system_quantity", "total_quantity", "before_qty", "after_qty", "min_stock_qty", "item_count", "invoice_count", "purchase_count", "returns_count", "return_count", "items_returned", "transaction_count", "action_count", "total_invoices", "total_items_sold", "distinct_suppliers", "supplier_count", "customer_count", "tx_count", "days_until_expiry", "days_since_last_movement", "days_since_last_sale", "days_to_collect", "weekday_num", "cancelled_count", "loyalty_points", "suggested_order_qty", "returns_handled", "weekday_num", "shift_count"]);
 
 function inferType(key) {
   if (CODE_KEYS.has(key)) return "code";
