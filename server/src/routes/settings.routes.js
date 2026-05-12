@@ -428,4 +428,47 @@ router.post("/bulk", authRequired, requirePagePermission("settings", "add"), req
   res.json({ success: true, data: getSettings() });
 });
 
+router.get("/default-user-permissions", authRequired, (req, res, next) => {
+  try {
+    if (req.user.role !== "admin" && req.user.role !== "dev") {
+      return res.status(403).json({ error: "admin_only" });
+    }
+
+    const settings = getSettings();
+    const permissions = settings?.default_user_permissions
+      ? JSON.parse(settings.default_user_permissions)
+      : {};
+
+    res.json({ success: true, data: permissions });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.put("/default-user-permissions", authRequired, (req, res, next) => {
+  try {
+    if (req.user.role !== "admin" && req.user.role !== "dev") {
+      return res.status(403).json({ error: "admin_only" });
+    }
+
+    const payload = req.body || {};
+    const permissions = payload.permissions || {};
+
+    if (typeof permissions !== "object" || Array.isArray(permissions)) {
+      const err = new Error("Permissions must be a valid object");
+      err.status = 400;
+      throw err;
+    }
+
+    const permissionsJson = JSON.stringify(permissions);
+    getDb()
+      .prepare("UPDATE settings SET default_user_permissions = ? WHERE id = 1")
+      .run(permissionsJson);
+
+    res.json({ success: true, data: permissions });
+  } catch (error) {
+    next(error);
+  }
+});
+
 module.exports = router;

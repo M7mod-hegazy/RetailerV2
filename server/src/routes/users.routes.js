@@ -79,4 +79,78 @@ router.put("/:id", requirePagePermission("users", "edit"), requireRole("admin"),
   }
 });
 
+router.get("/:id/permissions", (req, res, next) => {
+  try {
+    if (req.user.role !== "admin" && req.user.role !== "dev") {
+      return res.status(403).json({ error: "admin_only" });
+    }
+
+    const user = getDb()
+      .prepare("SELECT id, page_permissions FROM users WHERE id = ?")
+      .get(req.params.id);
+
+    if (!user) {
+      const err = new Error("User not found");
+      err.status = 404;
+      throw err;
+    }
+
+    let permissions;
+    if (user.page_permissions) {
+      permissions = JSON.parse(user.page_permissions);
+    } else {
+      const settings = getDb()
+        .prepare("SELECT default_user_permissions FROM settings WHERE id = 1")
+        .get();
+      permissions = settings?.default_user_permissions
+        ? JSON.parse(settings.default_user_permissions)
+        : {};
+    }
+
+    res.json({ success: true, data: permissions });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.put("/:id/permissions", (req, res, next) => {
+  try {
+    if (req.user.role !== "admin" && req.user.role !== "dev") {
+      return res.status(403).json({ error: "admin_only" });
+    }
+
+    const target = getDb()
+      .prepare("SELECT id, role FROM users WHERE id = ?")
+      .get(req.params.id);
+
+    if (!target) {
+      const err = new Error("User not found");
+      err.status = 404;
+      throw err;
+    }
+
+    if (target.role === "admin") {
+      return res.status(403).json({ error: "cannot_modify_admin_permissions" });
+    }
+
+    const payload = req.body || {};
+    const permissions = payload.permissions || {};
+
+    if (typeof permissions !== "object" || Array.isArray(permissions)) {
+      const err = new Error("Permissions must be a valid object");
+      err.status = 400;
+      throw err;
+    }
+
+    const permissionsJson = JSON.stringify(permissions);
+    getDb()
+      .prepare("UPDATE users SET page_permissions = ? WHERE id = ?")
+      .run(permissionsJson, req.params.id);
+
+    res.json({ success: true, data: permissions });
+  } catch (error) {
+    next(error);
+  }
+});
+
 module.exports = router;
