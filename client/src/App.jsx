@@ -7,6 +7,8 @@ import api from "./services/api";
 import ScreenLock from "./components/auth/ScreenLock";
 import GlobalSearchPage from "./pages/search/GlobalSearchPage";
 import FullPageLoader from "./components/ui/FullPageLoader";
+import { useCanView } from "./hooks/usePermission";
+const UnauthorizedPage = lazy(() => import("./pages/auth/UnauthorizedPage"));
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } } });
 
 const SetupWizard = lazy(() => import("./pages/setup/SetupWizard"));
@@ -61,6 +63,7 @@ const BranchTransferFormPage = lazy(() => import("./pages/operations/BranchTrans
 const QuotationFormPage = lazy(() => import("./pages/operations/QuotationFormPage"));
 const ReportsCenterPage = lazy(() => import("./pages/reports/ReportsCenter"));
 const ReportWorkspacePage = lazy(() => import("./pages/reports/ReportWorkspacePage"));
+const SourceWorkspacePage = lazy(() => import("./pages/reports/SourceWorkspacePage"));
 const SettingsPage = lazy(() => import("./pages/settings/SettingsPage"));
 const NotificationsPage = lazy(() => import("./pages/notifications/NotificationsPage"));
 const PromotionsPage = lazy(() => import("./pages/definitions/PromotionsPage"));
@@ -74,6 +77,12 @@ const ExpenseCategoriesPage = lazy(() => import("./pages/definitions/ExpenseCate
 const CustomerAccountsPage = lazy(() => import("./pages/accounts/CustomerAccountsPage"));
 const SupplierAccountsPage = lazy(() => import("./pages/accounts/SupplierAccountsPage"));
 const InstallmentsPage = lazy(() => import("./pages/operations/InstallmentsPage"));
+
+function PermissionRoute({ page, children }) {
+  const canView = useCanView(page);
+  if (!canView) return <Navigate to="/unauthorized" replace />;
+  return children;
+}
 
 function AuthGuard({ children }) {
   const token = useAuthStore((s) => s.token);
@@ -123,8 +132,9 @@ export default function App() {
                 <AppShell>
                   <QueryClientProvider client={queryClient}>
                   <Routes>
+                    <Route path="unauthorized" element={<UnauthorizedPage />} />
                     <Route path="dashboard" element={<DashboardPage />} />
-                    <Route path="analytics" element={<AnalyticsPage />} />
+                    <Route path="analytics" element={<PermissionRoute page="analytics"><AnalyticsPage /></PermissionRoute>} />
                     <Route path="workspace/finance" element={<FinanceWorkspacePage />} />
                     <Route path="workspace/purchases" element={<PurchasesWorkspacePage />} />
                     <Route path="workspace/inventory" element={<InventoryWorkspacePage />} />
@@ -133,68 +143,69 @@ export default function App() {
                     <Route path="workspace/parties" element={<PartiesWorkspacePage />} />
                     <Route path="workspace/resources" element={<ResourcesWorkspacePage />} />
                     <Route path="workspace/team" element={<TeamWorkspacePage />} />
-                    <Route path="definitions/categories" element={<CategoriesPage />} />
-                    <Route path="definitions/items" element={<ItemsListPage />} />
-                    <Route path="definitions/customers" element={<CustomersListPage />} />
-                    <Route path="definitions/customers/:id" element={<CustomerProfilePage />} />
-                    <Route path="definitions/suppliers" element={<SuppliersListPage />} />
-                    <Route path="definitions/suppliers/:id" element={<SupplierProfilePage />} />
+                    <Route path="definitions/categories" element={<PermissionRoute page="categories"><CategoriesPage /></PermissionRoute>} />
+                    <Route path="definitions/items" element={<PermissionRoute page="items"><ItemsListPage /></PermissionRoute>} />
+                    <Route path="definitions/customers" element={<PermissionRoute page="customers"><CustomersListPage /></PermissionRoute>} />
+                    <Route path="definitions/customers/:id" element={<PermissionRoute page="customers"><CustomerProfilePage /></PermissionRoute>} />
+                    <Route path="definitions/suppliers" element={<PermissionRoute page="suppliers"><SuppliersListPage /></PermissionRoute>} />
+                    <Route path="definitions/suppliers/:id" element={<PermissionRoute page="suppliers"><SupplierProfilePage /></PermissionRoute>} />
                     <Route path="definitions/expense-categories" element={<ExpenseCategoriesPage />} />
                     <Route path="definitions/revenue-categories" element={<RevenueCategoriesPage />} />
-                    <Route path="definitions/financial-categories" element={<FinancialCategoriesPage />} />
-                    <Route path="definitions/units" element={<UnitsPage />} />
-                    <Route path="definitions/warehouses" element={<WarehousesPage />} />
-                    <Route path="definitions/branches" element={<BranchesPage />} />
+                    <Route path="definitions/financial-categories" element={<PermissionRoute page="financial_categories"><FinancialCategoriesPage /></PermissionRoute>} />
+                    <Route path="definitions/units" element={<PermissionRoute page="units"><UnitsPage /></PermissionRoute>} />
+                    <Route path="definitions/warehouses" element={<PermissionRoute page="warehouses"><WarehousesPage /></PermissionRoute>} />
+                    <Route path="definitions/branches" element={<PermissionRoute page="branches"><BranchesPage /></PermissionRoute>} />
                     <Route path="definitions/treasuries" element={<Navigate to="/dashboard" replace />} />
-                    <Route path="definitions/banks" element={<BanksPage />} />
-                    <Route path="definitions/users" element={<UsersPage />} />
-                    <Route path="definitions/employees" element={<EmployeesPage />} />
-                    <Route path="pos" element={<POSPage />} />
+                    <Route path="definitions/banks" element={<PermissionRoute page="banks"><BanksPage /></PermissionRoute>} />
+                    <Route path="definitions/users" element={<PermissionRoute page="users"><UsersPage /></PermissionRoute>} />
+                    <Route path="definitions/employees" element={<PermissionRoute page="employees"><EmployeesPage /></PermissionRoute>} />
+                    <Route path="pos" element={<PermissionRoute page="pos"><POSPage /></PermissionRoute>} />
                     <Route path="invoices/:id" element={<InvoiceDetailPage />} />
-                    <Route path="daily-treasury" element={<DailyTreasuryPage />} />
-                    <Route path="operations/payment-methods" element={<PaymentMethodsPage />} />
+                    <Route path="daily-treasury" element={<PermissionRoute page="daily_treasury"><DailyTreasuryPage /></PermissionRoute>} />
+                    <Route path="operations/payment-methods" element={<PermissionRoute page="payment_methods"><PaymentMethodsPage /></PermissionRoute>} />
                     <Route path="operations/payment-transactions" element={<PaymentTransactionsPage />} />
                     <Route path="sales/returns" element={<Navigate to="/sales/returns/new" replace />} />
-                    <Route path="sales/returns/new" element={<SalesReturnFormPage />} />
-                    <Route path="sales/returns/amend" element={<SalesReturnFormPage />} />
+                    <Route path="sales/returns/new" element={<PermissionRoute page="sales_returns"><SalesReturnFormPage /></PermissionRoute>} />
+                    <Route path="sales/returns/amend" element={<PermissionRoute page="sales_returns"><SalesReturnFormPage /></PermissionRoute>} />
                     <Route path="purchases" element={<Navigate to="/purchases/new" replace />} />
-                    <Route path="purchases/new" element={<PurchaseFormPage />} />
-                    <Route path="purchases/:id" element={<PurchaseFormPage />} />
-                    <Route path="purchases/orders" element={<PurchaseOrdersPage />} />
-                    <Route path="purchases/orders/new" element={<PurchaseOrderFormPage />} />
+                    <Route path="purchases/new" element={<PermissionRoute page="purchases"><PurchaseFormPage /></PermissionRoute>} />
+                    <Route path="purchases/:id" element={<PermissionRoute page="purchases"><PurchaseFormPage /></PermissionRoute>} />
+                    <Route path="purchases/orders" element={<PermissionRoute page="purchase_orders"><PurchaseOrdersPage /></PermissionRoute>} />
+                    <Route path="purchases/orders/new" element={<PermissionRoute page="purchase_orders"><PurchaseOrderFormPage /></PermissionRoute>} />
                     <Route path="purchases/returns" element={<Navigate to="/purchases/returns/new" replace />} />
-                    <Route path="purchases/returns/new" element={<PurchaseReturnFormPage />} />
-                    <Route path="purchases/returns/amend" element={<PurchaseReturnFormPage />} />
-                    <Route path="purchases/returns/:id" element={<PurchaseReturnDetailPage />} />
-                    <Route path="pos/sales-returns/:id" element={<SalesReturnDetailPage />} />
+                    <Route path="purchases/returns/new" element={<PermissionRoute page="purchase_returns"><PurchaseReturnFormPage /></PermissionRoute>} />
+                    <Route path="purchases/returns/amend" element={<PermissionRoute page="purchase_returns"><PurchaseReturnFormPage /></PermissionRoute>} />
+                    <Route path="purchases/returns/:id" element={<PermissionRoute page="purchase_returns"><PurchaseReturnDetailPage /></PermissionRoute>} />
+                    <Route path="pos/sales-returns/:id" element={<PermissionRoute page="sales_returns"><SalesReturnDetailPage /></PermissionRoute>} />
                     <Route path="payments" element={<PaymentsListPage />} />
                     <Route path="payments/new" element={<PaymentFormPage />} />
-                    <Route path="accounts/customers" element={<CustomerAccountsPage />} />
-                    <Route path="accounts/suppliers" element={<SupplierAccountsPage />} />
+                    <Route path="accounts/customers" element={<PermissionRoute page="customer_accounts"><CustomerAccountsPage /></PermissionRoute>} />
+                    <Route path="accounts/suppliers" element={<PermissionRoute page="supplier_accounts"><SupplierAccountsPage /></PermissionRoute>} />
                     <Route path="operations/ajal-tracker" element={<Navigate to="/accounts/customers" replace />} />
-                    <Route path="operations/cheques" element={<ChequesPage />} />
+                    <Route path="operations/cheques" element={<PermissionRoute page="cheques"><ChequesPage /></PermissionRoute>} />
                     <Route path="operations/payment-transactions" element={<Navigate to="/operations/payment-methods" replace />} />
                     <Route path="operations/treasury-transfer" element={<Navigate to="/expenses" replace />} />
-                    <Route path="operations/installments" element={<InstallmentsPage />} />
-                    <Route path="operations/bank-operations" element={<BankOperationsPage />} />
-                    <Route path="operations/bulk-price-update" element={<BulkPriceUpdatePage />} />
+                    <Route path="operations/installments" element={<PermissionRoute page="installments"><InstallmentsPage /></PermissionRoute>} />
+                    <Route path="operations/bank-operations" element={<PermissionRoute page="bank_operations"><BankOperationsPage /></PermissionRoute>} />
+                    <Route path="operations/bulk-price-update" element={<PermissionRoute page="bulk_price_update"><BulkPriceUpdatePage /></PermissionRoute>} />
                     <Route path="operations/employee-adjustments" element={<EmployeeAdjustmentsPage />} />
-                    <Route path="operations/branch-transfer" element={<BranchTransferPage />} />
-                    <Route path="operations/branch-transfer/new" element={<BranchTransferFormPage />} />
-                    <Route path="operations/quotations" element={<QuotationsPage />} />
-                    <Route path="operations/quotations/new" element={<QuotationFormPage />} />
-                    <Route path="reports/center" element={<ReportsCenterPage />} />
-                    <Route path="reports/:reportSlug" element={<ReportWorkspacePage />} />
-                    <Route path="settings" element={<SettingsPage />} />
+                    <Route path="operations/branch-transfer" element={<PermissionRoute page="branch_transfer"><BranchTransferPage /></PermissionRoute>} />
+                    <Route path="operations/branch-transfer/new" element={<PermissionRoute page="branch_transfer"><BranchTransferFormPage /></PermissionRoute>} />
+                    <Route path="operations/quotations" element={<PermissionRoute page="quotations"><QuotationsPage /></PermissionRoute>} />
+                    <Route path="operations/quotations/new" element={<PermissionRoute page="quotations"><QuotationFormPage /></PermissionRoute>} />
+                    <Route path="reports/center" element={<PermissionRoute page="reports"><ReportsCenterPage /></PermissionRoute>} />
+                    <Route path="reports/source/:sourceKey/:classificationId/:dataMode" element={<PermissionRoute page="reports"><SourceWorkspacePage /></PermissionRoute>} />
+                    <Route path="reports/:reportSlug" element={<PermissionRoute page="reports"><ReportWorkspacePage /></PermissionRoute>} />
+                    <Route path="settings" element={<PermissionRoute page="settings"><SettingsPage /></PermissionRoute>} />
                     <Route path="notifications" element={<NotificationsPage />} />
-                    <Route path="definitions/promotions" element={<PromotionsPage />} />
-                    <Route path="expenses" element={<ExpensesListPage />} />
-                    <Route path="revenues" element={<RevenuesListPage />} />
-                    <Route path="withdrawals" element={<WithdrawalsListPage />} />
+                    <Route path="definitions/promotions" element={<PermissionRoute page="promotions"><PromotionsPage /></PermissionRoute>} />
+                    <Route path="expenses" element={<PermissionRoute page="expenses"><ExpensesListPage /></PermissionRoute>} />
+                    <Route path="revenues" element={<PermissionRoute page="revenues"><RevenuesListPage /></PermissionRoute>} />
+                    <Route path="withdrawals" element={<PermissionRoute page="withdrawals"><WithdrawalsListPage /></PermissionRoute>} />
                     <Route path="stock/levels" element={<StockLevelsPage />} />
                     <Route path="stock/movements" element={<StockMovementsPage />} />
-                    <Route path="stock/transfer" element={<StockTransferPage />} />
-                    <Route path="stock/physical-count" element={<PhysicalCountPage />} />
+                    <Route path="stock/transfer" element={<PermissionRoute page="stock_transfer"><StockTransferPage /></PermissionRoute>} />
+                    <Route path="stock/physical-count" element={<PermissionRoute page="physical_count"><PhysicalCountPage /></PermissionRoute>} />
                     <Route path="*" element={<Navigate to="/dashboard" replace />} />
                   </Routes>
                   </QueryClientProvider>

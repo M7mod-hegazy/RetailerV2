@@ -9,12 +9,13 @@ import {
   Activity, UsersRound, Scale, Menu, ChevronLeft, Truck, Coins, Store, BadgePercent, Banknote, HeartHandshake, Briefcase, Fingerprint, CreditCard
 } from "lucide-react";
 import { useAuthStore } from "../../stores/authStore";
+import { useCanView } from "../../hooks/usePermission";
 
 const PRIMARY_MENU = [
   { path: "/dashboard", label: "مساحة العمل", icon: LayoutDashboard },
-  { path: "/pos", label: "نقطة البيع (POS)", icon: Store, highlight: true },
-  { path: "/daily-treasury", label: "الخزينة اليومية", icon: Wallet },
-  { path: "/analytics", label: "التحليلات والمبيعات", icon: Activity },
+  { path: "/pos", label: "نقطة البيع (POS)", icon: Store, highlight: true, pageKey: "pos" },
+  { path: "/daily-treasury", label: "الخزينة اليومية", icon: Wallet, pageKey: "daily_treasury" },
+  { path: "/analytics", label: "التحليلات والمبيعات", icon: Activity, pageKey: "analytics" },
 ];
 
 const NAV_MODULES = [
@@ -23,12 +24,12 @@ const NAV_MODULES = [
     id: "trade",
     icon: ShoppingCart,
     items: [
-      { path: "/purchases", label: "فواتير المشتريات", icon: PackageSearch },
-      { path: "/purchases/orders", label: "أوامر الشراء", icon: ClipboardList },
-      { path: "/purchases/returns", label: "مرتجع المشتريات", icon: ArrowRightLeft },
-      { path: "/sales/returns", label: "مرتجع المبيعات", icon: ReceiptText },
-      { path: "/operations/branch-transfer", label: "نقل المخزون", icon: Truck },
-      { path: "/operations/quotations", label: "عروض الأسعار", icon: Receipt },
+      { path: "/purchases", label: "فواتير المشتريات", icon: PackageSearch, pageKey: "purchases" },
+      { path: "/purchases/orders", label: "أوامر الشراء", icon: ClipboardList, pageKey: "purchase_orders" },
+      { path: "/purchases/returns", label: "مرتجع المشتريات", icon: ArrowRightLeft, pageKey: "purchase_returns" },
+      { path: "/sales/returns", label: "مرتجع المبيعات", icon: ReceiptText, pageKey: "sales_returns" },
+      { path: "/operations/branch-transfer", label: "نقل المخزون", icon: Truck, pageKey: "branch_transfer" },
+      { path: "/operations/quotations", label: "عروض الأسعار", icon: Receipt, pageKey: "quotations" },
     ],
   },
   {
@@ -36,15 +37,15 @@ const NAV_MODULES = [
     id: "finance",
     icon: CircleDollarSign,
     items: [
-      { path: "/accounts/customers", label: "حسابات العملاء", icon: HeartHandshake },
-      { path: "/accounts/suppliers", label: "حسابات الموردين", icon: Building },
-      { path: "/operations/installments", label: "الأقساط والآجل", icon: Coins },
-      { path: "/revenues", label: "تسجيل الإيرادات", icon: TrendingUp },
-      { path: "/expenses", label: "تسجيل المصروفات", icon: TrendingDown },
-      { path: "/withdrawals", label: "تسجيل المسحوبات", icon: Banknote },
-      { path: "/operations/payment-methods", label: "وسائل الدفع", icon: CreditCard },
-      { path: "/operations/bank-operations", label: "البنوك والفيزا", icon: Landmark },
-      { path: "/operations/cheques", label: "إدارة الشيكات", icon: Banknote },
+      { path: "/accounts/customers", label: "حسابات العملاء", icon: HeartHandshake, pageKey: "customer_accounts" },
+      { path: "/accounts/suppliers", label: "حسابات الموردين", icon: Building, pageKey: "supplier_accounts" },
+      { path: "/operations/installments", label: "الأقساط والآجل", icon: Coins, pageKey: "installments" },
+      { path: "/revenues", label: "تسجيل الإيرادات", icon: TrendingUp, pageKey: "revenues" },
+      { path: "/expenses", label: "تسجيل المصروفات", icon: TrendingDown, pageKey: "expenses" },
+      { path: "/withdrawals", label: "تسجيل المسحوبات", icon: Banknote, pageKey: "withdrawals" },
+      { path: "/operations/payment-methods", label: "وسائل الدفع", icon: CreditCard, pageKey: "payment_methods" },
+      { path: "/operations/bank-operations", label: "البنوك والفيزا", icon: Landmark, pageKey: "bank_operations" },
+      { path: "/operations/cheques", label: "إدارة الشيكات", icon: Banknote, pageKey: "cheques" },
     ],
   },
   {
@@ -52,12 +53,12 @@ const NAV_MODULES = [
     id: "inventory",
     icon: Boxes,
     items: [
-      { path: "/definitions/items", label: "قاعدة الأصناف", icon: Box },
-      { path: "/definitions/categories", label: "أقسام الأصناف", icon: Tags },
-      { path: "/operations/bulk-price-update", label: "تحديث الأسعار", icon: TrendingUp },
-      { path: "/stock/transfer", label: "تحويل مخزني", icon: ArrowRightLeft },
-      { path: "/stock/physical-count", label: "الجرد الفعلي", icon: FileSpreadsheet },
-      { path: "/definitions/promotions", label: "العروض والتخفيضات", icon: BadgePercent },
+      { path: "/definitions/items", label: "قاعدة الأصناف", icon: Box, pageKey: "items" },
+      { path: "/definitions/categories", label: "أقسام الأصناف", icon: Tags, pageKey: "categories" },
+      { path: "/operations/bulk-price-update", label: "تحديث الأسعار", icon: TrendingUp, pageKey: "bulk_price_update" },
+      { path: "/stock/transfer", label: "تحويل مخزني", icon: ArrowRightLeft, pageKey: "stock_transfer" },
+      { path: "/stock/physical-count", label: "الجرد الفعلي", icon: FileSpreadsheet, pageKey: "physical_count" },
+      { path: "/definitions/promotions", label: "العروض والتخفيضات", icon: BadgePercent, pageKey: "promotions" },
     ],
   },
   {
@@ -65,13 +66,13 @@ const NAV_MODULES = [
     id: "definitions",
     icon: Database,
     items: [
-      { path: "/definitions/branches", label: "الفروع", icon: Store },
-      { path: "/definitions/customers", label: "العملاء", icon: UsersRound },
-      { path: "/definitions/suppliers", label: "الموردين", icon: Briefcase },
-      { path: "/definitions/warehouses", label: "المخازن", icon: Warehouse },
-      { path: "/definitions/banks", label: "البنوك", icon: Landmark },
-      { path: "/definitions/units", label: "وحدات القياس", icon: Scale },
-      { path: "/definitions/financial-categories", label: "أقسام الحركات المالية", icon: Banknote },
+      { path: "/definitions/branches", label: "الفروع", icon: Store, pageKey: "branches" },
+      { path: "/definitions/customers", label: "العملاء", icon: UsersRound, pageKey: "customers" },
+      { path: "/definitions/suppliers", label: "الموردين", icon: Briefcase, pageKey: "suppliers" },
+      { path: "/definitions/warehouses", label: "المخازن", icon: Warehouse, pageKey: "warehouses" },
+      { path: "/definitions/banks", label: "البنوك", icon: Landmark, pageKey: "banks" },
+      { path: "/definitions/units", label: "وحدات القياس", icon: Scale, pageKey: "units" },
+      { path: "/definitions/financial-categories", label: "أقسام الحركات المالية", icon: Banknote, pageKey: "financial_categories" },
     ],
   },
   {
@@ -79,13 +80,23 @@ const NAV_MODULES = [
     id: "system",
     icon: ShieldCheck,
     items: [
-      { path: "/reports/center", label: "مركز التقارير", icon: PieChart },
-      { path: "/definitions/users", label: "المستخدمين", icon: Fingerprint },
-      { path: "/definitions/employees", label: "الموظفين", icon: UsersRound },
-      { path: "/settings", label: "الإعدادات العامة", icon: Settings },
+      { path: "/reports/center", label: "مركز التقارير", icon: PieChart, pageKey: "reports" },
+      { path: "/definitions/users", label: "المستخدمين", icon: Fingerprint, pageKey: "users" },
+      { path: "/definitions/employees", label: "الموظفين", icon: UsersRound, pageKey: "employees" },
+      { path: "/settings", label: "الإعدادات العامة", icon: Settings, pageKey: "settings" },
     ],
   },
 ];
+
+function usePermissionFilter() {
+  const { user, permissions } = useAuthStore();
+  return (pageKey) => {
+    if (!pageKey) return true;
+    if (!user) return false;
+    if (user.role === "dev" || user.role === "admin") return true;
+    return Array.isArray(permissions?.[pageKey]) && permissions[pageKey].includes("view");
+  };
+}
 
 function useCategoryCount() {
   const [count, setCount] = useState(null);
@@ -111,12 +122,16 @@ export default function Sidebar({ collapsed, setCollapsed }) {
   const [activeAccordion, setActiveAccordion] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const categoryCount = useCategoryCount();
+  const canView = usePermissionFilter();
+
+  const visiblePrimary = PRIMARY_MENU.filter((item) => canView(item.pageKey));
 
   const filteredModules = NAV_MODULES.map((module) => {
-    if (!searchQuery) return module;
+    const permittedItems = module.items.filter((item) => canView(item.pageKey));
+    if (!searchQuery) return { ...module, items: permittedItems };
     const query = searchQuery.toLowerCase();
-    if (module.title.toLowerCase().includes(query)) return module;
-    const items = module.items.filter((item) => item.label.toLowerCase().includes(query));
+    if (module.title.toLowerCase().includes(query)) return { ...module, items: permittedItems };
+    const items = permittedItems.filter((item) => item.label.toLowerCase().includes(query));
     return { ...module, items };
   }).filter((module) => module.items.length > 0);
 
@@ -163,7 +178,7 @@ export default function Sidebar({ collapsed, setCollapsed }) {
         )}
 
         <div className="space-y-1 mb-8">
-          {PRIMARY_MENU.map((item) => {
+          {visiblePrimary.map((item) => {
             const isActive = location.pathname === item.path;
             return (
               <Link key={item.path} to={item.path} className={`group flex items-center gap-3 rounded-xl px-3 py-3 transition-all ${isActive ? 'bg-zinc-950 text-white shadow-md shadow-zinc-900/10' : item.highlight ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100' : 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900'} ${collapsed ? 'justify-center px-0' : ''}`}>
