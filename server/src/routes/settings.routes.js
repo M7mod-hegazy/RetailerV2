@@ -434,10 +434,10 @@ router.get("/default-user-permissions", authRequired, (req, res, next) => {
       return res.status(403).json({ error: "admin_only" });
     }
 
-    const settings = getSettings();
-    const permissions = settings?.default_user_permissions
-      ? JSON.parse(settings.default_user_permissions)
-      : {};
+    const row = getDb()
+      .prepare("SELECT value FROM settings WHERE key = 'default_user_permissions'")
+      .get();
+    const permissions = row?.value ? JSON.parse(row.value) : {};
 
     res.json({ success: true, data: permissions });
   } catch (error) {
@@ -462,7 +462,7 @@ router.put("/default-user-permissions", authRequired, (req, res, next) => {
 
     const permissionsJson = JSON.stringify(permissions);
     getDb()
-      .prepare("UPDATE settings SET default_user_permissions = ? WHERE id = 1")
+      .prepare("UPDATE settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = 'default_user_permissions'")
       .run(permissionsJson);
 
     res.json({ success: true, data: permissions });
