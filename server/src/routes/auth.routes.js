@@ -68,7 +68,7 @@ router.post("/login", (req, res, next) => {
       process.env.JWT_SECRET || "dev-secret",
       { expiresIn: "8h" }
     );
-    return res.json({ success: true, data: { token: devToken, user: { id: "__dev__", username: devEmail, role: "dev" } } });
+    return res.json({ success: true, data: { token: devToken, user: { id: "__dev__", username: devEmail, role: "dev", page_permissions: null } } });
   }
 
   // GAP-03: Account Lockout Check
@@ -106,7 +106,7 @@ router.post("/login", (req, res, next) => {
   }
 
   const token = issueToken(user);
-  return res.json({ success: true, data: { token, user: { id: user.id, username: user.username, role: user.role } } });
+  return res.json({ success: true, data: { token, user: { id: user.id, username: user.username, role: user.role, page_permissions: user.page_permissions } } });
 });
 
 router.post("/change-password", authRequired, (req, res, next) => {
