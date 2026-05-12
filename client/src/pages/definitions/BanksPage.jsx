@@ -4,6 +4,7 @@ import SimpleCrudPage from "../../components/crud/SimpleCrudPage";
 export default function BanksPage() {
   return (
     <SimpleCrudPage
+      pageKey="banks"
       title="الحسابات البنكية"
       endpoint="/api/banks"
       fields={[

@@ -7,6 +7,7 @@ export default function SuppliersListPage() {
 
   return (
     <SimpleCrudPage
+      pageKey="suppliers"
       title="الموردون"
       description="إدارة الموردين وشروط الدفع والأرصدة. انقر على صف لعرض الملف الكامل."
       endpoint="/api/suppliers"

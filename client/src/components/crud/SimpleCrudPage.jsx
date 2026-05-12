@@ -15,6 +15,9 @@ import api from "../../services/api";
 import toast from "react-hot-toast";
 import DataTable from "../ui/DataTable";
 import SmartTooltip from "../ui/SmartTooltip";
+import PermissionGate from "../ui/PermissionGate";
+import { usePermission } from "../../hooks/usePermission";
+import PermissionDeniedModal from "../ui/PermissionDeniedModal";
 
 function createInitialState(fields, source = {}) {
   return fields.reduce((acc, field) => ({ ...acc, [field.name]: source[field.name] ?? field.initialValue ?? "" }), {});
@@ -63,7 +66,8 @@ export default function SimpleCrudPage({
   columns: columnDefs,
   fields,
   buildPayload = (f) => f,
-  searchKeys
+  searchKeys,
+  pageKey
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [rows, setRows] = useState([]);
@@ -72,6 +76,9 @@ export default function SimpleCrudPage({
   const [editingRow, setEditingRow] = useState(null);
   const [form, setForm] = useState(() => createInitialState(fields));
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [permDenied, setPermDenied] = useState(false);
+  const canAdd = usePermission(pageKey, 'add');
+  const canEdit = usePermission(pageKey, 'edit');
 
   useEffect(() => {
     if (searchParams.has("q")) {
@@ -117,22 +124,46 @@ export default function SimpleCrudPage({
         cell: (info) => (
           <div className="flex items-center justify-center gap-1">
             <SmartTooltip content="تعديل هذا السجل">
-              <motion.button
-                whileTap={{ scale: 0.9 }}
-                onClick={(e) => { e.stopPropagation(); startEdit(info.row.original); }}
-                className={`flex h-8 w-8 items-center justify-center rounded-xl transition-all ${editingRow?.id === info.row.original.id ? 'bg-zinc-950 text-white shadow-md' : 'text-slate-400 hover:bg-slate-100 hover:text-zinc-900'}`}
-              >
-                <Edit3 className="h-4 w-4" />
-              </motion.button>
+              {pageKey ? (
+                <PermissionGate page={pageKey} action="edit">
+                  <motion.button
+                    whileTap={{ scale: 0.9 }}
+                    onClick={(e) => { e.stopPropagation(); startEdit(info.row.original); }}
+                    className={`flex h-8 w-8 items-center justify-center rounded-xl transition-all ${editingRow?.id === info.row.original.id ? 'bg-zinc-950 text-white shadow-md' : 'text-slate-400 hover:bg-slate-100 hover:text-zinc-900'}`}
+                  >
+                    <Edit3 className="h-4 w-4" />
+                  </motion.button>
+                </PermissionGate>
+              ) : (
+                <motion.button
+                  whileTap={{ scale: 0.9 }}
+                  onClick={(e) => { e.stopPropagation(); startEdit(info.row.original); }}
+                  className={`flex h-8 w-8 items-center justify-center rounded-xl transition-all ${editingRow?.id === info.row.original.id ? 'bg-zinc-950 text-white shadow-md' : 'text-slate-400 hover:bg-slate-100 hover:text-zinc-900'}`}
+                >
+                  <Edit3 className="h-4 w-4" />
+                </motion.button>
+              )}
             </SmartTooltip>
             <SmartTooltip content="حذف نهائي">
-              <motion.button
-                whileTap={{ scale: 0.9 }}
-                onClick={(e) => { e.stopPropagation(); handleDelete(info.row.original.id); }}
-                className="flex h-8 w-8 items-center justify-center rounded-xl text-slate-300 hover:bg-rose-50 hover:text-rose-600 transition-all"
-              >
-                <Trash2 className="h-4 w-4" />
-              </motion.button>
+              {pageKey ? (
+                <PermissionGate page={pageKey} action="delete">
+                  <motion.button
+                    whileTap={{ scale: 0.9 }}
+                    onClick={(e) => { e.stopPropagation(); handleDelete(info.row.original.id); }}
+                    className="flex h-8 w-8 items-center justify-center rounded-xl text-slate-300 hover:bg-rose-50 hover:text-rose-600 transition-all"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </motion.button>
+                </PermissionGate>
+              ) : (
+                <motion.button
+                  whileTap={{ scale: 0.9 }}
+                  onClick={(e) => { e.stopPropagation(); handleDelete(info.row.original.id); }}
+                  className="flex h-8 w-8 items-center justify-center rounded-xl text-slate-300 hover:bg-rose-50 hover:text-rose-600 transition-all"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </motion.button>
+              )}
             </SmartTooltip>
           </div>
         ),
@@ -167,6 +198,10 @@ export default function SimpleCrudPage({
 
   async function handleSubmit(e) {
     e.preventDefault();
+    if (pageKey) {
+      const allowed = editingRow ? canEdit : canAdd;
+      if (!allowed) { setPermDenied(true); return; }
+    }
     setIsSubmitting(true);
     try {
       const payload = buildPayload(form, editingRow);
@@ -185,6 +220,7 @@ export default function SimpleCrudPage({
 
   return (
     <div className="min-h-[100dvh] bg-[#fafafa] flex flex-col font-sans overflow-x-hidden w-full max-w-full relative" dir="rtl">
+      <PermissionDeniedModal open={permDenied} onClose={() => setPermDenied(false)} />
       
       {/* Impeccable Animated Architectural Background */}
       <div className="absolute inset-0 z-0 pointer-events-none select-none overflow-hidden">
@@ -258,14 +294,27 @@ export default function SimpleCrudPage({
             transition={{ delay: 0.2, duration: 0.6 }}
           >
             <SmartTooltip content="تحميل البيانات بصيغة CSV">
-              <motion.button 
-                whileHover={{ y: -1 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={() => exportToCSV(rows, columnDefs, title)}
-                className="flex items-center justify-center gap-2 h-12 px-6 rounded-xl text-[12px] font-black text-slate-700 bg-white hover:bg-slate-50 transition-all shadow-sm border border-slate-200"
-              >
-                <Download className="h-4 w-4" /> تصدير السجلات
-              </motion.button>
+              {pageKey ? (
+                <PermissionGate page={pageKey} action="print">
+                  <motion.button
+                    whileHover={{ y: -1 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => exportToCSV(rows, columnDefs, title)}
+                    className="flex items-center justify-center gap-2 h-12 px-6 rounded-xl text-[12px] font-black text-slate-700 bg-white hover:bg-slate-50 transition-all shadow-sm border border-slate-200"
+                  >
+                    <Download className="h-4 w-4" /> تصدير السجلات
+                  </motion.button>
+                </PermissionGate>
+              ) : (
+                <motion.button
+                  whileHover={{ y: -1 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => exportToCSV(rows, columnDefs, title)}
+                  className="flex items-center justify-center gap-2 h-12 px-6 rounded-xl text-[12px] font-black text-slate-700 bg-white hover:bg-slate-50 transition-all shadow-sm border border-slate-200"
+                >
+                  <Download className="h-4 w-4" /> تصدير السجلات
+                </motion.button>
+              )}
             </SmartTooltip>
           </motion.div>
         </div>
@@ -374,8 +423,8 @@ export default function SimpleCrudPage({
                   type="submit"
                   disabled={isSubmitting}
                   className={`w-full h-12 flex items-center justify-center gap-2 rounded-xl text-[13px] font-black text-white transition-all shadow-xl disabled:opacity-50 ${
-                    editingRow 
-                      ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/20' 
+                    editingRow
+                      ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/20'
                       : 'bg-zinc-950 hover:bg-zinc-800 shadow-zinc-950/20'
                   }`}
                 >

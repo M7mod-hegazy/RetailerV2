@@ -7,6 +7,7 @@ export default function CustomersListPage() {
 
   return (
     <SimpleCrudPage
+      pageKey="customers"
       title="العملاء"
       description="عرض العملاء مع الرصيد والحد الائتماني. انقر على صف لعرض الملف الكامل."
       endpoint="/api/customers"

@@ -4,6 +4,7 @@ import SimpleCrudPage from "../../components/crud/SimpleCrudPage";
 export default function UnitsPage() {
   return (
     <SimpleCrudPage
+      pageKey="units"
       title="وحدات القياس"
       endpoint="/api/units"
       fields={[

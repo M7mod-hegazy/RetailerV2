@@ -4,6 +4,7 @@ import SimpleCrudPage from "../../components/crud/SimpleCrudPage";
 export default function BranchesPage() {
   return (
     <SimpleCrudPage
+      pageKey="branches"
       title="الفروع"
       endpoint="/api/branches"
       fields={[

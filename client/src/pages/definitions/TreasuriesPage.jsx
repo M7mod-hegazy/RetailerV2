@@ -4,6 +4,7 @@ import SimpleCrudPage from "../../components/crud/SimpleCrudPage";
 export default function TreasuriesPage() {
   return (
     <SimpleCrudPage
+      pageKey="banks"
       title="الخزن والصناديق"
       endpoint="/api/treasuries"
       fields={[

@@ -11,6 +11,7 @@ import { Card } from "../../components/ui/Card";
 import SectionHero from "../../components/ui/SectionHero";
 import { Select } from "../../components/ui/Select";
 import DataGrid from "../../components/ui/DataGrid";
+import PermissionGate from "../../components/ui/PermissionGate";
 export default function PromotionsPage() {
   const [promotions, setPromotions] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -126,16 +127,18 @@ export default function PromotionsPage() {
           icon={Tag}
           stats={[{ label: "إجمالي العروض", value: promotions.length }]}
           action={
-            <Button
-              onClick={() => {
-                resetForm();
-                setOpenModal(true);
-              }}
-              className="gap-2"
-            >
-              <Plus className="h-5 w-5" />
-              عرض جديد
-            </Button>
+            <PermissionGate page="promotions" action="add">
+              <Button
+                onClick={() => {
+                  resetForm();
+                  setOpenModal(true);
+                }}
+                className="gap-2"
+              >
+                <Plus className="h-5 w-5" />
+                عرض جديد
+              </Button>
+            </PermissionGate>
           }
         />
 
@@ -174,22 +177,26 @@ export default function PromotionsPage() {
                     id: "actions", header: "إجراءات", width: 120, sortable: false,
                     render: (row) => (
                       <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => openEdit(row)}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition hover:bg-slate-50"
-                          aria-label="تعديل العرض"
-                        >
-                          <Edit className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setPromotionToDelete(row)}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 text-rose-600 transition hover:bg-rose-50"
-                          aria-label="حذف العرض"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        <PermissionGate page="promotions" action="edit">
+                          <button
+                            type="button"
+                            onClick={() => openEdit(row)}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition hover:bg-slate-50"
+                            aria-label="تعديل العرض"
+                          >
+                            <Edit className="h-4 w-4" />
+                          </button>
+                        </PermissionGate>
+                        <PermissionGate page="promotions" action="delete">
+                          <button
+                            type="button"
+                            onClick={() => setPromotionToDelete(row)}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 text-rose-600 transition hover:bg-rose-50"
+                            aria-label="حذف العرض"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </PermissionGate>
                       </div>
                     ),
                   },

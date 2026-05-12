@@ -4,6 +4,7 @@ import SimpleCrudPage from "../../components/crud/SimpleCrudPage";
 export default function UsersPage() {
   return (
     <SimpleCrudPage
+      pageKey="users"
       title="المستخدمون والصلاحيات"
       endpoint="/api/users"
       fields={[

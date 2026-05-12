@@ -4,6 +4,7 @@ import SimpleCrudPage from "../../components/crud/SimpleCrudPage";
 export default function WarehousesPage() {
   return (
     <SimpleCrudPage
+      pageKey="warehouses"
       title="المخازن"
       endpoint="/api/warehouses"
       fields={[

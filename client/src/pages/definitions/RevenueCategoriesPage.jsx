@@ -4,6 +4,7 @@ import SimpleCrudPage from "../../components/crud/SimpleCrudPage";
 export default function RevenueCategoriesPage() {
   return (
     <SimpleCrudPage
+      pageKey="financial_categories"
       title="تصنيفات الإيرادات الأخرى"
       endpoint="/api/revenues/categories"
       fields={[
