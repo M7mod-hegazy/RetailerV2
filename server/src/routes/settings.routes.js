@@ -28,7 +28,7 @@ router.get("/", authRequired, requirePagePermission("settings", "view"), (_req, 
   res.json({ success: true, data: getSettings() });
 });
 
-router.get("/setup-status", requirePagePermission("settings", "view"), (_req, res) => {
+router.get("/setup-status", (_req, res) => {
   syncSettingsLicenseState();
   const settings = getSettings();
   res.json({
@@ -47,7 +47,7 @@ router.get("/setup-status", requirePagePermission("settings", "view"), (_req, re
   });
 });
 
-router.post("/validate-license", requirePagePermission("settings", "add"), (req, res, next) => {
+router.post("/validate-license", (req, res, next) => {
   if (!isLicenseFeatureEnabled()) {
     const error = new Error("License validation is disabled in windows_managed mode");
     error.status = 409;
@@ -65,11 +65,11 @@ router.post("/validate-license", requirePagePermission("settings", "add"), (req,
     .catch((error) => next(error));
 });
 
-router.get("/hardware-id", requirePagePermission("settings", "view"), (_req, res) => {
+router.get("/hardware-id", (_req, res) => {
   res.json({ success: true, data: { hardware_id: getHardwareFingerprint() } });
 });
 
-router.post("/setup-progress", requirePagePermission("settings", "add"), (req, res) => {
+router.post("/setup-progress", (req, res) => {
   const payload = req.body || {};
   const step = Number(payload.step || 1);
   const current = getSettings();
@@ -89,7 +89,7 @@ router.post("/setup-progress", requirePagePermission("settings", "add"), (req, r
   res.json({ success: true, data: { step, draft: mergedDraft } });
 });
 
-router.post("/setup-complete", requirePagePermission("settings", "add"), (req, res, next) => {
+router.post("/setup-complete", (req, res, next) => {
   const db = getDb();
   const payload = req.body || {};
 
@@ -435,7 +435,7 @@ router.get("/default-user-permissions", authRequired, (req, res, next) => {
     }
 
     const row = getDb()
-      .prepare("SELECT value FROM settings WHERE key = 'default_user_permissions'")
+      .prepare("SELECT value FROM settings_kv WHERE key = 'default_user_permissions'")
       .get();
     const permissions = row?.value ? JSON.parse(row.value) : {};
 
@@ -462,7 +462,7 @@ router.put("/default-user-permissions", authRequired, (req, res, next) => {
 
     const permissionsJson = JSON.stringify(permissions);
     getDb()
-      .prepare("UPDATE settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = 'default_user_permissions'")
+      .prepare("INSERT INTO settings_kv (key, value) VALUES ('default_user_permissions', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
       .run(permissionsJson);
 
     res.json({ success: true, data: permissions });

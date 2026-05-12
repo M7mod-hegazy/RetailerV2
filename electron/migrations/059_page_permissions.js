@@ -9,8 +9,8 @@ function up(db) {
   // Add page_permissions column to users table (nullable, defaults to NULL)
   addColumnIfMissing(db, "users", "page_permissions", "TEXT");
 
-  // Add default_user_permissions row to settings table (key/value store)
-  db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('default_user_permissions', '{"pos":["view","add"]}')`).run();
+  // Add default_user_permissions row to settings_kv (key/value store)
+  db.prepare(`INSERT OR IGNORE INTO settings_kv (key, value) VALUES ('default_user_permissions', '{"pos":["view","add"]}')`).run();
 }
 
 module.exports = { name: '059_page_permissions', up };

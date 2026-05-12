@@ -29,7 +29,7 @@ function getUserPermissions(user) {
   // Fall back to default permissions from settings table
   try {
     const db = getDb();
-    const row = db.prepare("SELECT value FROM settings WHERE key = 'default_user_permissions'").get();
+    const row = db.prepare("SELECT value FROM settings_kv WHERE key = 'default_user_permissions'").get();
     if (row && row.value) {
       return JSON.parse(row.value);
     }

@@ -99,12 +99,10 @@ router.get("/:id/permissions", (req, res, next) => {
     if (user.page_permissions) {
       permissions = JSON.parse(user.page_permissions);
     } else {
-      const settings = getDb()
-        .prepare("SELECT default_user_permissions FROM settings WHERE id = 1")
+      const row = getDb()
+        .prepare("SELECT value FROM settings_kv WHERE key = 'default_user_permissions'")
         .get();
-      permissions = settings?.default_user_permissions
-        ? JSON.parse(settings.default_user_permissions)
-        : {};
+      permissions = row?.value ? JSON.parse(row.value) : {};
     }
 
     res.json({ success: true, data: permissions });
