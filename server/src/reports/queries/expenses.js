@@ -6,7 +6,7 @@ function _detailExpenseQuery(startDate, endDate, opts = {}) {
   const params = [];
   const { category_id } = opts;
   return db.prepare(`
-    SELECT e.doc_no, DATE(e.created_at) AS date,
+    SELECT DATE(e.created_at) AS date,
       COALESCE(c.name, 'غير مصنف') AS category_name,
       e.amount, e.description, e.notes,
       e.payment_method AS payment_type
@@ -41,7 +41,7 @@ function detailedExpenses(startDate, endDate, opts = {}) {
   const params = [];
   const { category_id } = opts;
   return db.prepare(`
-    SELECT e.doc_no, DATE(e.created_at) AS date,
+    SELECT DATE(e.created_at) AS date,
       COALESCE(c.name, 'غير مصنف') AS category_name,
       e.amount, e.description, e.notes,
       e.payment_method, e.employee_id

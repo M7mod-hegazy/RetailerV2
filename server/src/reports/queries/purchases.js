@@ -6,7 +6,7 @@ function _detailPurchaseQuery(startDate, endDate, opts = {}) {
   const params = [];
   const { supplier_id, status, payment_type, category_id, item_id } = opts;
   return db.prepare(`
-    SELECT p.id, p.purchase_no, p.doc_no,
+    SELECT p.id, p.purchase_no,
       DATE(p.created_at) AS date,
       s.name AS supplier_name, p.total, p.status, p.payment_type,
       p.supplier_id,
@@ -60,7 +60,7 @@ function detailedPurchases(startDate, endDate, opts = {}) {
   const params = [];
   const { supplier_id, status, payment_type, category_id, item_id } = opts;
   return db.prepare(`
-    SELECT p.id, p.purchase_no, p.doc_no,
+    SELECT p.id, p.purchase_no,
       DATE(p.created_at) AS date,
       s.name AS supplier_name, p.total, p.status, p.payment_type,
       p.supplier_id,

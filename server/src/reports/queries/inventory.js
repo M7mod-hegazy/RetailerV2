@@ -40,6 +40,7 @@ function stockLevels(startDate, endDate, opts = {}) {
       it.name AS item_name,
       c.name AS category_name,
       sl.warehouse_id,
+      COALESCE(w.name, '') AS warehouse_name,
       COALESCE(sl.quantity, 0) AS quantity,
       it.min_stock_qty,
       u.name AS unit_name,
@@ -53,6 +54,7 @@ function stockLevels(startDate, endDate, opts = {}) {
     LEFT JOIN stock_levels sl ON sl.item_id = it.id
     LEFT JOIN item_categories c ON c.id = it.category_id
     LEFT JOIN units u ON u.id = it.unit_id
+    LEFT JOIN warehouses w ON w.id = sl.warehouse_id
     WHERE it.deleted_at IS NULL
       ${warehouse_id ? " AND sl.warehouse_id = ?" : ""}
       ${category_id ? " AND it.category_id = ?" : ""}
@@ -68,6 +70,7 @@ function stockMovements(startDate, endDate, opts = {}) {
   return db.prepare(`
     SELECT COALESCE(i.code, 'ITEM-' || i.id) AS item_code,
       i.name AS item_name,
+      COALESCE(w.name, '') AS warehouse_name,
       sm.movement_type, sm.reference_type, sm.reference_id,
       sm.warehouse_id, sm.before_qty, sm.after_qty,
       sm.quantity,
@@ -76,6 +79,7 @@ function stockMovements(startDate, endDate, opts = {}) {
     FROM stock_movements sm
     LEFT JOIN items i ON i.id = sm.item_id
     LEFT JOIN users u ON u.id = sm.created_by
+    LEFT JOIN warehouses w ON w.id = sm.warehouse_id
     WHERE sm.deleted_at IS NULL
       ${addDateFilter("sm.created_at", startDate, endDate, params)}
       ${movement_type ? " AND sm.movement_type = ?" : ""}
@@ -104,12 +108,14 @@ function stockValuation(startDate, endDate, opts = {}) {
       it.name,
       c.name AS category_name,
       sl.warehouse_id,
+      COALESCE(w.name, '') AS warehouse_name,
       COALESCE(sl.quantity, 0) AS total_quantity,
       sl.wacc, sl.last_purchase_cost,
       COALESCE(sl.quantity, 0) * ${costCol} AS total_value
     FROM items it
     JOIN stock_levels sl ON sl.item_id = it.id
     LEFT JOIN item_categories c ON c.id = it.category_id
+    LEFT JOIN warehouses w ON w.id = sl.warehouse_id
     WHERE it.deleted_at IS NULL AND COALESCE(sl.quantity, 0) > 0
       ${warehouse_id ? " AND sl.warehouse_id = ?" : ""}
       ${category_id ? " AND it.category_id = ?" : ""}
@@ -127,12 +133,14 @@ function countSheet(startDate, endDate, opts = {}) {
       it.name AS item_name, it.barcode,
       c.name AS category_name,
       sl.warehouse_id,
+      COALESCE(w.name, '') AS warehouse_name,
       COALESCE(SUM(sl.quantity), 0) AS system_quantity,
       u.name AS unit_name
     FROM items it
     LEFT JOIN stock_levels sl ON sl.item_id = it.id
     LEFT JOIN item_categories c ON c.id = it.category_id
     LEFT JOIN units u ON u.id = it.unit_id
+    LEFT JOIN warehouses w ON w.id = sl.warehouse_id
     WHERE it.deleted_at IS NULL
       ${warehouse_id ? " AND sl.warehouse_id = ?" : ""}
       ${category_id ? " AND it.category_id = ?" : ""}

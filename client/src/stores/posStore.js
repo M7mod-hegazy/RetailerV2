@@ -137,6 +137,7 @@ export const usePosStore = create(
           paymentType: "cash",
         });
       },
+      discardHeldInvoice: (id) => set((state) => ({ heldInvoices: state.heldInvoices.filter((h) => h.id !== id) })),
       resumeHeldInvoice: (id) => {
         const state = get();
         const held = state.heldInvoices.find((entry) => entry.id === id);

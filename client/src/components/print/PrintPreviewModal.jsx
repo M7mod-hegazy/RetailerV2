@@ -37,6 +37,7 @@ export default function PrintPreviewModal({
   const [viewZoom, setViewZoom] = useState(0.55);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [docSettings, setDocSettings] = useState({});
+  const [fetchedGlobalSettings, setFetchedGlobalSettings] = useState({});
   const [reportPrintKeys, setReportPrintKeys] = useState([]);
   const [printPage, setPrintPage] = useState(1);
   const [totalPrintPages, setTotalPrintPages] = useState(1);
@@ -73,6 +74,9 @@ export default function PrintPreviewModal({
           setTemplate(cfg ? cfg.defaultSize : "A4");
         }
       });
+    api.get("/api/settings").then((r) => {
+      if (!cancelled && r.data?.data) setFetchedGlobalSettings(r.data.data);
+    }).catch(() => {});
     return () => { cancelled = true; };
   }, [docType, open]);
 
@@ -134,6 +138,7 @@ export default function PrintPreviewModal({
     : reportFitScore <= reportCapacity + 1.5 ? "amber" : "red";
 
   const combinedSettings = {
+    ...(fetchedGlobalSettings || {}),
     ...(globalSettings || {}),
     ...docSettings,
     ...(operationLabel ? { receipt_footer: operationLabel } : {}),

@@ -328,28 +328,39 @@ router.get("/payment-type-options", requirePagePermission("reports", "view"), (_
     const types = new Map();
 
     // Collect distinct payment types from invoices
-    const invoiceTypes = db.prepare("SELECT DISTINCT payment_type FROM invoices WHERE payment_type IS NOT NULL AND payment_type != ''").all();
-    invoiceTypes.forEach((r) => types.set(r.payment_type, true));
+    try {
+      const invoiceTypes = db.prepare("SELECT DISTINCT payment_type FROM invoices WHERE payment_type IS NOT NULL AND payment_type != ''").all();
+      invoiceTypes.forEach((r) => types.set(r.payment_type, true));
+    } catch (_e) { /* invoices table may not exist */ }
 
     // Collect distinct payment types from purchases
-    const purchaseTypes = db.prepare("SELECT DISTINCT payment_type FROM purchases WHERE payment_type IS NOT NULL AND payment_type != ''").all();
-    purchaseTypes.forEach((r) => types.set(r.payment_type, true));
+    try {
+      const purchaseTypes = db.prepare("SELECT DISTINCT payment_type FROM purchases WHERE payment_type IS NOT NULL AND payment_type != ''").all();
+      purchaseTypes.forEach((r) => types.set(r.payment_type, true));
+    } catch (_e) { /* purchases table may not exist */ }
 
     // Collect distinct payment methods from expenses
-    const expenseMethods = db.prepare("SELECT DISTINCT payment_method FROM expenses WHERE payment_method IS NOT NULL AND payment_method != ''").all();
-    expenseMethods.forEach((r) => types.set(r.payment_method, true));
+    try {
+      const expenseMethods = db.prepare("SELECT DISTINCT payment_method FROM expenses WHERE payment_method IS NOT NULL AND payment_method != ''").all();
+      expenseMethods.forEach((r) => types.set(r.payment_method, true));
+    } catch (_e) { /* expenses table may not exist */ }
 
     // Collect distinct payment methods from revenues
-    const revenueMethods = db.prepare("SELECT DISTINCT payment_method FROM revenues WHERE payment_method IS NOT NULL AND payment_method != ''").all();
-    revenueMethods.forEach((r) => types.set(r.payment_method, true));
+    try {
+      const revenueMethods = db.prepare("SELECT DISTINCT payment_method FROM revenues WHERE payment_method IS NOT NULL AND payment_method != ''").all();
+      revenueMethods.forEach((r) => types.set(r.payment_method, true));
+    } catch (_e) { /* revenues table may not exist */ }
 
     // Look up labels from payment_methods table
-    const methods = db.prepare("SELECT type, category, name FROM payment_methods WHERE is_active = 1").all();
     const labelMap = {};
-    methods.forEach((m) => {
-      if (m.type) labelMap[m.type] = m.name;
-      if (m.category && !labelMap[m.category]) labelMap[m.category] = m.name;
-    });
+    try {
+      const methods = db.prepare("SELECT type, name FROM payment_methods WHERE is_active = 1").all();
+      methods.forEach((m) => {
+        if (m.type) labelMap[m.type] = m.name;
+      });
+    } catch (_e) {
+      // payment_methods table might not exist yet; fall back to SPECIAL_LABELS
+    }
 
     // Special labels for system types
     const SPECIAL_LABELS = { multi: "متعدد", cash: "نقداً", card: "بطاقة", credit: "آجل", wallet: "محفظة", installments: "تقسيط", bank_transfer: "تحويل بنكي" };

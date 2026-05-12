@@ -138,7 +138,7 @@ const DATE_PRESETS = [
   { label: "الربع", days: 90 },
 ];
 
-const FIXED_PAGE_SIZE = 200;
+const FIXED_PAGE_SIZE = 40;
 
 function TableSkeleton({ colCount = 6 }) {
   return (
@@ -810,11 +810,47 @@ export default function SourceWorkspacePage() {
                         if (displayName == null || displayName === "") return <span className="text-zinc-300">—</span>;
                         return <span className="text-[13px] font-medium text-zinc-700">{String(displayName)}</span>;
                       }
-                    : undefined,
+                    : c.type === "cur" || c.type === "num" || c.type === "percent" || c.type === "money" || c.type === "number"
+                      ? (row) => {
+                          const val = row[c.id];
+                          if (val == null || val === "") return <span className="text-zinc-300">—</span>;
+                          const num = Number(val);
+                          if (isNaN(num)) return <span className="text-[13px] font-medium text-zinc-700">{String(val)}</span>;
+                          const suffix = c.type === "percent" ? "%" : "";
+                          return (
+                            <span className="tabular-nums text-[13px] font-bold text-zinc-900" dir="ltr" style={{ maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block" }}>
+                              {num.toLocaleString("ar-EG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{suffix}
+                            </span>
+                          );
+                        }
+                      : undefined,
                 }))}
                 data={rows}
                 rowKey="id"
               />
+              {/* Totals Bar */}
+              {rows.length > 0 && Object.keys(columnTotals).length > 0 && (
+                <div className="flex items-stretch border-t-2 border-emerald-500 bg-emerald-50/50">
+                  {displayColumns.map((col) => {
+                    const val = columnTotals[col.id];
+                    const hasVal = val != null && !isNaN(Number(val));
+                    return (
+                      <div key={col.id}
+                        style={{ minWidth: col.width || 120, flex: 1 }}
+                        className="flex items-center justify-center px-3 py-2.5 text-center border-l border-emerald-100 last:border-l-0"
+                      >
+                        {hasVal ? (
+                          <span className="text-[13px] font-black text-emerald-800 tabular-nums" dir="ltr">
+                            {Number(val).toLocaleString("ar-EG", { maximumFractionDigits: 2 })}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] font-bold text-emerald-600">الإجمالي</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </motion.div>
             {totalPages > 1 && (
               <div className="flex items-center justify-between px-6 py-3 border-t border-zinc-100 bg-zinc-50/50 shrink-0">

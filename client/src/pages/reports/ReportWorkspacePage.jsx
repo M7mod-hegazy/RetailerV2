@@ -150,7 +150,7 @@ const COST_METHODS = [
   { value: "purchase_price", label_key: "reports_purchase_price" },
 ];
 
-const FIXED_PAGE_SIZE = 200;
+const FIXED_PAGE_SIZE = 40;
 
 const CHART_COLORS = ["#059669", "#2563EB", "#7C3AED", "#D97706", "#DC2626", "#0891B2", "#F59E0B", "#EC4899"];
 
@@ -393,9 +393,13 @@ export default function ReportWorkspacePage() {
   const [costMethod, setCostMethod] = useState(initialCostMethod);
   const [exportProgress, setExportProgress] = useState(null);
   const [paymentTypeOptions, setPaymentTypeOptions] = useState([]);
+  const [globalPrintSettings, setGlobalPrintSettings] = useState({});
   useEffect(() => {
     api.get("/api/reports/payment-type-options").then((r) => {
       if (r.data?.data) setPaymentTypeOptions(r.data.data);
+    }).catch(() => {});
+    api.get("/api/settings").then((r) => {
+      if (r.data?.data) setGlobalPrintSettings(r.data.data);
     }).catch(() => {});
   }, []);
 
@@ -645,18 +649,8 @@ export default function ReportWorkspacePage() {
   }, [rows, columnTotals, allColumns]);
 
   const gridData = useMemo(() => {
-    if (rows.length > 0 && Object.keys(columnTotals).length > 0) {
-      const totalRow = { isTotalRow: true };
-      allColumns.forEach(c => {
-         if (columnTotals[c.id] !== undefined) totalRow[c.id] = columnTotals[c.id];
-         else totalRow[c.id] = "";
-      });
-      const firstTextCol = allColumns.find(c => columnTotals[c.id] === undefined && !c.id.toLowerCase().includes("id") && !c.id.toLowerCase().includes("code"));
-      if (firstTextCol) totalRow[firstTextCol.id] = "الإجمالي العام";
-      return [...rows, totalRow];
-    }
     return rows;
-  }, [rows, columnTotals, allColumns]);
+  }, [rows]);
 
   const categoryMeta = definition ? CATEGORY_META[definition.cat] : null;
   const CategoryIcon = categoryMeta?.icon || BarChart3;
@@ -1025,7 +1019,6 @@ export default function ReportWorkspacePage() {
               <div className="overflow-x-auto">
                 <DataGrid
                   data={gridData}
-                  rowClass={(row) => row.isTotalRow ? "bg-emerald-50/50 hover:bg-emerald-50/80 border-t-2 border-emerald-500" : ""}
                   columns={visibleColumns.map((c) => ({
                     id: c.id,
                     header: c.header,
@@ -1034,7 +1027,7 @@ export default function ReportWorkspacePage() {
                     headerClass: "text-right font-black text-[11px] text-zinc-500 uppercase tracking-wide bg-zinc-50/80 border-b border-zinc-200",
                     cellClass: "text-right border-b border-zinc-100 py-3",
                     render: SKU_COLUMN_KEYS.has(c.id)
-                      ? (row) => (<span className={`font-mono text-[13px] font-bold tabular-nums px-2 py-0.5 rounded-md ${row.isTotalRow ? "text-emerald-800 bg-emerald-100/50 border-emerald-200" : "text-zinc-700 bg-zinc-100/50 border border-zinc-200/50"}`} dir="ltr">{row[c.id] != null && row[c.id] !== "" ? String(row[c.id]) : "—"}</span>)
+                      ? (row) => (<span className="font-mono text-[13px] font-bold tabular-nums px-2 py-0.5 rounded-md text-zinc-700 bg-zinc-100/50 border border-zinc-200/50" dir="ltr">{row[c.id] != null && row[c.id] !== "" ? String(row[c.id]) : "—"}</span>)
                       : c.id === "warehouse_id" || c.id === "supplier_id" || c.id === "customer_id" || c.id === "cashier_id" || c.id === "user_id" || c.id === "category_id"
                         ? (row) => {
                             const nameKey = c.id.replace("_id", "_name");
@@ -1045,15 +1038,38 @@ export default function ReportWorkspacePage() {
                         : (row) => {
                           const val = row[c.id];
                           if (val == null || val === "") return <span className="text-zinc-300">—</span>;
-                          if (row.isTotalRow && typeof val === "string") return <span className="text-[13px] font-black text-emerald-800">{val}</span>;
                           const num = Number(val);
                           const isNum = !isNaN(num) && String(val).trim() !== "";
-                          if (isNum) return (<span className={`tabular-nums text-[13px] ${row.isTotalRow ? "font-black text-emerald-700 text-[14px]" : "font-bold text-zinc-900"}`} dir="ltr">{num.toLocaleString("ar-EG", { maximumFractionDigits: 2 })}</span>);
-                          return <span className={`text-[13px] ${row.isTotalRow ? "font-black text-emerald-800" : "font-medium text-zinc-700"}`}>{String(val)}</span>;
+                          if (isNum) return (<span className="tabular-nums text-[13px] font-bold text-zinc-900" dir="ltr" style={{ maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block" }}>{num.toLocaleString("ar-EG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>);
+                          return <span className="text-[13px] font-medium text-zinc-700">{String(val)}</span>;
                         },
                   }))}
                   rowKey={(row) => row.id || JSON.stringify(row)}
                 />
+              </div>
+            )}
+
+            {/* Totals Bar */}
+            {rows.length > 0 && Object.keys(columnTotals).length > 0 && (
+              <div className="flex items-stretch border-t-2 border-emerald-500 bg-emerald-50/50">
+                {visibleColumns.map((col) => {
+                  const val = columnTotals[col.id];
+                  const hasVal = val != null && !isNaN(Number(val));
+                  return (
+                    <div key={col.id}
+                      style={{ minWidth: SKU_COLUMN_KEYS.has(col.id) ? 140 : Math.max(120, Math.min(200, 80 + col.header.length * 8)), flex: 1 }}
+                      className="flex items-center justify-center px-3 py-2.5 text-center border-l border-emerald-100 last:border-l-0"
+                    >
+                      {hasVal ? (
+                        <span className="text-[13px] font-black text-emerald-800 tabular-nums" dir="ltr">
+                          {Number(val).toLocaleString("ar-EG", { maximumFractionDigits: 2 })}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] font-bold text-emerald-600">الإجمالي</span>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
 

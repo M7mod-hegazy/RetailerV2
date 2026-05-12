@@ -13,8 +13,7 @@ function exceptionsReport(startDate, endDate, opts = {}) {
         WHEN i.status = 'unpaid' THEN 'غير مدفوعة'
         WHEN i.discount > i.total * 0.2 THEN 'خصم عالي'
         ELSE 'أخرى'
-      END AS exception_type,
-      i.doc_no
+      END AS exception_type
     FROM invoices i
     LEFT JOIN customers c ON c.id = i.customer_id
     WHERE (i.status != 'paid' OR i.discount > i.total * 0.2)

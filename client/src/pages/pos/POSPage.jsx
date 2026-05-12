@@ -16,6 +16,7 @@ import {
   Minus,
   PackageCheck,
   PauseCircle,
+  PlayCircle,
   Plus,
   Printer,
   Receipt,
@@ -54,6 +55,7 @@ import { usePosStore } from "../../stores/posStore";
 import { useAuthStore } from "../../stores/authStore";
 import { useSound } from "../../hooks/useSound";
 import { useNavigate, useLocation } from "react-router-dom";
+import toast from "react-hot-toast";
 import { useInvoiceActivation } from "../../hooks/useInvoiceActivation";
 
 // --- Local Lookup Component ---
@@ -230,7 +232,40 @@ function toDateInput(date = new Date()) {
   return date.toISOString().slice(0, 10);
 }
 
-// ─── Constants ───────────────────────────────────────────────────────────────
+function HeldDropdown({ heldInvoices, onResume, onDiscard, onClose }) {
+  if (!heldInvoices.length) return null;
+  return (
+    <div className="absolute left-0 right-0 top-full z-50 mt-2 min-w-[320px] overflow-hidden rounded-xl border border-amber-200 bg-white shadow-[0_12px_48px_-8px_rgba(0,0,0,0.2)]">
+      <div className="max-h-[300px] overflow-y-auto p-2 custom-scrollbar">
+        {heldInvoices.map((h) => (
+          <div key={h.id} className="flex items-center gap-3 rounded-xl px-4 py-3.5 hover:bg-amber-50 transition-colors border-b border-slate-100 last:border-0">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
+              <PauseCircle className="h-5 w-5" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-[14px] font-black text-slate-800 truncate">{h.customer?.name || "زبون نقدي"}</span>
+                <span className="font-mono text-[13px] font-black text-amber-700 shrink-0">{formatMoney(h.heldTotal)} ج.م</span>
+              </div>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-500">{h.linesCount} أصناف</span>
+                <span className="text-[10px] text-slate-400 font-mono">{formatArabicDateTime(new Date(h.heldAt))}</span>
+              </div>
+            </div>
+            <div className="flex gap-1.5 shrink-0">
+              <button onClick={() => { onResume(h.id); onClose(); }} className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100 hover:text-emerald-700 transition-all active:scale-95" title="استئناف">
+                <PlayCircle className="h-5 w-5" />
+              </button>
+              <button onClick={() => onDiscard(h.id)} className="flex h-9 w-9 items-center justify-center rounded-lg bg-rose-50 text-rose-500 hover:bg-rose-100 hover:text-rose-600 transition-all active:scale-95" title="حذف">
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 const WALK_IN_CUSTOMER = { id: null, name: "زبون نقدي", phone: "", opening_balance: 0 };
 const DEFAULT_WAREHOUSE = { id: "default", name: "المخزن الرئيسي" };
@@ -412,9 +447,27 @@ export default function POSPage() {
   const setPaymentType    = usePosStore((s) => s.setPaymentType);
   const getTotals         = usePosStore((s) => s.getTotals);
   const clear             = usePosStore((s) => s.clear);
-  const heldInvoices      = usePosStore((s) => s.heldInvoices);
-  const holdCurrentInvoice = usePosStore((s) => s.holdCurrentInvoice);
-  const resumeHeldInvoice  = usePosStore((s) => s.resumeHeldInvoice);
+  const heldInvoices       = usePosStore((s) => s.heldInvoices);
+  const holdCurrentInvoice  = usePosStore((s) => s.holdCurrentInvoice);
+  const resumeHeldInvoice   = usePosStore((s) => s.resumeHeldInvoice);
+  const discardHeldInvoice  = usePosStore((s) => s.discardHeldInvoice);
+
+  // Hold / تعليق
+  const [heldDropdownOpen, setHeldDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) setHeldDropdownOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+  const handleHold = () => {
+    if (!lines.length) return;
+    holdCurrentInvoice();
+    toast.success("تم تعليق الفاتورة");
+    setHeldDropdownOpen(false);
+  };
 
   // UI state
   const [openShiftModal, setOpenShiftModal]   = useState(false);
@@ -1740,6 +1793,24 @@ export default function POSPage() {
                     <FilePlus className="h-4 w-4" /> جديدة
                   </button>
                 </div>
+                {heldInvoices.length > 0 && (
+                  <div className="relative mt-2">
+                    <button
+                      type="button"
+                      onClick={() => setHeldDropdownOpen((v) => !v)}
+                      className="flex w-full items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] font-black text-amber-800 hover:bg-amber-100 hover:border-amber-300 transition-all"
+                    >
+                      <div className="flex items-center gap-2">
+                        <PauseCircle className="h-5 w-5" />
+                        <span>فواتير معلقة ({heldInvoices.length})</span>
+                      </div>
+                      <ChevronDown className={`h-4 w-4 transition-transform ${heldDropdownOpen ? "rotate-180" : ""}`} />
+                    </button>
+                    {heldDropdownOpen && (
+                      <HeldDropdown heldInvoices={heldInvoices} onResume={(id) => { if (lines.length) holdCurrentInvoice(); resumeHeldInvoice(id); setHeldDropdownOpen(false); }} onDiscard={discardHeldInvoice} onClose={() => setHeldDropdownOpen(false)} />
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </aside>
@@ -2354,6 +2425,23 @@ export default function POSPage() {
                   >
                     <Sparkles className="h-4 w-4" />
                     حفظ الحالية وإنشاء جديدة
+                  </button>
+                  <button
+                    onClick={() => {
+                      setNewInvoiceModalOpen(false);
+                      holdCurrentInvoice();
+                      clear();
+                      resetPaymentFields();
+                      resetStaging();
+                      resetCustomer();
+                      setPaymentType("cash");
+                      setInvoiceSeq((s) => s + 1);
+                      toast.success("تم تعليق الفاتورة");
+                    }}
+                    className="flex items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] font-black text-amber-700 hover:bg-amber-100 transition-colors"
+                  >
+                    <PauseCircle className="h-4 w-4" />
+                    تعليق الحالية وإنشاء جديدة
                   </button>
                   <button
                     onClick={() => {
@@ -3118,6 +3206,24 @@ export default function POSPage() {
                     <FilePlus className="h-4 w-4" /> جديدة
                   </button>
                 </div>
+                {heldInvoices.length > 0 && (
+                  <div className="relative mt-2">
+                    <button
+                      type="button"
+                      onClick={() => setHeldDropdownOpen((v) => !v)}
+                      className="flex w-full items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] font-black text-amber-800 hover:bg-amber-100 hover:border-amber-300 transition-all"
+                    >
+                      <div className="flex items-center gap-2">
+                        <PauseCircle className="h-5 w-5" />
+                        <span>فواتير معلقة ({heldInvoices.length})</span>
+                      </div>
+                      <ChevronDown className={`h-4 w-4 transition-transform ${heldDropdownOpen ? "rotate-180" : ""}`} />
+                    </button>
+                    {heldDropdownOpen && (
+                      <HeldDropdown heldInvoices={heldInvoices} onResume={(id) => { if (lines.length) holdCurrentInvoice(); resumeHeldInvoice(id); setHeldDropdownOpen(false); }} onDiscard={discardHeldInvoice} onClose={() => setHeldDropdownOpen(false)} />
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -3449,6 +3555,23 @@ export default function POSPage() {
                 >
                   <Sparkles className="h-4 w-4" />
                   حفظ الحالية وإنشاء جديدة
+                </button>
+                <button
+                  onClick={() => {
+                    setNewInvoiceModalOpen(false);
+                    holdCurrentInvoice();
+                    clear();
+                    resetPaymentFields();
+                    resetStaging();
+                    resetCustomer();
+                    setPaymentType("cash");
+                    setInvoiceSeq((s) => s + 1);
+                    toast.success("تم تعليق الفاتورة");
+                  }}
+                  className="flex items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] font-black text-amber-700 hover:bg-amber-100 transition-colors"
+                >
+                  <PauseCircle className="h-4 w-4" />
+                  تعليق الحالية وإنشاء جديدة
                 </button>
                 <button
                   onClick={() => {

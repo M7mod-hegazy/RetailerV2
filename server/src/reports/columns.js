@@ -394,13 +394,13 @@ const AR_LABELS = {
 
 const REPORT_COLUMN_KEYS = {
   "daily-sales": ["date", "invoice_count", "gross_sales", "total_discount", "net_sales", "returns_amount", "returns_count", "total_cost", "gross_profit"],
-  "detailed-sales": ["invoice_no", "doc_no", "date", "customer_name", "cashier", "payment_type", "status", "subtotal", "discount", "total", "item_count"],
+  "detailed-sales": ["invoice_no", "date", "customer_name", "cashier", "payment_type", "status", "subtotal", "discount", "total", "item_count"],
   "sales-by-item": ["item_code", "item_name", "category_name", "quantity_sold", "revenue", "discount_total", "cost", "profit_margin", "margin_percent", "avg_unit_price"],
   "sales-by-category": ["category_name", "item_count", "quantity_sold", "revenue", "discount_total", "cost", "profit_margin", "margin_percent"],
   "sales-by-cashier": ["cashier", "invoice_count", "cancelled_count", "total_sales", "total_discount", "avg_invoice_value", "total_items_sold", "returns_handled"],
   "sales-by-payment": ["payment_type", "invoice_count", "total_sales", "total_discount", "avg_transaction", "returns_amount"],
   "sales-heatmap": ["weekday_name", "hour_slot", "invoice_count", "total_sales", "avg_sale"],
-  "exceptions": ["invoice_no", "doc_no", "date", "customer_name", "exception_type", "discount", "status", "total"],
+  "exceptions": ["invoice_no", "date", "customer_name", "exception_type", "discount", "status", "total"],
   "period-comparison": ["period", "date", "invoice_count", "total_sales", "total_discount"],
   "gross-net-sales": ["date", "gross_sales", "total_discount", "net_sales", "invoice_count", "returns_amount", "total_cost", "gross_profit"],
   "sales-returns": ["return_ref", "invoice_no", "date", "customer_name", "handled_by", "return_total", "reason", "refund_method", "items_returned"],
@@ -410,7 +410,7 @@ const REPORT_COLUMN_KEYS = {
   "margin-health": ["item_code", "item_name", "wacc", "sale_price", "current_margin_percent", "min_margin_percent", "suggested_price", "below_threshold"],
   "shift-history": ["id", "cashier", "opened_date", "closed_at", "opening_cash", "closing_cash", "sales_total", "expected_cash", "cash_variance", "invoice_count", "status"],
   "purchase-summary": ["date", "purchase_count", "distinct_suppliers", "total_purchases", "avg_order_value"],
-  "detailed-purchases": ["id", "purchase_no", "doc_no", "date", "supplier_name", "total", "status", "payment_type", "created_by", "item_count"],
+  "detailed-purchases": ["id", "purchase_no", "date", "supplier_name", "total", "status", "payment_type", "created_by", "item_count"],
   "purchases-by-supplier": ["supplier_name", "purchase_count", "total_purchases", "avg_order_value", "returns_total", "last_purchase_date"],
   "purchases-by-item": ["item_code", "item_name", "quantity_purchased", "total_cost", "avg_unit_cost", "distinct_suppliers", "last_purchase_date"],
   "purchase-returns": ["return_ref", "supplier_name", "date", "return_total", "reason", "refund_method", "items_returned"],
@@ -480,7 +480,7 @@ const REPORT_COLUMN_KEYS = {
   "profit-by-period": ["period", "revenue", "cost", "profit_margin", "margin_percent", "invoice_count"],
 };
 
-const CODE_KEYS = new Set(["id", "item_code", "code", "sku", "barcode", "invoice_no", "doc_no", "purchase_no", "ref_no", "return_ref", "reference_id", "shift_id", "user_id", "warehouse_id", "batch_no", "section"]);
+const CODE_KEYS = new Set(["id", "item_code", "code", "sku", "barcode", "invoice_no", "purchase_no", "ref_no", "return_ref", "reference_id", "shift_id", "user_id", "warehouse_id", "batch_no", "section"]);
 const DATE_KEYS = new Set(["date", "created_at", "opened_date", "closed_at", "purchase_date", "last_purchase_date", "last_invoice_date", "last_sale_date", "last_movement_date", "expiry_date", "updated_at"]);
 const PERCENT_KEYS = new Set(["pct", "margin_percent", "current_margin_percent", "min_margin_percent", "avg_discount_percent", "collection_rate", "percentage", "tax_rate", "avg_discount_percent", "collection_rate"]);
 const NUMBER_KEYS = new Set(["quantity", "quantity_sold", "quantity_purchased", "stock_quantity", "system_quantity", "total_quantity", "before_qty", "after_qty", "min_stock_qty", "item_count", "invoice_count", "purchase_count", "returns_count", "return_count", "items_returned", "transaction_count", "action_count", "total_invoices", "total_items_sold", "distinct_suppliers", "supplier_count", "customer_count", "tx_count", "days_until_expiry", "days_since_last_movement", "days_since_last_sale", "days_to_collect", "weekday_num", "cancelled_count", "loyalty_points", "suggested_order_qty", "returns_handled", "weekday_num", "shift_count"]);

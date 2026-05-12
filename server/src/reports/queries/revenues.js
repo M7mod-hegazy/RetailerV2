@@ -6,7 +6,7 @@ function _detailRevenueQuery(startDate, endDate, opts = {}) {
   const params = [];
   const { category_id } = opts;
   return db.prepare(`
-    SELECT r.doc_no, DATE(r.created_at) AS date,
+    SELECT DATE(r.created_at) AS date,
       COALESCE(c.name, 'غير مصنف') AS category_name,
       r.amount, r.description, r.notes,
       r.payment_method AS payment_type
@@ -41,7 +41,7 @@ function detailedRevenues(startDate, endDate, opts = {}) {
   const params = [];
   const { category_id } = opts;
   return db.prepare(`
-    SELECT r.doc_no, DATE(r.created_at) AS date,
+    SELECT DATE(r.created_at) AS date,
       COALESCE(c.name, 'غير مصنف') AS category_name,
       r.amount, r.description, r.notes,
       r.payment_method AS payment_type

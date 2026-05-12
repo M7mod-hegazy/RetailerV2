@@ -37,7 +37,7 @@ function detailedSales(startDate, endDate, opts = {}) {
   const { q, status, payment_type, customer_id, category_id, item_id } = opts;
   const ptFilter = addPaymentTypeFilter(payment_type, "i", params);
   return db.prepare(`
-    SELECT i.invoice_no, i.doc_no,
+    SELECT i.invoice_no,
       DATE(i.created_at) AS date,
       COALESCE(c.name, 'نقدي') AS customer_name,
       u.full_name AS cashier,
@@ -74,7 +74,7 @@ function _detailSalesQuery(startDate, endDate, opts = {}) {
   const { customer_id, category_id, item_id, status, payment_type, cashier_id } = opts;
   const ptFilter = addPaymentTypeFilter(payment_type, "i", params);
   return db.prepare(`
-    SELECT i.invoice_no, i.doc_no,
+    SELECT i.invoice_no,
       DATE(i.created_at) AS date,
       COALESCE(c.name, 'نقدي') AS customer_name,
       u.full_name AS cashier,
