@@ -1,11 +1,12 @@
 const express = require("express");
 const { getDb } = require("../config/database");
 const { authRequired } = require("../middleware/auth");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 router.use(authRequired);
 
-router.get("/", (_req, res) => {
+router.get("/", requirePagePermission("analytics", "view"), (_req, res) => {
   const db = getDb();
   const todaySales = db.prepare("SELECT COALESCE(SUM(total), 0) AS total FROM invoices WHERE date(created_at)=date('now')").get().total;
   const weekSales = db.prepare("SELECT COALESCE(SUM(total), 0) AS total FROM invoices WHERE date(created_at) >= date('now', '-7 day')").get().total;

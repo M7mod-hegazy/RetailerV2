@@ -3,10 +3,11 @@ const { createInvoice, getInvoiceWithLines, editInvoice, cancelInvoice, amendInv
 const { createReturn, createGeneralReturn, getReturns, getReturnDetails, cancelSalesReturn, amendSalesReturn, editSalesReturn } = require("../services/returnService");
 const { adjustStock } = require("../services/stockService");
 const { getDb } = require("../config/database");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 
-router.get("/", (req, res) => {
+router.get("/", requirePagePermission("pos", "view"), (req, res) => {
   try {
     const db = getDb();
     const { date_from, date_to, sort = "created_at", dir = "desc", search = "", customer_id, user_id } = req.query;
@@ -59,7 +60,7 @@ router.get("/", (req, res) => {
 });
 
 // Returns the most recent unit_price this item was sold at
-router.get("/last-price/:itemId", (req, res) => {
+router.get("/last-price/:itemId", requirePagePermission("pos", "view"), (req, res) => {
   try {
     const db = getDb();
     const row = db.prepare(`
@@ -76,7 +77,7 @@ router.get("/last-price/:itemId", (req, res) => {
   }
 });
 
-router.get("/returns", (req, res) => {
+router.get("/returns", requirePagePermission("pos", "view"), (req, res) => {
   try {
     const db = getDb();
     const { search = "", customer_id, date_from, date_to } = req.query;
@@ -103,7 +104,7 @@ router.get("/returns", (req, res) => {
   }
 });
 
-router.get("/returns/:id", (req, res, next) => {
+router.get("/returns/:id", requirePagePermission("pos", "view"), (req, res, next) => {
     try {
         const sr = getReturnDetails(Number(req.params.id));
         if (!sr) throw new Error("Return not found");
@@ -111,14 +112,14 @@ router.get("/returns/:id", (req, res, next) => {
     } catch (e) { next(e); }
 });
 
-router.post("/general-return", (req, res, next) => {
+router.post("/general-return", requirePagePermission("pos", "add"), (req, res, next) => {
   try {
     const result = createGeneralReturn({ ...req.body, user_id: req.user?.id || req.body.user_id || null });
     res.json({ success: true, data: result });
   } catch (e) { next(e); }
 });
 
-router.post("/returns/:id/cancel", (req, res, next) => {
+router.post("/returns/:id/cancel", requirePagePermission("pos", "add"), (req, res, next) => {
   try {
     const { reason, user_id } = req.body || {};
     const result = cancelSalesReturn(Number(req.params.id), reason, req.user?.id || user_id || null);
@@ -126,21 +127,21 @@ router.post("/returns/:id/cancel", (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-router.put("/returns/:id", (req, res, next) => {
+router.put("/returns/:id", requirePagePermission("pos", "edit"), (req, res, next) => {
   try {
     const result = editSalesReturn(Number(req.params.id), req.body || {}, req.user?.id || req.body?.user_id || null);
     res.json({ success: true, data: result });
   } catch (e) { next(e); }
 });
 
-router.put("/returns/:id/amend", (req, res, next) => {
+router.put("/returns/:id/amend", requirePagePermission("pos", "edit"), (req, res, next) => {
   try {
     const result = amendSalesReturn(Number(req.params.id), req.body || {}, req.user?.id || req.body?.user_id || null);
     res.json({ success: true, data: result });
   } catch (e) { next(e); }
 });
 
-router.post("/general-purchase-return", (req, res, next) => {
+router.post("/general-purchase-return", requirePagePermission("pos", "add"), (req, res, next) => {
   try {
     const db = getDb();
     const { lines, supplier_id, refund_method, notes, reason } = req.body;
@@ -179,7 +180,61 @@ router.post("/general-purchase-return", (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-router.get("/cancel-reasons", (_req, res) => {
+router.get("/items-search", requirePagePermission("pos", "view"), (req, res, next) => {
+  try {
+    const db = getDb();
+    const { q = "", invoice_search = "", customer_search = "", customer_id = "", user_id = "", date_from, date_to } = req.query;
+    if (!q.trim()) return res.json({ success: true, data: [] });
+
+    const conditions = ["i.status != 'cancelled'"];
+    const params = [];
+
+    conditions.push("(it.name LIKE ? OR it.code LIKE ? OR it.barcode LIKE ?)");
+    const searchTerm = `%${q.trim()}%`;
+    params.push(searchTerm, searchTerm, searchTerm);
+
+    if (invoice_search.trim()) {
+      conditions.push("i.invoice_no LIKE ?");
+      params.push(`%${invoice_search.trim()}%`);
+    }
+    if (customer_search.trim()) {
+      conditions.push("c.name LIKE ?");
+      params.push(`%${customer_search.trim()}%`);
+    }
+    if (customer_id) { conditions.push("i.customer_id = ?"); params.push(customer_id); }
+    if (user_id) { conditions.push("i.user_id = ?"); params.push(user_id); }
+    if (date_from && date_to) {
+      conditions.push("date(i.created_at) BETWEEN date(?) AND date(?)");
+      params.push(date_from, date_to);
+    } else if (date_from || date_to) {
+      conditions.push("date(i.created_at) = date(?)");
+      params.push(date_from || date_to);
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    const rows = db.prepare(`
+      SELECT il.id AS line_id, il.invoice_id, i.invoice_no, i.created_at, i.status,
+             i.customer_id, c.name AS customer_name,
+             il.item_id, it.name AS item_name, it.code AS item_code, it.barcode, it.purchase_price,
+             il.quantity, il.unit_price, il.line_total,
+             COALESCE((SELECT SUM(srl.quantity) FROM sales_return_lines srl WHERE srl.invoice_line_id = il.id), 0) AS already_returned,
+             (il.quantity - COALESCE((SELECT SUM(srl.quantity) FROM sales_return_lines srl WHERE srl.invoice_line_id = il.id), 0)) AS returnable_qty
+      FROM invoice_lines il
+      JOIN invoices i ON i.id = il.invoice_id
+      JOIN items it ON it.id = il.item_id
+      LEFT JOIN customers c ON c.id = i.customer_id
+      ${where}
+      ORDER BY i.created_at DESC
+      LIMIT 100
+    `).all(...params);
+
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/cancel-reasons", requirePagePermission("pos", "view"), (_req, res) => {
   res.json({
     success: true,
     data: [
@@ -193,7 +248,7 @@ router.get("/cancel-reasons", (_req, res) => {
   });
 });
 
-router.get("/:id", (req, res, next) => {
+router.get("/:id", requirePagePermission("pos", "view"), (req, res, next) => {
   try {
     const invoice = getInvoiceWithLines(Number(req.params.id));
     if (!invoice) {
@@ -207,20 +262,20 @@ router.get("/:id", (req, res, next) => {
   }
 });
 
-router.put("/:id", (req, res, next) => {
+router.put("/:id", requirePagePermission("pos", "edit"), (req, res, next) => {
   try {
     const result = editInvoice(Number(req.params.id), req.body);
     res.json({ success: true, data: result });
   } catch (e) { next(e); }
 });
 
-router.post("/", (req, res) => {
+router.post("/", requirePagePermission("pos", "add"), (req, res) => {
   const payload = { ...(req.body || {}), user_id: req.user?.id || null };
   const invoice = createInvoice(payload);
   res.status(201).json({ success: true, data: invoice });
 });
 
-router.post("/:id/return", (req, res, next) => {
+router.post("/:id/return", requirePagePermission("pos", "add"), (req, res, next) => {
   try {
     const salesReturn = createReturn(Number(req.params.id), req.body || {});
     res.status(201).json({ success: true, data: salesReturn });
@@ -229,7 +284,7 @@ router.post("/:id/return", (req, res, next) => {
   }
 });
 
-router.post("/:id/void", (req, res, next) => {
+router.post("/:id/void", requirePagePermission("pos", "add"), (req, res, next) => {
   try {
     if (!req.body.reason) {
       const error = new Error("Void reason is required");
@@ -244,7 +299,7 @@ router.post("/:id/void", (req, res, next) => {
   }
 });
 
-router.delete("/:id", (req, res, next) => {
+router.delete("/:id", requirePagePermission("pos", "delete"), (req, res, next) => {
   try {
     const result = cancelInvoice(Number(req.params.id), req.body?.reason, req.user?.id);
     res.json({ success: true, data: result });
@@ -253,7 +308,7 @@ router.delete("/:id", (req, res, next) => {
   }
 });
 
-router.put("/:id/amend", (req, res, next) => {
+router.put("/:id/amend", requirePagePermission("pos", "edit"), (req, res, next) => {
   try {
     const result = amendInvoice(Number(req.params.id), req.body, req.user?.id);
     res.json({ success: true, data: result });

@@ -2,6 +2,7 @@ const express = require("express");
 const bcrypt = require("bcryptjs");
 const { getDb } = require("../config/database");
 const { authRequired, requireRole } = require("../middleware/auth");
+const { requirePagePermission } = require("../middleware/permission");
 const {
   ALLOW_DEV_BYPASS,
   APP_PROTECTION_MODE,
@@ -23,11 +24,11 @@ function normalizeBoolean(value) {
   return value ? 1 : 0;
 }
 
-router.get("/", authRequired, (_req, res) => {
+router.get("/", authRequired, requirePagePermission("settings", "view"), (_req, res) => {
   res.json({ success: true, data: getSettings() });
 });
 
-router.get("/setup-status", (_req, res) => {
+router.get("/setup-status", requirePagePermission("settings", "view"), (_req, res) => {
   syncSettingsLicenseState();
   const settings = getSettings();
   res.json({
@@ -46,7 +47,7 @@ router.get("/setup-status", (_req, res) => {
   });
 });
 
-router.post("/validate-license", (req, res, next) => {
+router.post("/validate-license", requirePagePermission("settings", "add"), (req, res, next) => {
   if (!isLicenseFeatureEnabled()) {
     const error = new Error("License validation is disabled in windows_managed mode");
     error.status = 409;
@@ -64,11 +65,11 @@ router.post("/validate-license", (req, res, next) => {
     .catch((error) => next(error));
 });
 
-router.get("/hardware-id", (_req, res) => {
+router.get("/hardware-id", requirePagePermission("settings", "view"), (_req, res) => {
   res.json({ success: true, data: { hardware_id: getHardwareFingerprint() } });
 });
 
-router.post("/setup-progress", (req, res) => {
+router.post("/setup-progress", requirePagePermission("settings", "add"), (req, res) => {
   const payload = req.body || {};
   const step = Number(payload.step || 1);
   const current = getSettings();
@@ -88,7 +89,7 @@ router.post("/setup-progress", (req, res) => {
   res.json({ success: true, data: { step, draft: mergedDraft } });
 });
 
-router.post("/setup-complete", (req, res, next) => {
+router.post("/setup-complete", requirePagePermission("settings", "add"), (req, res, next) => {
   const db = getDb();
   const payload = req.body || {};
 
@@ -228,7 +229,7 @@ router.post("/setup-complete", (req, res, next) => {
   }
 });
 
-router.put("/", authRequired, requireRole("admin"), (req, res) => {
+router.put("/", authRequired, requirePagePermission("settings", "edit"), requireRole("admin"), (req, res) => {
   const current = getSettings();
   const payload = req.body || {};
   const next = { ...current, ...payload };
@@ -314,7 +315,7 @@ router.put("/", authRequired, requireRole("admin"), (req, res) => {
 });
 
 // Bulk update settings - accepts array of { setting_key, setting_value }
-router.post("/bulk", authRequired, requireRole("admin"), (req, res) => {
+router.post("/bulk", authRequired, requirePagePermission("settings", "add"), requireRole("admin"), (req, res) => {
   const { settings } = req.body || {};
   if (!Array.isArray(settings) || settings.length === 0) {
     return res.status(400).json({ success: false, message: "Settings array is required" });

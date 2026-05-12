@@ -1,5 +1,6 @@
 const express = require("express");
 const { getDb } = require("../config/database");
+const { requirePagePermission } = require("../middleware/permission");
 const {
   calculateDailySummary,
   closeDailySession,
@@ -22,7 +23,7 @@ router.use((_req, _res, next) => {
 });
 
 /** Get or auto-create today's session */
-router.get("/today", (req, res) => {
+router.get("/today", requirePagePermission("daily_treasury", "view"), (req, res) => {
   try {
     const db = getDb();
     const today = localDate();
@@ -34,7 +35,7 @@ router.get("/today", (req, res) => {
 });
 
 /** Check if a write is allowed for a given date */
-router.get("/write-guard", (req, res) => {
+router.get("/write-guard", requirePagePermission("daily_treasury", "view"), (req, res) => {
   try {
     const db = getDb();
     const targetDate = normalizeDate(req.query.date || localDate());
@@ -63,7 +64,7 @@ router.get("/write-guard", (req, res) => {
 });
 
 /** Check if yesterday's session is unclosed */
-router.get("/yesterday/alert", (req, res) => {
+router.get("/yesterday/alert", requirePagePermission("daily_treasury", "view"), (req, res) => {
   try {
     const db = getDb();
     const yesterday = new Date();
@@ -78,7 +79,7 @@ router.get("/yesterday/alert", (req, res) => {
 });
 
 /** Today's full financial equation */
-router.get("/today/summary", (req, res) => {
+router.get("/today/summary", requirePagePermission("daily_treasury", "view"), (req, res) => {
   try {
     const db = getDb();
     const summary = calculateDailySummary(db, localDate(), { createIfMissing: true });
@@ -89,7 +90,7 @@ router.get("/today/summary", (req, res) => {
 });
 
 /** Get transactions by type (supports date param for historical) */
-router.get("/today/transactions", (req, res) => {
+router.get("/today/transactions", requirePagePermission("daily_treasury", "view"), (req, res) => {
   try {
     const db = getDb();
     const { type = "pos", page = 1, limit = 100, search = "", date: queryDate, show_cancelled = "0" } = req.query;
@@ -396,7 +397,7 @@ router.get("/today/transactions", (req, res) => {
 });
 
 /** Add a withdrawal */
-router.post("/today/withdrawals", (req, res) => {
+router.post("/today/withdrawals", requirePagePermission("daily_treasury", "add"), (req, res) => {
   try {
     const db = getDb();
     const today = localDate();
@@ -425,7 +426,7 @@ router.post("/today/withdrawals", (req, res) => {
 });
 
 /** Close today's session */
-router.post("/today/close", (req, res) => {
+router.post("/today/close", requirePagePermission("daily_treasury", "add"), (req, res) => {
   try {
     const db = getDb();
     const { actual_cash, notes } = req.body || {};
@@ -437,7 +438,7 @@ router.post("/today/close", (req, res) => {
 });
 
 /** Close any open session by date */
-router.post("/:date/close", (req, res) => {
+router.post("/:date/close", requirePagePermission("daily_treasury", "add"), (req, res) => {
   try {
     const db = getDb();
     const { actual_cash, notes } = req.body || {};
@@ -449,7 +450,7 @@ router.post("/:date/close", (req, res) => {
 });
 
 /** Force-close yesterday with calculated expected balance */
-router.post("/yesterday/force-close", (req, res) => {
+router.post("/yesterday/force-close", requirePagePermission("daily_treasury", "add"), (req, res) => {
   try {
     const db = getDb();
     const d = new Date();
@@ -467,7 +468,7 @@ router.post("/yesterday/force-close", (req, res) => {
 });
 
 /** Reopen the latest closed day if it was closed by mistake */
-router.post("/:date/reopen", (req, res) => {
+router.post("/:date/reopen", requirePagePermission("daily_treasury", "add"), (req, res) => {
   try {
     const db = getDb();
     const targetDate = normalizeDate(req.params.date);
@@ -498,7 +499,7 @@ router.post("/:date/reopen", (req, res) => {
 });
 
 /** Edit opening balance on an open day */
-router.patch("/:date/opening-balance", (req, res) => {
+router.patch("/:date/opening-balance", requirePagePermission("daily_treasury", "edit"), (req, res) => {
   try {
     const db = getDb();
     const targetDate = normalizeDate(req.params.date);
@@ -522,7 +523,7 @@ router.patch("/:date/opening-balance", (req, res) => {
 });
 
 /** List sessions */
-router.get("/", (req, res) => {
+router.get("/", requirePagePermission("daily_treasury", "view"), (req, res) => {
   try {
     const db = getDb();
     const { search = "", status = "", limit = 180 } = req.query;
@@ -544,7 +545,7 @@ router.get("/", (req, res) => {
 });
 
 /** Summary for a specific date */
-router.get("/:date/summary", (req, res) => {
+router.get("/:date/summary", requirePagePermission("daily_treasury", "view"), (req, res) => {
   try {
     const db = getDb();
     const summary = calculateDailySummary(db, req.params.date);
@@ -556,7 +557,7 @@ router.get("/:date/summary", (req, res) => {
 });
 
 /** Single session by date */
-router.get("/:date", (req, res) => {
+router.get("/:date", requirePagePermission("daily_treasury", "view"), (req, res) => {
   try {
     const db = getDb();
     const session = getSession(db, req.params.date, false);

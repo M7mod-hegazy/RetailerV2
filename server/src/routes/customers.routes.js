@@ -1,9 +1,10 @@
 const express = require("express");
 const { getDb } = require("../config/database");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 
-router.get("/", (req, res) => {
+router.get("/", requirePagePermission("customers", "view"), (req, res) => {
   const showArchived = req.query.archived === 'true';
   const query = showArchived
     ? "SELECT * FROM customers WHERE is_active = 0 ORDER BY id DESC"
@@ -12,7 +13,7 @@ router.get("/", (req, res) => {
   res.json({ success: true, data: rows });
 });
 
-router.post("/", (req, res) => {
+router.post("/", requirePagePermission("customers", "add"), (req, res) => {
   const payload = req.body || {};
   const info = getDb()
     .prepare(
@@ -39,7 +40,7 @@ router.post("/", (req, res) => {
   });
 });
 
-router.put("/:id", (req, res) => {
+router.put("/:id", requirePagePermission("customers", "edit"), (req, res) => {
   const payload = req.body || {};
   getDb()
     .prepare(
@@ -64,7 +65,7 @@ router.put("/:id", (req, res) => {
   res.json({ success: true, data: getDb().prepare("SELECT * FROM customers WHERE id = ?").get(req.params.id) });
 });
 
-router.delete("/:id", (req, res) => {
+router.delete("/:id", requirePagePermission("customers", "delete"), (req, res) => {
   try {
     const db = getDb();
     const settings = db.prepare("SELECT walk_in_customer_id FROM settings WHERE id = 1").get();
@@ -101,7 +102,7 @@ router.delete("/:id", (req, res) => {
   }
 });
 
-router.get("/:id/loyalty", (req, res, next) => {
+router.get("/:id/loyalty", requirePagePermission("customers", "view"), (req, res, next) => {
   try {
     const db = getDb();
     const customer = db.prepare("SELECT loyalty_points, loyalty_tier, total_spent FROM customers WHERE id = ?").get(req.params.id);
@@ -117,13 +118,13 @@ router.get("/:id/loyalty", (req, res, next) => {
   }
 });
 
-router.get("/:id", (req, res) => {
+router.get("/:id", requirePagePermission("customers", "view"), (req, res) => {
   const customer = getDb().prepare("SELECT * FROM customers WHERE id = ?").get(req.params.id);
   if (!customer) return res.status(404).json({ success: false, message: "العميل غير موجود" });
   res.json({ success: true, data: customer });
 });
 
-router.post("/:id/adjust", (req, res) => {
+router.post("/:id/adjust", requirePagePermission("customers", "add"), (req, res) => {
   const { amount, reason, direction } = req.body || {};
   const delta = direction === 'subtract' ? -Math.abs(Number(amount)) : Math.abs(Number(amount));
   try {
@@ -138,12 +139,12 @@ router.post("/:id/adjust", (req, res) => {
   }
 });
 
-router.get("/:id/notes", (req, res) => {
+router.get("/:id/notes", requirePagePermission("customers", "view"), (req, res) => {
   const notes = getDb().prepare("SELECT n.*, u.name as user_name FROM customer_notes n LEFT JOIN users u ON u.id = n.created_by WHERE customer_id = ? ORDER BY n.created_at DESC").all(req.params.id);
   res.json({ success: true, data: notes });
 });
 
-router.post("/:id/notes", (req, res) => {
+router.post("/:id/notes", requirePagePermission("customers", "add"), (req, res) => {
   const { note } = req.body || {};
   if (!note) return res.status(400).json({ success: false, message: "الملاحظة مطلوبة" });
   const result = getDb().prepare("INSERT INTO customer_notes (customer_id, note, created_by) VALUES (?, ?, ?)")

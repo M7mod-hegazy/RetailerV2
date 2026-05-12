@@ -1,6 +1,7 @@
 const express = require('express');
 const { getDb } = require('../config/database');
 const { authRequired, requireRole } = require('../middleware/auth');
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 
@@ -21,7 +22,7 @@ function ensureLoyaltySchema(db) {
   if (!transactionColumns.includes("invoice_id")) db.exec("ALTER TABLE loyalty_transactions ADD COLUMN invoice_id INTEGER");
 }
 
-router.post("/redeem", (req, res, next) => {
+router.post("/redeem", requirePagePermission("customers", "add"), (req, res, next) => {
   try {
     const db = getDb();
     ensureLoyaltySchema(db);
@@ -54,7 +55,7 @@ router.post("/redeem", (req, res, next) => {
   }
 });
 
-router.post("/adjust", requireRole('admin'), (req, res, next) => {
+router.post("/adjust", requirePagePermission("customers", "add"), requireRole('admin'), (req, res, next) => {
   try {
     const db = getDb();
     ensureLoyaltySchema(db);
@@ -90,7 +91,7 @@ router.post("/adjust", requireRole('admin'), (req, res, next) => {
   }
 });
 
-router.get("/report", requireRole('admin'), (req, res, next) => {
+router.get("/report", requirePagePermission("customers", "view"), requireRole('admin'), (req, res, next) => {
   try {
     const db = getDb();
     ensureLoyaltySchema(db);

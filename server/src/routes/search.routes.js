@@ -1,6 +1,7 @@
 const express = require("express");
 const { getDb } = require("../config/database");
 const { authRequired } = require("../middleware/auth");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 router.use(authRequired);
@@ -136,7 +137,7 @@ function normalizeQuery(value) {
 }
 
 // ─── Suggestions endpoint ─────────────────────────────────────────────────────
-router.get("/suggestions", (req, res) => {
+router.get("/suggestions", requirePagePermission("reports", "view"), (req, res) => {
   const rawQ = normalizeQuery(req.query.q);
   if (!rawQ) {
     return res.json({ success: true, data: PAGE_INDEX.slice(0, 10) });
@@ -146,7 +147,7 @@ router.get("/suggestions", (req, res) => {
 });
 
 // ─── Global search endpoint ───────────────────────────────────────────────────
-router.get("/", (req, res, next) => {
+router.get("/", requirePagePermission("reports", "view"), (req, res, next) => {
   try {
     const db = getDb();
     const query = normalizeQuery(req.query.q);

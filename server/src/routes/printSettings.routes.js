@@ -1,5 +1,6 @@
 const express = require("express");
 const { getDb } = require("../config/database");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 
@@ -37,7 +38,7 @@ function safeParseSettings(value) {
   }
 }
 
-router.get("/", (_req, res) => {
+router.get("/", requirePagePermission("settings", "view"), (_req, res) => {
   try {
     const db = getDb();
     ensureTable(db);
@@ -51,7 +52,7 @@ router.get("/", (_req, res) => {
   }
 });
 
-router.get("/:docType", (req, res) => {
+router.get("/:docType", requirePagePermission("settings", "view"), (req, res) => {
   try {
     const { docType } = req.params;
     if (!DOC_TYPES.includes(docType)) {
@@ -66,7 +67,7 @@ router.get("/:docType", (req, res) => {
   }
 });
 
-router.put("/:docType", (req, res) => {
+router.put("/:docType", requirePagePermission("settings", "edit"), (req, res) => {
   try {
     const { docType } = req.params;
     if (!DOC_TYPES.includes(docType)) {

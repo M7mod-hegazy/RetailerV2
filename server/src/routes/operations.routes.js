@@ -1,12 +1,13 @@
 const express = require("express");
 const { transferTreasury } = require("../services/treasuryService");
 const { authRequired } = require("../middleware/auth");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 
 router.use(authRequired);
 
-router.post("/treasury/transfer", (req, res, next) => {
+router.post("/treasury/transfer", requirePagePermission("reports", "add"), (req, res, next) => {
   try {
     const payload = {
       source_id: req.body.source_id,
@@ -24,7 +25,7 @@ router.post("/treasury/transfer", (req, res, next) => {
   }
 });
 
-router.post("/treasury-transfer", (req, res, next) => {
+router.post("/treasury-transfer", requirePagePermission("reports", "add"), (req, res, next) => {
   try {
     const payload = {
       source_id: req.body.source_id,

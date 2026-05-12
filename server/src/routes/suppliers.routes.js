@@ -1,9 +1,10 @@
 const express = require("express");
 const { getDb } = require("../config/database");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 
-router.get("/", (req, res) => {
+router.get("/", requirePagePermission("suppliers", "view"), (req, res) => {
   const showArchived = req.query.archived === 'true';
   const query = showArchived 
     ? "SELECT * FROM suppliers WHERE is_active = 0 ORDER BY id DESC"
@@ -12,7 +13,7 @@ router.get("/", (req, res) => {
   res.json({ success: true, data: rows });
 });
 
-router.post("/", (req, res) => {
+router.post("/", requirePagePermission("suppliers", "add"), (req, res) => {
   const payload = req.body || {};
   const info = getDb()
     .prepare(
@@ -35,7 +36,7 @@ router.post("/", (req, res) => {
   });
 });
 
-router.put("/:id", (req, res) => {
+router.put("/:id", requirePagePermission("suppliers", "edit"), (req, res) => {
   const payload = req.body || {};
   getDb()
     .prepare(
@@ -56,7 +57,7 @@ router.put("/:id", (req, res) => {
   res.json({ success: true, data: getDb().prepare("SELECT * FROM suppliers WHERE id = ?").get(req.params.id) });
 });
 
-router.delete("/:id", (req, res) => {
+router.delete("/:id", requirePagePermission("suppliers", "delete"), (req, res) => {
   try {
     const db = getDb();
     
@@ -83,13 +84,13 @@ router.delete("/:id", (req, res) => {
   }
 });
 
-router.get("/:id", (req, res) => {
+router.get("/:id", requirePagePermission("suppliers", "view"), (req, res) => {
   const supplier = getDb().prepare("SELECT * FROM suppliers WHERE id = ?").get(req.params.id);
   if (!supplier) return res.status(404).json({ success: false, message: "المورد غير موجود" });
   res.json({ success: true, data: supplier });
 });
 
-router.post("/:id/adjust", (req, res) => {
+router.post("/:id/adjust", requirePagePermission("suppliers", "add"), (req, res) => {
   const { amount, reason, direction } = req.body || {};
   const delta = direction === 'subtract' ? -Math.abs(Number(amount)) : Math.abs(Number(amount));
   try {
@@ -104,12 +105,12 @@ router.post("/:id/adjust", (req, res) => {
   }
 });
 
-router.get("/:id/notes", (req, res) => {
+router.get("/:id/notes", requirePagePermission("suppliers", "view"), (req, res) => {
   const notes = getDb().prepare("SELECT n.*, u.name as user_name FROM supplier_notes n LEFT JOIN users u ON u.id = n.created_by WHERE supplier_id = ? ORDER BY n.created_at DESC").all(req.params.id);
   res.json({ success: true, data: notes });
 });
 
-router.post("/:id/notes", (req, res) => {
+router.post("/:id/notes", requirePagePermission("suppliers", "add"), (req, res) => {
   const { note } = req.body || {};
   if (!note) return res.status(400).json({ success: false, message: "الملاحظة مطلوبة" });
   const result = getDb().prepare("INSERT INTO supplier_notes (supplier_id, note, created_by) VALUES (?, ?, ?)")

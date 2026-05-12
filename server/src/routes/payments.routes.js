@@ -2,6 +2,7 @@ const express = require("express");
 const { getDb } = require("../config/database");
 const { recalculateInvoiceStatus } = require("../services/invoiceService");
 const { assertCanWriteForDate, normalizeDate } = require("../services/dailySessionService");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 
@@ -26,7 +27,7 @@ function getOpenInvoices(db, partyType, partyId) {
     .filter((invoice) => invoice.outstanding > 0);
 }
 
-router.get("/", (req, res) => {
+router.get("/", requirePagePermission("payment_methods", "view"), (req, res) => {
   const db = getDb();
   const { party_type, party_id, from, to } = req.query;
   const conds = [];
@@ -40,7 +41,7 @@ router.get("/", (req, res) => {
   res.json({ success: true, data: rows });
 });
 
-router.get("/context", (req, res) => {
+router.get("/context", requirePagePermission("payment_methods", "view"), (req, res) => {
   const db = getDb();
   const partyType = req.query.party_type || "customer";
   const partyId = Number(req.query.party_id || 0);
@@ -61,7 +62,7 @@ router.get("/context", (req, res) => {
   });
 });
 
-router.post("/", (req, res, next) => {
+router.post("/", requirePagePermission("payment_methods", "add"), (req, res, next) => {
   const db = getDb();
   const payload = req.body || {};
 

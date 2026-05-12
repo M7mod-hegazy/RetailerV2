@@ -2,6 +2,7 @@ const express = require("express");
 const { getDb } = require("../config/database");
 const { generateDocNumber } = require("../utils/docNumber");
 const { assertCanWriteForDate, normalizeDate } = require("../services/dailySessionService");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 
@@ -59,7 +60,7 @@ function recalcDebt(db, debtId) {
 }
 
 // GET /api/ajal-debts/summary
-router.get("/summary", (req, res) => {
+router.get("/summary", requirePagePermission("installments", "view"), (req, res) => {
   try {
     const db = getDb();
     const partyType = normalizePartyType(req.query.party_type);
@@ -75,7 +76,7 @@ router.get("/summary", (req, res) => {
 });
 
 // GET /api/ajal-debts
-router.get("/", (req, res) => {
+router.get("/", requirePagePermission("installments", "view"), (req, res) => {
   try {
     const db = getDb();
     const today = new Date().toISOString().slice(0, 10);
@@ -110,7 +111,7 @@ router.get("/", (req, res) => {
 });
 
 // GET /api/ajal-debts/customer/:customerId
-router.get("/customer/:customerId", (req, res) => {
+router.get("/customer/:customerId", requirePagePermission("installments", "view"), (req, res) => {
   try {
     const db = getDb();
     const rows = db.prepare(`
@@ -123,7 +124,7 @@ router.get("/customer/:customerId", (req, res) => {
 });
 
 // GET /api/ajal-debts/supplier/:supplierId
-router.get("/supplier/:supplierId", (req, res) => {
+router.get("/supplier/:supplierId", requirePagePermission("installments", "view"), (req, res) => {
   try {
     const db = getDb();
     const rows = db.prepare(`
@@ -140,7 +141,7 @@ router.get("/supplier/:supplierId", (req, res) => {
 });
 
 // GET /api/ajal-debts/:id
-router.get("/:id", (req, res) => {
+router.get("/:id", requirePagePermission("installments", "view"), (req, res) => {
   try {
     const db = getDb();
     const debt = db.prepare(`
@@ -166,7 +167,7 @@ router.get("/:id", (req, res) => {
 });
 
 // POST /api/ajal-debts/:id/pay
-router.post("/:id/pay", (req, res) => {
+router.post("/:id/pay", requirePagePermission("installments", "add"), (req, res) => {
   try {
     const db = getDb();
     const { amount, payments, payment_method_id, notes, payment_date } = req.body || {};
@@ -212,7 +213,7 @@ router.post("/:id/pay", (req, res) => {
 });
 
 // POST /api/ajal-debts/:id/schedule
-router.post("/:id/schedule", (req, res) => {
+router.post("/:id/schedule", requirePagePermission("installments", "add"), (req, res) => {
   try {
     const db = getDb();
     const { installments, frequency = "monthly", start_date } = req.body || {};

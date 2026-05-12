@@ -1,9 +1,10 @@
 const express = require("express");
 const { getDb } = require("../config/database");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 
-router.get("/", (req, res, next) => {
+router.get("/", requirePagePermission("branches", "view"), (req, res, next) => {
   try {
     const db = getDb();
     const showArchived = req.query.archived === 'true';
@@ -17,7 +18,7 @@ router.get("/", (req, res, next) => {
   }
 });
 
-router.post("/", (req, res, next) => {
+router.post("/", requirePagePermission("branches", "add"), (req, res, next) => {
   try {
     const db = getDb();
     const { name } = req.body;
@@ -34,7 +35,7 @@ router.post("/", (req, res, next) => {
   }
 });
 
-router.put("/:id", (req, res, next) => {
+router.put("/:id", requirePagePermission("branches", "edit"), (req, res, next) => {
   try {
     const db = getDb();
     const id = Number(req.params.id);
@@ -52,7 +53,7 @@ router.put("/:id", (req, res, next) => {
   }
 });
 
-router.delete("/:id", (req, res, next) => {
+router.delete("/:id", requirePagePermission("branches", "delete"), (req, res, next) => {
   try {
     const db = getDb();
     const id = Number(req.params.id);

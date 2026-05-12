@@ -1,8 +1,9 @@
 const express = require("express");
+const { requirePagePermission } = require("../middleware/permission");
 const router = express.Router();
 const { getDb } = require("../config/database");
 
-router.get("/", (_req, res) => {
+router.get("/", requirePagePermission("payment_methods", "view"), (_req, res) => {
   try {
     const db = getDb();
     let rows = db.prepare("SELECT * FROM payment_methods ORDER BY id ASC").all();
@@ -50,7 +51,7 @@ router.get("/", (_req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
-router.get("/transactions", (req, res) => {
+router.get("/transactions", requirePagePermission("payment_methods", "view"), (req, res) => {
   try {
     const db = getDb();
     const { from, to, method_id, type, search } = req.query;
@@ -151,7 +152,7 @@ router.get("/transactions", (req, res) => {
   }
 });
 
-router.post("/", (req, res) => {
+router.post("/", requirePagePermission("payment_methods", "add"), (req, res) => {
   try {
     const db = getDb();
     const { name, category = "digital_wallet", icon = "💳", description = "", excludes_from_treasury = 1 } = req.body || {};
@@ -164,7 +165,7 @@ router.post("/", (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
-router.put("/:id", (req, res) => {
+router.put("/:id", requirePagePermission("payment_methods", "edit"), (req, res) => {
   try {
     const db = getDb();
     const method = db.prepare("SELECT is_system FROM payment_methods WHERE id = ?").get(req.params.id);
@@ -177,7 +178,7 @@ router.put("/:id", (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
-router.delete("/:id", (req, res) => {
+router.delete("/:id", requirePagePermission("payment_methods", "delete"), (req, res) => {
   try {
     const db = getDb();
     const method = db.prepare("SELECT is_system, name FROM payment_methods WHERE id = ?").get(req.params.id);

@@ -1,9 +1,10 @@
 const express = require("express");
 const { getDb } = require("../config/database");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 
-router.get("/", (req, res) => {
+router.get("/", requirePagePermission("daily_treasury", "view"), (req, res) => {
   const showArchived = req.query.archived === 'true';
   const query = showArchived
     ? "SELECT * FROM treasuries WHERE is_active = 0 ORDER BY name ASC"
@@ -12,7 +13,7 @@ router.get("/", (req, res) => {
   res.json({ success: true, data: rows });
 });
 
-router.post("/", (req, res) => {
+router.post("/", requirePagePermission("daily_treasury", "add"), (req, res) => {
   const payload = req.body || {};
   const info = getDb()
     .prepare("INSERT INTO treasuries (name, code, balance) VALUES (?, ?, ?)")
@@ -23,7 +24,7 @@ router.post("/", (req, res) => {
   });
 });
 
-router.put("/:id", (req, res) => {
+router.put("/:id", requirePagePermission("daily_treasury", "edit"), (req, res) => {
   const payload = req.body || {};
   getDb()
     .prepare("UPDATE treasuries SET name = ?, code = ?, balance = ? WHERE id = ?")
@@ -31,7 +32,7 @@ router.put("/:id", (req, res) => {
   res.json({ success: true, data: getDb().prepare("SELECT * FROM treasuries WHERE id = ?").get(req.params.id) });
 });
 
-router.delete("/:id", (req, res) => {
+router.delete("/:id", requirePagePermission("daily_treasury", "delete"), (req, res) => {
   try {
     const db = getDb();
     

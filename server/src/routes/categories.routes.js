@@ -1,9 +1,10 @@
 const express = require("express");
 const { getDb } = require("../config/database");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 
-router.get("/", (req, res) => {
+router.get("/", requirePagePermission("categories", "view"), (req, res) => {
   const showArchived = req.query.archived === "true";
   const query = showArchived
     ? "SELECT * FROM item_categories WHERE is_active = 0 ORDER BY CAST(COALESCE(sku_prefix, '0') AS INTEGER) ASC, id ASC"
@@ -12,7 +13,7 @@ router.get("/", (req, res) => {
   res.json({ success: true, data: rows });
 });
 
-router.post("/", (req, res) => {
+router.post("/", requirePagePermission("categories", "add"), (req, res) => {
   const payload = req.body || {};
   const requestedPrefix = String(payload.sku_prefix || "").trim();
   const nextPrefix = requestedPrefix || String(((getDb()
@@ -46,7 +47,7 @@ router.post("/", (req, res) => {
   });
 });
 
-router.put("/:id", (req, res) => {
+router.put("/:id", requirePagePermission("categories", "edit"), (req, res) => {
   const payload = req.body || {};
   const existing = getDb().prepare("SELECT * FROM item_categories WHERE id = ?").get(req.params.id);
   if (!existing) {
@@ -58,7 +59,7 @@ router.put("/:id", (req, res) => {
   res.json({ success: true, data: getDb().prepare("SELECT * FROM item_categories WHERE id = ?").get(req.params.id) });
 });
 
-router.delete("/:id", (req, res) => {
+router.delete("/:id", requirePagePermission("categories", "delete"), (req, res) => {
   const db = getDb();
   const countRow = db.prepare("SELECT COUNT(*) AS c FROM items WHERE category_id = ?").get(req.params.id);
 

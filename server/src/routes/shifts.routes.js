@@ -1,16 +1,17 @@
 const express = require("express");
 const { getDb } = require("../config/database");
 const { authRequired } = require("../middleware/auth");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 router.use(authRequired);
 
-router.get("/current", (_req, res) => {
+router.get("/current", requirePagePermission("pos", "view"), (_req, res) => {
   const current = getDb().prepare("SELECT * FROM shifts WHERE status = 'open' ORDER BY id DESC LIMIT 1").get() || null;
   res.json({ success: true, data: current });
 });
 
-router.post("/open", (req, res, next) => {
+router.post("/open", requirePagePermission("pos", "add"), (req, res, next) => {
   try {
     const db = getDb();
     const existing = db.prepare("SELECT id FROM shifts WHERE status = 'open'").get();
@@ -28,7 +29,7 @@ router.post("/open", (req, res, next) => {
   }
 });
 
-router.post("/close", (req, res, next) => {
+router.post("/close", requirePagePermission("pos", "add"), (req, res, next) => {
   try {
     const db = getDb();
     const shiftId = req.body?.id || db.prepare("SELECT id FROM shifts WHERE status = 'open' ORDER BY id DESC LIMIT 1").get()?.id;
@@ -47,7 +48,7 @@ router.post("/close", (req, res, next) => {
   }
 });
 
-router.post("/pay-in", (req, res, next) => {
+router.post("/pay-in", requirePagePermission("pos", "add"), (req, res, next) => {
   try {
     const db = getDb();
     const shift = db.prepare("SELECT id FROM shifts WHERE status = 'open' ORDER BY id DESC LIMIT 1").get();
@@ -77,7 +78,7 @@ router.post("/pay-in", (req, res, next) => {
   }
 });
 
-router.post("/pay-out", (req, res, next) => {
+router.post("/pay-out", requirePagePermission("pos", "add"), (req, res, next) => {
   try {
     const db = getDb();
     const shift = db.prepare("SELECT id FROM shifts WHERE status = 'open' ORDER BY id DESC LIMIT 1").get();
@@ -107,7 +108,7 @@ router.post("/pay-out", (req, res, next) => {
   }
 });
 
-router.get("/:id/report", (req, res, next) => {
+router.get("/:id/report", requirePagePermission("pos", "view"), (req, res, next) => {
   try {
     const db = getDb();
     const shift = db.prepare("SELECT * FROM shifts WHERE id = ?").get(req.params.id);

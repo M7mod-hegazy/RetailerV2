@@ -1,9 +1,10 @@
 const express = require("express");
 const { getDb } = require("../config/database");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 
-router.get("/", (req, res) => {
+router.get("/", requirePagePermission("units", "view"), (req, res) => {
   const showArchived = req.query.archived === 'true';
   const query = showArchived
     ? "SELECT * FROM units WHERE is_active = 0 ORDER BY name ASC"
@@ -12,7 +13,7 @@ router.get("/", (req, res) => {
   res.json({ success: true, data: rows });
 });
 
-router.post("/", (req, res) => {
+router.post("/", requirePagePermission("units", "add"), (req, res) => {
   const payload = req.body || {};
   const info = getDb().prepare("INSERT INTO units (name, symbol, is_active) VALUES (?, ?, ?)").run(
     payload.name,
@@ -22,7 +23,7 @@ router.post("/", (req, res) => {
   res.status(201).json({ success: true, data: getDb().prepare("SELECT * FROM units WHERE id = ?").get(info.lastInsertRowid) });
 });
 
-router.put("/:id", (req, res) => {
+router.put("/:id", requirePagePermission("units", "edit"), (req, res) => {
   const payload = req.body || {};
   getDb()
     .prepare("UPDATE units SET name = ?, symbol = ?, is_active = ? WHERE id = ?")
@@ -30,7 +31,7 @@ router.put("/:id", (req, res) => {
   res.json({ success: true, data: getDb().prepare("SELECT * FROM units WHERE id = ?").get(req.params.id) });
 });
 
-router.delete("/:id", (req, res) => {
+router.delete("/:id", requirePagePermission("units", "delete"), (req, res) => {
   try {
     const db = getDb();
     

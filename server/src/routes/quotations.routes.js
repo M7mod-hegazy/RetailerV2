@@ -1,6 +1,7 @@
 const express = require("express");
 const { getDb } = require("../config/database");
 const QuotationModel = require("../models/quotation.model");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 
@@ -50,7 +51,7 @@ function buildQuotationPayload(payload = {}) {
   };
 }
 
-router.get("/", (req, res) => {
+router.get("/", requirePagePermission("quotations", "view"), (req, res) => {
   const { search = "", status } = req.query;
   let data = QuotationModel.all();
   if (search) {
@@ -64,7 +65,7 @@ router.get("/", (req, res) => {
   res.json({ success: true, data });
 });
 
-router.get("/:id", (req, res, next) => {
+router.get("/:id", requirePagePermission("quotations", "view"), (req, res, next) => {
   try {
     const quotation = QuotationModel.findById(req.params.id);
     if (!quotation) {
@@ -78,7 +79,7 @@ router.get("/:id", (req, res, next) => {
   }
 });
 
-router.post("/", (req, res, next) => {
+router.post("/", requirePagePermission("quotations", "add"), (req, res, next) => {
   try {
     res.status(201).json({ success: true, data: QuotationModel.create(buildQuotationPayload(req.body || {})) });
   } catch (error) {
@@ -86,7 +87,7 @@ router.post("/", (req, res, next) => {
   }
 });
 
-router.put("/:id", (req, res, next) => {
+router.put("/:id", requirePagePermission("quotations", "edit"), (req, res, next) => {
   try {
     const existing = QuotationModel.findById(req.params.id);
     if (!existing) {
@@ -105,7 +106,7 @@ router.put("/:id", (req, res, next) => {
   }
 });
 
-router.patch("/:id/send", (req, res, next) => {
+router.patch("/:id/send", requirePagePermission("quotations", "edit"), (req, res, next) => {
   try {
     const q = QuotationModel.findById(req.params.id);
     if (!q) { const e = new Error("Quotation not found"); e.status = 404; throw e; }
@@ -115,7 +116,7 @@ router.patch("/:id/send", (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-router.delete("/:id", (req, res, next) => {
+router.delete("/:id", requirePagePermission("quotations", "delete"), (req, res, next) => {
   try {
     const db = getDb();
     const q = QuotationModel.findById(req.params.id);
@@ -127,7 +128,7 @@ router.delete("/:id", (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-router.post("/:id/duplicate", (req, res, next) => {
+router.post("/:id/duplicate", requirePagePermission("quotations", "add"), (req, res, next) => {
   try {
     const original = QuotationModel.findById(req.params.id);
     if (!original) { const e = new Error("Quotation not found"); e.status = 404; throw e; }
@@ -150,7 +151,7 @@ router.post("/:id/duplicate", (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-router.post("/:id/convert-to-invoice", (req, res, next) => {
+router.post("/:id/convert-to-invoice", requirePagePermission("quotations", "add"), (req, res, next) => {
   try {
     const db = getDb();
     const quotation = QuotationModel.findById(req.params.id);

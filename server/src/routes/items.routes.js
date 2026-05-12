@@ -1,5 +1,6 @@
 const express = require("express");
 const { getDb } = require("../config/database");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 
@@ -177,7 +178,7 @@ function getItemsList(search = "", categoryId = null, includeDeleted = false) {
   return withImages(rows);
 }
 
-router.get("/", (req, res) => {
+router.get("/", requirePagePermission("items", "view"), (req, res) => {
   const search = String(req.query.search || "").trim();
   const categoryId = req.query.category_id ? Number(req.query.category_id) : null;
   const includeDeleted = req.query.include_deleted === "1" || req.query.include_deleted === "true";
@@ -185,7 +186,7 @@ router.get("/", (req, res) => {
   res.json({ success: true, data: rows });
 });
 
-router.get("/search/detailed", (req, res) => {
+router.get("/search/detailed", requirePagePermission("items", "view"), (req, res) => {
   const query = String(req.query.q || "").trim().toLowerCase();
   const limit = Math.min(Math.max(Number(req.query.limit || 30), 1), 200);
   const allItems = getItemsList("");
@@ -203,14 +204,14 @@ router.get("/search/detailed", (req, res) => {
   res.json({ success: true, data: filtered.slice(0, limit) });
 });
 
-router.get("/barcode/:barcode", (req, res) => {
+router.get("/barcode/:barcode", requirePagePermission("items", "view"), (req, res) => {
   const row = getDb().prepare("SELECT * FROM items WHERE barcode = ?").get(req.params.barcode);
   if (!row) return res.status(404).json({ success: false, message: "Item not found" });
   const item = withImages([row])[0];
   return res.json({ success: true, data: item });
 });
 
-router.post("/", (req, res) => {
+router.post("/", requirePagePermission("items", "add"), (req, res) => {
   const payload = req.body || {};
   const categoryId = payload.category_id ? Number(payload.category_id) : null;
   const sku = computeCodeAndSequence({
@@ -250,7 +251,7 @@ router.post("/", (req, res) => {
   return res.status(201).json({ success: true, data: withImages([row])[0] });
 });
 
-router.put("/:id", (req, res) => {
+router.put("/:id", requirePagePermission("items", "edit"), (req, res) => {
   const payload = req.body || {};
   const id = Number(req.params.id);
   const existing = getDb().prepare("SELECT * FROM items WHERE id = ?").get(id);
@@ -305,7 +306,7 @@ router.put("/:id", (req, res) => {
 });
 
 // Swap the code and sku_sequence of two items (same category, adjacent positions)
-router.post("/:id/swap/:otherId", (req, res) => {
+router.post("/:id/swap/:otherId", requirePagePermission("items", "add"), (req, res) => {
   const db = getDb();
   const a = db.prepare("SELECT id, code, sku_sequence FROM items WHERE id = ?").get(req.params.id);
   const b = db.prepare("SELECT id, code, sku_sequence FROM items WHERE id = ?").get(req.params.otherId);
@@ -322,7 +323,7 @@ router.post("/:id/swap/:otherId", (req, res) => {
 });
 
 // Reorder all items in a category — reassigns codes and sku_sequence in the given order
-router.post("/reorder", (req, res) => {
+router.post("/reorder", requirePagePermission("items", "add"), (req, res) => {
   const { category_id, ordered_ids } = req.body || {};
   if (!category_id || !Array.isArray(ordered_ids) || !ordered_ids.length) {
     return res.status(400).json({ success: false, message: "category_id and ordered_ids are required" });
@@ -342,7 +343,7 @@ router.post("/reorder", (req, res) => {
   return res.json({ success: true });
 });
 
-router.delete("/:id", (req, res) => {
+router.delete("/:id", requirePagePermission("items", "delete"), (req, res) => {
   try {
     const existing = getDb().prepare("SELECT id FROM items WHERE id = ?").get(req.params.id);
     if (!existing) return res.status(404).json({ success: false, message: "الصنف غير موجود" });
@@ -353,7 +354,7 @@ router.delete("/:id", (req, res) => {
   }
 });
 
-router.post("/:id/restore", (req, res) => {
+router.post("/:id/restore", requirePagePermission("items", "add"), (req, res) => {
   try {
     const existing = getDb().prepare("SELECT id FROM items WHERE id = ?").get(req.params.id);
     if (!existing) return res.status(404).json({ success: false, message: "الصنف غير موجود" });
@@ -582,7 +583,7 @@ function updateSmartItem(db, id, rawPayload, createCategories) {
   setImportedStockLevel(db, Number(id), payload);
 }
 
-router.post("/import", (req, res, next) => {
+router.post("/import", requirePagePermission("items", "add"), (req, res, next) => {
   const db = getDb();
   const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
   const overwriteExisting = req.body?.overwrite_existing === true;
@@ -725,7 +726,7 @@ router.post("/import", (req, res, next) => {
   }
 });
 
-router.post("/bulk-update", (req, res, next) => {
+router.post("/bulk-update", requirePagePermission("items", "add"), (req, res, next) => {
   const db = getDb();
   const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
   const createCategories = req.body?.create_categories !== false;
@@ -773,7 +774,7 @@ function calcNewPrice(oldPrice, direction, adjustment_type, value) {
     : Math.max(0, Math.round((oldPrice + signed) * 100) / 100);
 }
 
-router.post("/bulk-price-update", (req, res, next) => {
+router.post("/bulk-price-update", requirePagePermission("items", "add"), (req, res, next) => {
   const db = getDb();
   try {
     const { item_ids, adjustment_type, adjustment_value, direction = "up", price_field = "retail_price", reason = "" } = req.body;
@@ -812,7 +813,7 @@ router.post("/bulk-price-update", (req, res, next) => {
   }
 });
 
-router.post("/bulk-price-rollback", (req, res, next) => {
+router.post("/bulk-price-rollback", requirePagePermission("items", "add"), (req, res, next) => {
   const db = getDb();
   try {
     const { operation_id } = req.body;
@@ -834,7 +835,7 @@ router.post("/bulk-price-rollback", (req, res, next) => {
   }
 });
 
-router.get("/bulk-price-history", (req, res, next) => {
+router.get("/bulk-price-history", requirePagePermission("items", "view"), (req, res, next) => {
   const db = getDb();
   try {
     const rows = db.prepare(`
@@ -851,7 +852,7 @@ router.get("/bulk-price-history", (req, res, next) => {
   }
 });
 
-router.get("/bulk-price-history/:operationId/items", (req, res, next) => {
+router.get("/bulk-price-history/:operationId/items", requirePagePermission("items", "view"), (req, res, next) => {
   const db = getDb();
   try {
     const rows = db.prepare(`

@@ -2,16 +2,17 @@ const express = require("express");
 const { getDb } = require("../config/database");
 const { generateDocNumber } = require("../utils/docNumber");
 const { normalizeDate } = require("../services/dailySessionService");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 
 // ── Categories ─────────────────────────────────────────────────────────────
 
-router.get("/categories", (_req, res) => {
+router.get("/categories", requirePagePermission("withdrawals", "view"), (_req, res) => {
   res.json({ success: true, data: getDb().prepare("SELECT * FROM withdrawal_categories ORDER BY name ASC").all() });
 });
 
-router.post("/categories", (req, res) => {
+router.post("/categories", requirePagePermission("withdrawals", "add"), (req, res) => {
   const { name, description } = req.body || {};
   if (!name?.trim()) return res.status(400).json({ success: false, message: "الاسم مطلوب" });
   try {
@@ -20,7 +21,7 @@ router.post("/categories", (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
-router.put("/categories/:id", (req, res) => {
+router.put("/categories/:id", requirePagePermission("withdrawals", "edit"), (req, res) => {
   const { name, description } = req.body || {};
   if (!name?.trim()) return res.status(400).json({ success: false, message: "الاسم مطلوب" });
   try {
@@ -29,7 +30,7 @@ router.put("/categories/:id", (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
-router.delete("/categories/:id", (req, res) => {
+router.delete("/categories/:id", requirePagePermission("withdrawals", "delete"), (req, res) => {
   try {
     const inUse = getDb().prepare("SELECT COUNT(*) AS c FROM withdrawals WHERE category_id = ?").get(req.params.id);
     if (inUse.c > 0) return res.status(409).json({ success: false, message: "لا يمكن حذف التصنيف لأنه مستخدم في مسحوبات مسجلة" });
@@ -40,7 +41,7 @@ router.delete("/categories/:id", (req, res) => {
 
 // ── Withdrawals ────────────────────────────────────────────────────────────
 
-router.get("/", (req, res) => {
+router.get("/", requirePagePermission("withdrawals", "view"), (req, res) => {
   const { date_from, date_to, category_id, search = "" } = req.query;
   const db = getDb();
   const conds = ["1=1"];
@@ -62,7 +63,7 @@ router.get("/", (req, res) => {
   });
 });
 
-router.post("/", (req, res) => {
+router.post("/", requirePagePermission("withdrawals", "add"), (req, res) => {
   const payload = req.body || {};
   const db = getDb();
   if (!payload.amount || Number(payload.amount) <= 0)
@@ -86,7 +87,7 @@ router.post("/", (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
-router.put("/:id", (req, res) => {
+router.put("/:id", requirePagePermission("withdrawals", "edit"), (req, res) => {
   const payload = req.body || {};
   const db = getDb();
   try {
@@ -96,7 +97,7 @@ router.put("/:id", (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
-router.delete("/:id", (req, res) => {
+router.delete("/:id", requirePagePermission("withdrawals", "delete"), (req, res) => {
   try {
     getDb().prepare("DELETE FROM withdrawals WHERE id = ?").run(req.params.id);
     res.json({ success: true });

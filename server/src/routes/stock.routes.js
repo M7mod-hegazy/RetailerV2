@@ -2,6 +2,7 @@ const express = require("express");
 const { getDb } = require("../config/database");
 const { transferStock } = require("../services/stockTransferService");
 const { adjustStock } = require("../services/stockService");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 
@@ -35,7 +36,7 @@ function getSessionWithLines(db, sessionId) {
   return { ...session, lines };
 }
 
-router.get("/levels", (req, res) => {
+router.get("/levels", requirePagePermission("stock_transfer", "view"), (req, res) => {
   const warehouseId = req.query.warehouse_id ? Number(req.query.warehouse_id) : null;
   const search = String(req.query.search || "").trim();
   const params = [];
@@ -98,7 +99,7 @@ router.get("/levels", (req, res) => {
   res.json({ success: true, data });
 });
 
-router.get("/movements", (req, res) => {
+router.get("/movements", requirePagePermission("stock_transfer", "view"), (req, res) => {
   const db = getDb();
   const {
     warehouse_id,
@@ -150,7 +151,7 @@ router.get("/movements", (req, res) => {
   res.json({ success: true, data: rows, total, limit: Number(limit), offset: Number(offset) });
 });
 
-router.get("/movements/:id", (req, res, next) => {
+router.get("/movements/:id", requirePagePermission("stock_transfer", "view"), (req, res, next) => {
   try {
     const db = getDb();
     const movement = db
@@ -169,7 +170,7 @@ router.get("/movements/:id", (req, res, next) => {
   }
 });
 
-router.put("/movements/:id", (req, res, next) => {
+router.put("/movements/:id", requirePagePermission("stock_transfer", "edit"), (req, res, next) => {
   try {
     const db = getDb();
     const id = Number(req.params.id);
@@ -185,7 +186,7 @@ router.put("/movements/:id", (req, res, next) => {
   }
 });
 
-router.delete("/movements/:id", (req, res, next) => {
+router.delete("/movements/:id", requirePagePermission("stock_transfer", "delete"), (req, res, next) => {
   const db = getDb();
   try {
     const id = Number(req.params.id);
@@ -210,7 +211,7 @@ router.delete("/movements/:id", (req, res, next) => {
   }
 });
 
-router.post("/transfer", (req, res, next) => {
+router.post("/transfer", requirePagePermission("stock_transfer", "add"), (req, res, next) => {
   try {
     const { item_id, from_warehouse_id, to_warehouse_id, quantity, notes } = req.body || {};
     const result = transferStock({ item_id, from_warehouse_id, to_warehouse_id, quantity, notes });
@@ -220,7 +221,7 @@ router.post("/transfer", (req, res, next) => {
   }
 });
 
-router.post("/transfer/bulk", (req, res, next) => {
+router.post("/transfer/bulk", requirePagePermission("stock_transfer", "add"), (req, res, next) => {
   try {
     const { from_warehouse_id, to_warehouse_id, items, notes } = req.body || {};
     if (!Array.isArray(items) || !items.length) {
@@ -243,7 +244,7 @@ router.post("/transfer/bulk", (req, res, next) => {
   }
 });
 
-router.post("/adjust", (req, res, next) => {
+router.post("/adjust", requirePagePermission("stock_transfer", "add"), (req, res, next) => {
   const db = getDb();
   try {
     // Guard: ensure before_qty/after_qty columns exist
@@ -287,7 +288,7 @@ router.post("/adjust", (req, res, next) => {
 
 // ─── Physical Count ───────────────────────────────────────────────────────────
 
-router.get("/physical-count/sessions", (req, res, next) => {
+router.get("/physical-count/sessions", requirePagePermission("stock_transfer", "view"), (req, res, next) => {
   try {
     const db = getDb();
     const sessions = db
@@ -310,7 +311,7 @@ router.get("/physical-count/sessions", (req, res, next) => {
   }
 });
 
-router.post("/physical-count/sessions", (req, res, next) => {
+router.post("/physical-count/sessions", requirePagePermission("stock_transfer", "add"), (req, res, next) => {
   const db = getDb();
 
   try {
@@ -399,7 +400,7 @@ router.post("/physical-count/sessions", (req, res, next) => {
   }
 });
 
-router.get("/physical-count/sessions/:id", (req, res, next) => {
+router.get("/physical-count/sessions/:id", requirePagePermission("stock_transfer", "view"), (req, res, next) => {
   try {
     const session = getSessionWithLines(getDb(), Number(req.params.id));
     if (!session) {
@@ -413,7 +414,7 @@ router.get("/physical-count/sessions/:id", (req, res, next) => {
   }
 });
 
-router.delete("/physical-count/sessions/:id", (req, res, next) => {
+router.delete("/physical-count/sessions/:id", requirePagePermission("stock_transfer", "delete"), (req, res, next) => {
   const db = getDb();
   try {
     const sessionId = Number(req.params.id);
@@ -437,7 +438,7 @@ router.delete("/physical-count/sessions/:id", (req, res, next) => {
   }
 });
 
-router.post("/physical-count/sessions/:id/lines", (req, res, next) => {
+router.post("/physical-count/sessions/:id/lines", requirePagePermission("stock_transfer", "add"), (req, res, next) => {
   const db = getDb();
 
   try {
@@ -493,7 +494,7 @@ router.post("/physical-count/sessions/:id/lines", (req, res, next) => {
   }
 });
 
-router.post("/physical-count/sessions/:id/confirm", (req, res, next) => {
+router.post("/physical-count/sessions/:id/confirm", requirePagePermission("stock_transfer", "add"), (req, res, next) => {
   const db = getDb();
 
   try {

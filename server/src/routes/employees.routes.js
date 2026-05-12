@@ -1,9 +1,10 @@
 const express = require("express");
 const { getDb } = require("../config/database");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 
-router.get("/", (req, res) => {
+router.get("/", requirePagePermission("employees", "view"), (req, res) => {
   const showArchived = req.query.archived === 'true';
   const query = showArchived
     ? "SELECT * FROM employees WHERE is_active = 0 ORDER BY id DESC"
@@ -12,7 +13,7 @@ router.get("/", (req, res) => {
   res.json({ success: true, data: rows });
 });
 
-router.post("/", (req, res) => {
+router.post("/", requirePagePermission("employees", "add"), (req, res) => {
   const payload = req.body || {};
   const info = getDb()
     .prepare("INSERT INTO employees (name, role, phone, is_active) VALUES (?, ?, ?, ?)")
@@ -23,7 +24,7 @@ router.post("/", (req, res) => {
   });
 });
 
-router.put("/:id", (req, res, next) => {
+router.put("/:id", requirePagePermission("employees", "edit"), (req, res, next) => {
   try {
     const payload = req.body || {};
     const db = getDb();
@@ -46,7 +47,7 @@ router.put("/:id", (req, res, next) => {
   }
 });
 
-router.delete("/:id", (req, res) => {
+router.delete("/:id", requirePagePermission("employees", "delete"), (req, res) => {
   try {
     const db = getDb();
     
@@ -73,7 +74,7 @@ router.delete("/:id", (req, res) => {
   }
 });
 
-router.post("/:id/adjustments", (req, res) => {
+router.post("/:id/adjustments", requirePagePermission("employees", "add"), (req, res) => {
   const payload = req.body || {};
   const amount = Number(payload.amount || 0);
 
@@ -99,7 +100,7 @@ router.post("/:id/adjustments", (req, res) => {
   });
 });
 
-router.get("/:id/adjustments", (req, res) => {
+router.get("/:id/adjustments", requirePagePermission("employees", "view"), (req, res) => {
   const rows = getDb().prepare("SELECT * FROM employee_adjustments WHERE employee_id = ? ORDER BY id DESC").all(req.params.id);
   res.json({ success: true, data: rows });
 });

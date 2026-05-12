@@ -2,10 +2,11 @@ const express = require("express");
 const { getDb } = require("../config/database");
 const { adjustStock } = require("../services/stockService");
 const { generateDocNumber } = require("../utils/docNumber");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 
-router.get("/", (req, res) => {
+router.get("/", requirePagePermission("purchase_orders", "view"), (req, res) => {
   const db = getDb();
   const { search = "", status } = req.query;
   const conditions = ["1=1"];
@@ -25,7 +26,7 @@ router.get("/", (req, res) => {
   res.json({ success: true, data: orders });
 });
 
-router.get("/:id", (req, res, next) => {
+router.get("/:id", requirePagePermission("purchase_orders", "view"), (req, res, next) => {
   try {
     const db = getDb();
     const order = db.prepare(`
@@ -54,7 +55,7 @@ router.get("/:id", (req, res, next) => {
   }
 });
 
-router.post("/", (req, res) => {
+router.post("/", requirePagePermission("purchase_orders", "add"), (req, res) => {
   const db = getDb();
   const payload = req.body || {};
   const docNo = generateDocNumber('purchase_order');
@@ -74,7 +75,7 @@ router.post("/", (req, res) => {
   });
 });
 
-router.patch("/:id/approve", (req, res, next) => {
+router.patch("/:id/approve", requirePagePermission("purchase_orders", "edit"), (req, res, next) => {
   try {
     getDb().prepare("UPDATE purchase_orders SET status = 'approved' WHERE id = ?").run(req.params.id);
     res.json({ success: true, data: getDb().prepare("SELECT * FROM purchase_orders WHERE id = ?").get(req.params.id) });
@@ -83,7 +84,7 @@ router.patch("/:id/approve", (req, res, next) => {
   }
 });
 
-router.patch("/:id/cancel", (req, res, next) => {
+router.patch("/:id/cancel", requirePagePermission("purchase_orders", "edit"), (req, res, next) => {
   try {
     const db = getDb();
     const order = db.prepare("SELECT * FROM purchase_orders WHERE id = ?").get(req.params.id);
@@ -96,7 +97,7 @@ router.patch("/:id/cancel", (req, res, next) => {
   }
 });
 
-router.patch("/:id/receive", (req, res, next) => {
+router.patch("/:id/receive", requirePagePermission("purchase_orders", "edit"), (req, res, next) => {
   const db = getDb();
 
   try {

@@ -1,5 +1,6 @@
 const express = require("express");
 const { getDb } = require("../config/database");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 
@@ -17,7 +18,7 @@ router.use((_req, _res, next) => {
   }
 });
 
-router.get("/", (req, res) => {
+router.get("/", requirePagePermission("banks", "view"), (req, res) => {
   const showArchived = req.query.archived === 'true';
   const query = showArchived
     ? "SELECT * FROM banks WHERE is_active = 0 ORDER BY name ASC"
@@ -26,7 +27,7 @@ router.get("/", (req, res) => {
   res.json({ success: true, data: rows });
 });
 
-router.post("/", (req, res) => {
+router.post("/", requirePagePermission("banks", "add"), (req, res) => {
   const payload = req.body || {};
   const info = getDb()
     .prepare("INSERT INTO banks (name, code, balance, alert_threshold) VALUES (?, ?, ?, ?)")
@@ -34,14 +35,14 @@ router.post("/", (req, res) => {
   res.status(201).json({ success: true, data: getDb().prepare("SELECT * FROM banks WHERE id = ?").get(info.lastInsertRowid) });
 });
 
-router.put("/:id", (req, res) => {
+router.put("/:id", requirePagePermission("banks", "edit"), (req, res) => {
   const payload = req.body || {};
   getDb().prepare("UPDATE banks SET name = ?, code = ?, alert_threshold = ? WHERE id = ?")
     .run(payload.name, payload.code || null, Number(payload.alert_threshold || 0), req.params.id);
   res.json({ success: true, data: getDb().prepare("SELECT * FROM banks WHERE id = ?").get(req.params.id) });
 });
 
-router.delete("/:id", (req, res) => {
+router.delete("/:id", requirePagePermission("banks", "delete"), (req, res) => {
   try {
     const db = getDb();
     
@@ -69,7 +70,7 @@ router.delete("/:id", (req, res) => {
 });
 
 // POST /api/banks/transfer
-router.post("/transfer", (req, res) => {
+router.post("/transfer", requirePagePermission("banks", "add"), (req, res) => {
   try {
     const db = getDb();
     const { from_id, to_id, amount, notes } = req.body || {};
@@ -101,7 +102,7 @@ router.post("/transfer", (req, res) => {
 });
 
 // PATCH /api/banks/transactions/:id/reconcile
-router.patch("/transactions/:id/reconcile", (req, res) => {
+router.patch("/transactions/:id/reconcile", requirePagePermission("banks", "edit"), (req, res) => {
   try {
     const db = getDb();
     const tx = db.prepare("SELECT * FROM bank_transactions WHERE id = ?").get(req.params.id);
@@ -113,7 +114,7 @@ router.patch("/transactions/:id/reconcile", (req, res) => {
 });
 
 // GET /api/banks/:id/balance
-router.get("/:id/balance", (req, res) => {
+router.get("/:id/balance", requirePagePermission("banks", "view"), (req, res) => {
   try {
     const bank = getDb().prepare("SELECT id, name, balance FROM banks WHERE id = ?").get(req.params.id);
     if (!bank) return res.status(404).json({ success: false, message: "البنك غير موجود" });
@@ -122,7 +123,7 @@ router.get("/:id/balance", (req, res) => {
 });
 
 // GET /api/banks/:id/transactions
-router.get("/:id/transactions", (req, res) => {
+router.get("/:id/transactions", requirePagePermission("banks", "view"), (req, res) => {
   try {
     const db = getDb();
     const { from, to, limit = 100 } = req.query;
@@ -139,7 +140,7 @@ router.get("/:id/transactions", (req, res) => {
 });
 
 // POST /api/banks/:id/deposit
-router.post("/:id/deposit", (req, res) => {
+router.post("/:id/deposit", requirePagePermission("banks", "add"), (req, res) => {
   try {
     const db = getDb();
     const { amount, reference, notes } = req.body || {};
@@ -154,7 +155,7 @@ router.post("/:id/deposit", (req, res) => {
 });
 
 // POST /api/banks/:id/withdraw
-router.post("/:id/withdraw", (req, res) => {
+router.post("/:id/withdraw", requirePagePermission("banks", "add"), (req, res) => {
   try {
     const db = getDb();
     const { amount, reference, notes } = req.body || {};

@@ -1,12 +1,13 @@
 const express = require("express");
 const fs = require("fs");
 const { getDb } = require("../config/database");
-const { listRows } = require("../reports/index");
-const { REPORT_REGISTRY } = require("../reports/registry");
+const { listRows, listRowsBySource } = require("../reports/index");
+const { REPORT_REGISTRY, getSource, getSourceClassifications } = require("../reports/registry");
 const { buildColumnsFromRows } = require("../reports/helpers");
 const { getReportColumns, getReportTitle, normalizeStructuredReport } = require("../reports/columns");
 const { exportRowsToExcelV2, exportRowsToPdfV3, exportRowsToDocx } = require("../services/exportService");
 const { authRequired } = require("../middleware/auth");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 router.use(authRequired);
@@ -102,7 +103,7 @@ function hydrateReportDefinition(report) {
 }
 
 // GET /api/reports/registry — return all report definitions
-router.get("/registry", (_req, res) => {
+router.get("/registry", requirePagePermission("reports", "view"), (_req, res) => {
   res.json({
     success: true,
     data: {
@@ -113,7 +114,7 @@ router.get("/registry", (_req, res) => {
 });
 
 // GET /api/reports/registry/:slug — return single report definition
-router.get("/registry/:slug", (req, res) => {
+router.get("/registry/:slug", requirePagePermission("reports", "view"), (req, res) => {
   const report = REPORT_REGISTRY.reports.find((r) => r.slug === req.params.slug);
   if (!report) return res.status(404).json({ success: false, message: "Report not found" });
   res.json({ success: true, data: hydrateReportDefinition(report) });
@@ -121,7 +122,7 @@ router.get("/registry/:slug", (req, res) => {
 
 // GET /api/reports/run/:slug — execute a report with optional filters
 // Query params: start_date, end_date, page, pageSize, cost_method, plus per-report filters
-router.get("/run/:slug", (req, res, next) => {
+router.get("/run/:slug", requirePagePermission("reports", "view"), (req, res, next) => {
   try {
     const { start_date, end_date, page, pageSize } = req.query;
     const slug = req.params.slug;
@@ -163,7 +164,7 @@ router.get("/run/:slug", (req, res, next) => {
 });
 
 // GET /api/reports/export-slug/:slug — export any report by slug
-router.get("/export-slug/:slug", async (req, res, next) => {
+router.get("/export-slug/:slug", requirePagePermission("reports", "print"), async (req, res, next) => {
   try {
     const { start_date, end_date, format } = req.query;
     const slug = String(req.params.slug || "");
@@ -214,7 +215,7 @@ router.get("/export-slug/:slug", async (req, res, next) => {
 });
 
 // GET /api/reports/export-rows-stream — direct stream export (backward compat)
-router.get("/export-rows-stream", async (req, res, next) => {
+router.get("/export-rows-stream", requirePagePermission("reports", "print"), async (req, res, next) => {
   try {
     const { rows: rawRows, format, title, columns } = req.query;
     const rows = rawRows ? JSON.parse(rawRows) : [];
@@ -239,6 +240,76 @@ router.get("/export-rows-stream", async (req, res, next) => {
     res.send(buffer);
     res.on("finish", () => { try { fs.unlinkSync(filePath); } catch {} });
   } catch (error) { next(error); }
+});
+
+// GET /api/reports/source/:sourceKey/run — run a specific classification within a source
+// Query params: classification (required), dataMode (detailed|summary), start_date, end_date, plus per-classification filters
+router.get("/source/:sourceKey/run", requirePagePermission("reports", "view"), (req, res, next) => {
+  try {
+    const { sourceKey } = req.params;
+    const { classification, dataMode, start_date, end_date, page, pageSize, ...rest } = req.query;
+
+    const source = getSource(sourceKey);
+    if (!source) return res.status(404).json({ success: false, message: `Source '${sourceKey}' not found` });
+
+    const classes = getSourceClassifications(sourceKey);
+    const clsDef = classes.find((c) => c.id === classification);
+    if (!clsDef) return res.status(404).json({ success: false, message: `Classification '${classification}' not found in source '${sourceKey}'` });
+
+    const mode = dataMode === "summary" ? "summary" : "detailed";
+    if (!clsDef.availableModes.includes(mode)) {
+      return res.status(400).json({ success: false, message: `Data mode '${mode}' not available for this classification` });
+    }
+
+    const opts = buildOpts(req.query);
+
+    // Handle multi-select filters (comma-separated values)
+    if (clsDef.multiSelectFilters) {
+      clsDef.multiSelectFilters.forEach((msf) => {
+        const raw = req.query[msf.key];
+        if (raw) opts[msf.key] = raw.split(",").map((v) => v.trim()).filter(Boolean);
+      });
+    }
+
+    let data = listRowsBySource(sourceKey, classification, mode, start_date, end_date, opts);
+    const normalized = normalizeReportPayload(data);
+    let rows = normalized.rows;
+    rows = applyRowFilters(rows, opts);
+
+    const total = rows.length;
+    const p = Math.max(1, parseInt(page) || 1);
+    const ps = Math.min(500, Math.max(1, parseInt(pageSize) || 50));
+    const paginated = rows.slice((p - 1) * ps, p * ps);
+    const columns = getReportColumns(clsDef.detailedQuery || clsDef.summaryQuery, rows.length ? rows : paginated);
+    const totals = computeTotals(rows, columns);
+
+    res.json({
+      success: true,
+      data: paginated,
+      columns,
+      sections: normalized.sections,
+      summary: normalized.summary,
+      total,
+      page: p,
+      pageSize: ps,
+      totals,
+      title: getReportTitle(clsDef.detailedQuery || clsDef.summaryQuery, classification),
+      source: sourceKey,
+      classification,
+      dataMode: mode,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/reports/source/:sourceKey/classifications — list classifications for a source
+router.get("/source/:sourceKey/classifications", requirePagePermission("reports", "view"), (req, res) => {
+  const { sourceKey } = req.params;
+  const source = getSource(sourceKey);
+  if (!source) return res.status(404).json({ success: false, message: `Source '${sourceKey}' not found` });
+  const classes = getSourceClassifications(sourceKey);
+  res.json({ success: true, data: { source, classifications: classes } });
 });
 
 module.exports = router;

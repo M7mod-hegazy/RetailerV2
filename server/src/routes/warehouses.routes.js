@@ -1,9 +1,10 @@
 const express = require("express");
 const { getDb } = require("../config/database");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 
-router.get("/", (req, res) => {
+router.get("/", requirePagePermission("warehouses", "view"), (req, res) => {
   const showArchived = req.query.archived === 'true';
   const query = showArchived
     ? "SELECT * FROM warehouses WHERE is_active = 0 ORDER BY name ASC"
@@ -12,7 +13,7 @@ router.get("/", (req, res) => {
   res.json({ success: true, data: rows });
 });
 
-router.post("/", (req, res) => {
+router.post("/", requirePagePermission("warehouses", "add"), (req, res) => {
   const payload = req.body || {};
   const info = getDb()
     .prepare("INSERT INTO warehouses (name, code, is_default) VALUES (?, ?, ?)")
@@ -28,7 +29,7 @@ router.post("/", (req, res) => {
   });
 });
 
-router.put("/:id", (req, res) => {
+router.put("/:id", requirePagePermission("warehouses", "edit"), (req, res) => {
   const payload = req.body || {};
   getDb()
     .prepare("UPDATE warehouses SET name = ?, code = ?, is_default = ? WHERE id = ?")
@@ -39,7 +40,7 @@ router.put("/:id", (req, res) => {
   res.json({ success: true, data: getDb().prepare("SELECT * FROM warehouses WHERE id = ?").get(req.params.id) });
 });
 
-router.delete("/:id", (req, res) => {
+router.delete("/:id", requirePagePermission("warehouses", "delete"), (req, res) => {
   try {
     const db = getDb();
     

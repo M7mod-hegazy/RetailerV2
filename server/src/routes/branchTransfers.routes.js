@@ -1,11 +1,12 @@
 const express = require("express");
 const { getDb } = require("../config/database");
 const { adjustStock } = require("../services/stockService");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 
 // GET /api/branch-transfers
-router.get("/", (req, res, next) => {
+router.get("/", requirePagePermission("branch_transfer", "view"), (req, res, next) => {
   try {
     const db = getDb();
     const { date_from, date_to, type, search } = req.query;
@@ -41,7 +42,7 @@ router.get("/", (req, res, next) => {
 });
 
 // GET /api/branch-transfers/:id
-router.get("/:id", (req, res, next) => {
+router.get("/:id", requirePagePermission("branch_transfer", "view"), (req, res, next) => {
   try {
     const db = getDb();
     const id = Number(req.params.id);
@@ -70,7 +71,7 @@ router.get("/:id", (req, res, next) => {
 });
 
 // POST /api/branch-transfers
-router.post("/", (req, res, next) => {
+router.post("/", requirePagePermission("branch_transfer", "add"), (req, res, next) => {
   const db = getDb();
   try {
     const { type, warehouse_id, partner_branch, notes, items } = req.body || {};

@@ -1,9 +1,10 @@
 const express = require("express");
 const PromotionModel = require("../models/promotion.model");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 
-router.get("/", (req, res, next) => {
+router.get("/", requirePagePermission("promotions", "view"), (req, res, next) => {
   try {
     res.json({ success: true, data: PromotionModel.list() });
   } catch (err) {
@@ -11,7 +12,7 @@ router.get("/", (req, res, next) => {
   }
 });
 
-router.post("/", (req, res, next) => {
+router.post("/", requirePagePermission("promotions", "add"), (req, res, next) => {
   try {
     const { name, rule_json, starts_at, ends_at, is_active } = req.body;
     
@@ -26,7 +27,7 @@ router.post("/", (req, res, next) => {
   }
 });
 
-router.put("/:id", (req, res, next) => {
+router.put("/:id", requirePagePermission("promotions", "edit"), (req, res, next) => {
   try {
     const { name, rule_json, starts_at, ends_at, is_active } = req.body;
     const updatedRow = PromotionModel.update(req.params.id, { name, rule_json, starts_at, ends_at, is_active });
@@ -36,7 +37,7 @@ router.put("/:id", (req, res, next) => {
   }
 });
 
-router.delete("/:id", (req, res, next) => {
+router.delete("/:id", requirePagePermission("promotions", "delete"), (req, res, next) => {
   try {
     PromotionModel.remove(req.params.id);
     res.json({ success: true });
@@ -45,7 +46,7 @@ router.delete("/:id", (req, res, next) => {
   }
 });
 
-router.patch("/:id/toggle", (req, res, next) => {
+router.patch("/:id/toggle", requirePagePermission("promotions", "edit"), (req, res, next) => {
   try {
     const updatedRow = PromotionModel.toggle(req.params.id);
     res.json({ success: true, data: updatedRow });
@@ -55,7 +56,7 @@ router.patch("/:id/toggle", (req, res, next) => {
 });
 
 // A utility endpoint to match promotions against a given cart
-router.post("/evaluate", (req, res, next) => {
+router.post("/evaluate", requirePagePermission("promotions", "add"), (req, res, next) => {
   try {
     const { lines } = req.body; // e.g. [{ item_id, quantity, unit_price }]
     res.json({ success: true, data: PromotionModel.evaluateCart(Array.isArray(lines) ? lines : []) });

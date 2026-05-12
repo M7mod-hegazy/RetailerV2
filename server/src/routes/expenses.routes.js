@@ -2,14 +2,15 @@ const express = require("express");
 const { getDb } = require("../config/database");
 const { generateDocNumber } = require("../utils/docNumber");
 const { assertCanWriteForDate, normalizeDate } = require("../services/dailySessionService");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 
-router.get("/categories", (_req, res) => {
+router.get("/categories", requirePagePermission("expenses", "view"), (_req, res) => {
   res.json({ success: true, data: getDb().prepare("SELECT * FROM expense_categories ORDER BY name ASC").all() });
 });
 
-router.post("/categories", (req, res) => {
+router.post("/categories", requirePagePermission("expenses", "add"), (req, res) => {
   const payload = req.body || {};
   try {
     const result = getDb()
@@ -19,7 +20,7 @@ router.post("/categories", (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
-router.put("/categories/:id", (req, res) => {
+router.put("/categories/:id", requirePagePermission("expenses", "edit"), (req, res) => {
   const payload = req.body || {};
   try {
     getDb().prepare("UPDATE expense_categories SET name = ?, parent_id = ? WHERE id = ?").run(payload.name, payload.parent_id || null, req.params.id);
@@ -27,12 +28,12 @@ router.put("/categories/:id", (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
-router.delete("/categories/:id", (req, res) => {
+router.delete("/categories/:id", requirePagePermission("expenses", "delete"), (req, res) => {
   getDb().prepare("DELETE FROM expense_categories WHERE id = ?").run(req.params.id);
   res.json({ success: true });
 });
 
-router.get("/", (req, res) => {
+router.get("/", requirePagePermission("expenses", "view"), (req, res) => {
   const { date_from, date_to, category_id, search = "" } = req.query;
   const db = getDb();
   const conds = ["1=1"];
@@ -47,7 +48,7 @@ router.get("/", (req, res) => {
   });
 });
 
-router.post("/", (req, res) => {
+router.post("/", requirePagePermission("expenses", "add"), (req, res) => {
   const payload = req.body || {};
   const db = getDb();
   const result = db
@@ -91,7 +92,7 @@ router.post("/", (req, res) => {
   });
 });
 
-router.put("/:id", (req, res) => {
+router.put("/:id", requirePagePermission("expenses", "edit"), (req, res) => {
   try {
     const db = getDb();
     const payload = req.body || {};
@@ -101,7 +102,7 @@ router.put("/:id", (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
 
-router.delete("/:id", (req, res) => {
+router.delete("/:id", requirePagePermission("expenses", "delete"), (req, res) => {
   try {
     getDb().prepare("DELETE FROM expenses WHERE id = ?").run(req.params.id);
     res.json({ success: true });

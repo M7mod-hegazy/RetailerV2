@@ -4,6 +4,7 @@ const { adjustStock } = require("../services/stockService");
 const { generateDocNumber } = require("../utils/docNumber");
 const { assertCanWriteForDate, normalizeDate } = require("../services/dailySessionService");
 const { recalculateWACC } = require("../services/waccService");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 
@@ -48,30 +49,37 @@ function getPurchaseWithLines(db, purchaseId) {
   };
 }
 
-router.get("/", (req, res) => {
+router.get("/", requirePagePermission("purchases", "view"), (req, res) => {
   const db = getDb();
-  const { search = "", supplier_id, date_from, date_to } = req.query;
+  const { search = "", supplier_id, date_from, date_to, sort = "created_at", dir = "desc", user_id = "" } = req.query;
+  const allowedSort = ["created_at", "total", "doc_no", "payment_method", "supplier_name"];
+  const safeSort = allowedSort.includes(sort) ? sort : "created_at";
+  const safeDir = dir === "asc" ? "ASC" : "DESC";
   const conditions = ["1=1"];
   const params = [];
+  if (user_id) { conditions.push("p.created_by = ?"); params.push(user_id); }
   if (search) {
-    conditions.push("(s.name LIKE ? OR CAST(p.id AS TEXT) LIKE ?)");
-    params.push(`%${search}%`, `%${search}%`);
+    conditions.push("(s.name LIKE ? OR CAST(p.id AS TEXT) LIKE ? OR p.doc_no LIKE ?)");
+    params.push(`%${search}%`, `%${search}%`, `%${search}%`);
   }
   if (supplier_id) { conditions.push("p.supplier_id = ?"); params.push(supplier_id); }
   if (date_from) { conditions.push("date(p.created_at) >= date(?)"); params.push(date_from); }
   if (date_to) { conditions.push("date(p.created_at) <= date(?)"); params.push(date_to); }
+  const orderBy = safeSort === "supplier_name" ? `s.name ${safeDir}` : `p.${safeSort} ${safeDir}`;
   const purchases = db.prepare(`
-    SELECT p.*, s.name AS supplier_name,
+    SELECT p.*, s.name AS supplier_name, u.username AS created_by_username,
            (SELECT COUNT(*) FROM purchase_lines WHERE purchase_id = p.id) AS items_count
     FROM purchases p
     LEFT JOIN suppliers s ON s.id = p.supplier_id
+    LEFT JOIN users u ON u.id = p.created_by
     WHERE ${conditions.join(" AND ")}
-    ORDER BY p.id DESC
+    ORDER BY ${orderBy}
   `).all(...params);
-  res.json({ success: true, data: purchases });
+  const total = purchases.reduce((s, x) => s + Number(x.total || 0), 0);
+  res.json({ success: true, data: purchases, summary: { count: purchases.length, total } });
 });
 
-router.get("/returns", (req, res) => {
+router.get("/returns", requirePagePermission("purchases", "view"), (req, res) => {
   const db = getDb();
   ensurePurchaseReturnSettlementSchema(db);
   const { search = "", supplier_id, date_from, date_to } = req.query;
@@ -94,7 +102,7 @@ router.get("/returns", (req, res) => {
   res.json({ success: true, data: returns });
 });
 
-router.get("/returns/:id", (req, res, next) => {
+router.get("/returns/:id", requirePagePermission("purchases", "view"), (req, res, next) => {
     try {
       const db = getDb();
       ensurePurchaseReturnSettlementSchema(db);
@@ -110,7 +118,59 @@ router.get("/returns/:id", (req, res, next) => {
     } catch (e) { next(e); }
 });
 
-router.get("/:id", (req, res, next) => {
+router.get("/items-search", requirePagePermission("purchases", "view"), (req, res, next) => {
+  try {
+    const db = getDb();
+    const { q = "", doc_search = "", supplier_search = "", supplier_id = "", user_id = "", date_from, date_to } = req.query;
+    if (!q.trim()) return res.json({ success: true, data: [] });
+
+    const conditions = ["p.status != 'cancelled' AND p.status != 'voided'"];
+    const params = [];
+
+    conditions.push("(i.name LIKE ? OR i.code LIKE ? OR i.barcode LIKE ?)");
+    const searchTerm = `%${q.trim()}%`;
+    params.push(searchTerm, searchTerm, searchTerm);
+
+    if (doc_search.trim()) {
+      conditions.push("p.doc_no LIKE ?");
+      params.push(`%${doc_search.trim()}%`);
+    }
+    if (supplier_search.trim()) {
+      conditions.push("s.name LIKE ?");
+      params.push(`%${supplier_search.trim()}%`);
+    }
+    if (supplier_id) { conditions.push("p.supplier_id = ?"); params.push(supplier_id); }
+    if (user_id) { conditions.push("p.created_by = ?"); params.push(user_id); }
+    if (date_from && date_to) {
+      conditions.push("date(p.created_at) BETWEEN date(?) AND date(?)");
+      params.push(date_from, date_to);
+    } else if (date_from || date_to) {
+      conditions.push("date(p.created_at) = date(?)");
+      params.push(date_from || date_to);
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    const rows = db.prepare(`
+      SELECT pl.id AS line_id, pl.purchase_id, p.doc_no, p.created_at, p.status,
+             p.supplier_id, s.name AS supplier_name,
+             pl.item_id, i.name AS item_name, i.code AS item_code, i.barcode,
+             pl.quantity, pl.unit_cost, pl.line_total, pl.selling_price
+      FROM purchase_lines pl
+      JOIN purchases p ON p.id = pl.purchase_id
+      JOIN items i ON i.id = pl.item_id
+      LEFT JOIN suppliers s ON s.id = p.supplier_id
+      ${where}
+      ORDER BY p.created_at DESC
+      LIMIT 100
+    `).all(...params);
+
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/:id", requirePagePermission("purchases", "view"), (req, res, next) => {
   try {
     const purchase = getPurchaseWithLines(getDb(), Number(req.params.id));
     if (!purchase) {
@@ -124,7 +184,7 @@ router.get("/:id", (req, res, next) => {
   }
 });
 
-router.post("/", (req, res, next) => {
+router.post("/", requirePagePermission("purchases", "add"), (req, res, next) => {
   const db = getDb();
 
   try {
@@ -276,7 +336,7 @@ router.post("/", (req, res, next) => {
   }
 });
 
-router.post("/:id/return", (req, res, next) => {
+router.post("/:id/return", requirePagePermission("purchases", "add"), (req, res, next) => {
   const db = getDb();
   ensurePurchaseReturnSettlementSchema(db);
 
@@ -397,7 +457,7 @@ router.post("/:id/return", (req, res, next) => {
   }
 });
 
-router.put("/:id", (req, res, next) => {
+router.put("/:id", requirePagePermission("purchases", "edit"), (req, res, next) => {
   const db = getDb();
   try {
     ensureAjalDebtPurchaseSchema(db);
@@ -551,7 +611,7 @@ function cancelPurchaseFn(db, purchaseId, reason, userId) {
   return getPurchaseWithLines(db, purchase.id);
 }
 
-router.post("/:id/cancel", (req, res, next) => {
+router.post("/:id/cancel", requirePagePermission("purchases", "add"), (req, res, next) => {
   const db = getDb();
   try {
     const { reason } = req.body || {};
@@ -563,7 +623,7 @@ router.post("/:id/cancel", (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-router.put("/:id/amend", (req, res, next) => {
+router.put("/:id/amend", requirePagePermission("purchases", "edit"), (req, res, next) => {
   const db = getDb();
   try {
     ensureAjalDebtPurchaseSchema(db);
@@ -655,7 +715,7 @@ router.put("/:id/amend", (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-router.post("/:id/void", (req, res, next) => {
+router.post("/:id/void", requirePagePermission("purchases", "add"), (req, res, next) => {
   const db = getDb();
   try {
     db.transaction(() => {
@@ -725,7 +785,7 @@ function getPurchaseReturnWithLines(db, returnId) {
   return { ...pr, lines };
 }
 
-router.post("/returns/:id/cancel", (req, res, next) => {
+router.post("/returns/:id/cancel", requirePagePermission("purchases", "add"), (req, res, next) => {
   const db = getDb();
   try {
     const { reason, user_id } = req.body || {};
@@ -849,7 +909,7 @@ function editPurchaseReturn(db, returnId, payload) {
   })();
 }
 
-router.put("/returns/:id", (req, res, next) => {
+router.put("/returns/:id", requirePagePermission("purchases", "edit"), (req, res, next) => {
   const db = getDb();
   ensurePurchaseReturnSettlementSchema(db);
   try {
@@ -858,7 +918,7 @@ router.put("/returns/:id", (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-router.put("/returns/:id/amend", (req, res, next) => {
+router.put("/returns/:id/amend", requirePagePermission("purchases", "edit"), (req, res, next) => {
   const db = getDb();
   try {
     const payload = req.body || {};

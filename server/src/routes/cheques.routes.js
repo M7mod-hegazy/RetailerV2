@@ -1,5 +1,6 @@
 const express = require("express");
 const { getDb } = require("../config/database");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 
@@ -14,7 +15,7 @@ function ensureChequeColumns(db) {
   if (!columns.includes("replaced_by")) db.exec("ALTER TABLE cheques ADD COLUMN replaced_by INTEGER");
 }
 
-router.get("/", (req, res) => {
+router.get("/", requirePagePermission("cheques", "view"), (req, res) => {
   const db = getDb();
   ensureChequeColumns(db);
   const { party_id, party_type } = req.query;
@@ -35,7 +36,7 @@ router.get("/", (req, res) => {
   });
 });
 
-router.post("/", (req, res, next) => {
+router.post("/", requirePagePermission("cheques", "add"), (req, res, next) => {
   const db = getDb();
   try {
     ensureChequeColumns(db);
@@ -72,7 +73,7 @@ router.post("/", (req, res, next) => {
   }
 });
 
-router.patch("/:id/status", (req, res, next) => {
+router.patch("/:id/status", requirePagePermission("cheques", "edit"), (req, res, next) => {
   const db = getDb();
   try {
     ensureChequeColumns(db);

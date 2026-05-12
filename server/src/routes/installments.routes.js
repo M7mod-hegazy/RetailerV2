@@ -1,5 +1,6 @@
 const express = require("express");
 const { getDb } = require("../config/database");
+const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
 
@@ -14,7 +15,7 @@ function ensureInstallmentColumns(db) {
   if (!names.has("paid_at")) db.exec("ALTER TABLE installments ADD COLUMN paid_at TEXT");
 }
 
-router.get("/", (_req, res) => {
+router.get("/", requirePagePermission("installments", "view"), (_req, res) => {
   ensureInstallmentColumns(getDb());
   res.json({
     success: true,
@@ -22,7 +23,7 @@ router.get("/", (_req, res) => {
   });
 });
 
-router.post("/", (req, res) => {
+router.post("/", requirePagePermission("installments", "add"), (req, res) => {
   ensureInstallmentColumns(getDb());
   const payload = req.body || {};
   const result = getDb()
@@ -52,7 +53,7 @@ router.post("/", (req, res) => {
   });
 });
 
-router.get("/:invoice_id", (req, res, next) => {
+router.get("/:invoice_id", requirePagePermission("installments", "view"), (req, res, next) => {
   try {
     ensureInstallmentColumns(getDb());
     res.json({
@@ -64,7 +65,7 @@ router.get("/:invoice_id", (req, res, next) => {
   }
 });
 
-router.patch("/:id/pay", (req, res, next) => {
+router.patch("/:id/pay", requirePagePermission("installments", "edit"), (req, res, next) => {
   const db = getDb();
   try {
     ensureInstallmentColumns(db);
