@@ -1,12 +1,12 @@
 const express = require("express");
 const { getDb } = require("../config/database");
 const { requirePagePermission } = require("../middleware/permission");
+const { authRequired } = require('../middleware/auth');
 
 const router = express.Router();
+router.use(authRequired);
 
 const DOC_TYPES = [
-const { authRequired } = require('../middleware/auth');
-router.use(authRequired);
   "pos_receipt",
   "sales_invoice",
   "purchase_order",
