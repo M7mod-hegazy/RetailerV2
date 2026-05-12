@@ -1,223 +1,625 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Search, Trash2, Plus, Minus, History, CheckCircle2, AlertCircle, RotateCcw, ExternalLink } from "lucide-react";
+import {
+  ArrowLeft, Search, Trash2, Plus, Minus, RotateCcw, Clock,
+  CheckCircle2, AlertCircle, Lock, Pencil, Printer, X, ExternalLink,
+  Package, RefreshCw, ChevronRight, UserPlus, Phone,
+} from "lucide-react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import api from "../../services/api";
 import { useInvoiceActivation } from "../../hooks/useInvoiceActivation";
+import Modal from "../../components/ui/Modal";
 
 function formatMoney(v) {
   return Number(v || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2 });
 }
+function formatDate(d) {
+  if (!d) return "—";
+  return new Date(d).toLocaleDateString("ar-EG");
+}
+function last30Days() {
+  const to = new Date();
+  const from = new Date();
+  from.setDate(from.getDate() - 30);
+  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
+}
 
+const REASONS = [
+  { value: "defective", label: "عيب في المنتج" },
+  { value: "wrong_order", label: "خطأ في الطلب" },
+  { value: "shipping_damage", label: "تلف أثناء الشحن" },
+  { value: "not_as_described", label: "لا يطابق الوصف" },
+  { value: "other", label: "أخرى" },
+];
+
+const STATUS_OPTIONS = [
+  { value: "", label: "كل الحالات" },
+  { value: "not_returned", label: "غير مُرتجع" },
+  { value: "partially_returned", label: "مرتجع جزئياً" },
+];
+
+// ── Invoice Picker Modal ──────────────────────────────────────────────────────
+function InvoicePickerModal({ open, onClose, onSelectInvoice, customers }) {
+  const [search, setSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState(last30Days().from);
+  const [dateTo, setDateTo] = useState(last30Days().to);
+  const [customerId, setCustomerId] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: 100 });
+      if (search.trim()) params.set("search", search.trim());
+      if (dateFrom) params.set("date_from", dateFrom);
+      if (dateTo) params.set("date_to", dateTo);
+      if (customerId) params.set("customer_id", customerId);
+      const r = await api.get(`/api/invoices?${params}`);
+      let rows = (r.data.data || []).filter(i => i.status !== "cancelled" && !i.amended_by);
+      if (statusFilter === "not_returned") rows = rows.filter(i => !i.status?.includes("returned"));
+      if (statusFilter === "partially_returned") rows = rows.filter(i => i.status === "partially_returned");
+      setResults(rows);
+    } catch {
+      setResults([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { if (open) load(); }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    const t = setTimeout(load, 300);
+    return () => clearTimeout(t);
+  }, [search, dateFrom, dateTo, customerId, statusFilter]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm" dir="rtl">
+      <div className="w-[960px] max-h-[88vh] rounded-2xl bg-white shadow-2xl flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-600">
+              <Search className="h-5 w-5 text-white" />
+            </div>
+            <div>
+              <h2 className="text-[16px] font-black text-slate-900">اختيار فاتورة للمرتجع</h2>
+              <p className="text-[11px] font-bold text-slate-400">{results.length} نتيجة</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-slate-200">
+            <X className="h-5 w-5 text-slate-500" />
+          </button>
+        </div>
+
+        <div className="flex items-center gap-3 px-6 py-3 border-b border-slate-100 bg-white shrink-0 flex-wrap">
+          <div className="flex items-center gap-2 flex-1 min-w-[180px]">
+            <Search className="h-4 w-4 text-slate-400 shrink-0" />
+            <input value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="رقم الفاتورة أو اسم العميل..."
+              className="flex-1 text-[13px] outline-none placeholder:text-slate-400" />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-black text-slate-500">من:</span>
+            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+              className="rounded-lg border border-slate-200 px-3 py-1.5 text-[12px] font-bold outline-none focus:border-emerald-400" />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-black text-slate-500">إلى:</span>
+            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+              className="rounded-lg border border-slate-200 px-3 py-1.5 text-[12px] font-bold outline-none focus:border-emerald-400" />
+          </div>
+          <select value={customerId} onChange={e => setCustomerId(e.target.value)}
+            className="rounded-lg border border-slate-200 px-3 py-1.5 text-[12px] font-bold outline-none focus:border-emerald-400">
+            <option value="">كل العملاء</option>
+            {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+            className="rounded-lg border border-slate-200 px-3 py-1.5 text-[12px] font-bold outline-none focus:border-emerald-400">
+            {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          <button onClick={load}
+            className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-black text-white hover:bg-emerald-700">
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> تحديث
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-auto">
+          {loading ? (
+            <div className="flex items-center justify-center h-40 text-slate-400 font-black animate-pulse">جاري التحميل...</div>
+          ) : results.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-40 text-slate-300 gap-2">
+              <Search className="h-10 w-10" />
+              <span className="font-black">لا توجد فواتير</span>
+            </div>
+          ) : (
+            <table className="w-full text-[12px] border-collapse">
+              <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
+                <tr>
+                  {["رقم الفاتورة", "العميل", "التاريخ", "الإجمالي", "الحالة", ""].map(h => (
+                    <th key={h} className="px-4 py-3 text-right font-black text-slate-500 text-[11px] uppercase tracking-wider whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {results.map((inv, i) => (
+                  <tr key={inv.id} onClick={() => onSelectInvoice(inv)}
+                    className={`border-b border-slate-50 hover:bg-emerald-50 cursor-pointer transition-colors ${i % 2 === 0 ? "" : "bg-slate-50/40"}`}>
+                    <td className="px-4 py-3 font-mono text-[12px] font-black text-slate-700">{inv.invoice_no || inv.doc_no}</td>
+                    <td className="px-4 py-3 font-bold text-slate-800 max-w-[160px] truncate">{inv.customer_name || "—"}</td>
+                    <td className="px-4 py-3 text-slate-500 whitespace-nowrap">{formatDate(inv.created_at)}</td>
+                    <td className="px-4 py-3 font-mono font-black text-emerald-700">{formatMoney(inv.total)} ج.م</td>
+                    <td className="px-4 py-3">
+                      {inv.status === "partially_returned"
+                        ? <span className="rounded-full bg-amber-100 border border-amber-200 px-2 py-0.5 text-[10px] font-black text-amber-700">مرتجع جزئياً</span>
+                        : <span className="rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-black text-emerald-700">نشط</span>}
+                    </td>
+                    <td className="px-4 py-3 text-slate-400"><ChevronRight className="h-4 w-4" /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Invoice Detail Modal ──────────────────────────────────────────────────────
+function InvoiceDetailModal({ invoice, onClose, onConfirm }) {
+  const [detail, setDetail] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!invoice) return;
+    setLoading(true);
+    api.get(`/api/invoices/${invoice.id}`)
+      .then(r => setDetail(r.data.data))
+      .catch(() => setDetail(invoice))
+      .finally(() => setLoading(false));
+  }, [invoice?.id]);
+
+  if (!invoice) return null;
+
+  return (
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 backdrop-blur-sm" dir="rtl">
+      <div className="w-[780px] max-h-[88vh] rounded-2xl bg-white shadow-2xl flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-emerald-50 shrink-0">
+          <div>
+            <h2 className="text-[16px] font-black text-slate-900">فاتورة #{invoice.invoice_no || invoice.doc_no}</h2>
+            <p className="text-[11px] font-bold text-slate-500">
+              {invoice.customer_name || "—"} · {formatDate(invoice.created_at)} · {formatMoney(invoice.total)} ج.م
+            </p>
+          </div>
+          <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-slate-200">
+            <X className="h-5 w-5 text-slate-500" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-auto p-4">
+          {loading ? (
+            <div className="flex items-center justify-center h-40 text-slate-400 font-black animate-pulse">جاري التحميل...</div>
+          ) : (
+            <table className="w-full text-[12px] border-collapse rounded-lg overflow-hidden border border-slate-200">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="px-4 py-2.5 text-right font-black text-slate-500">الصنف</th>
+                  <th className="px-3 py-2.5 text-center font-black text-slate-500">الكمية</th>
+                  <th className="px-3 py-2.5 text-center font-black text-slate-500">سعر البيع</th>
+                  <th className="px-3 py-2.5 text-center font-black text-slate-500">مُرتجع سابقاً</th>
+                  <th className="px-3 py-2.5 text-center font-black text-slate-500">قابل للإرجاع</th>
+                </tr>
+              </thead>
+              <tbody>
+                {((detail || invoice).lines || []).map((l, i) => {
+                  const returned = Number(l.returned_quantity || 0);
+                  const returnable = Math.max(0, Number(l.quantity) - returned);
+                  return (
+                    <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
+                      <td className="px-4 py-2.5 font-bold text-slate-800">{l.item_name_ar || l.item_name || l.name}</td>
+                      <td className="px-3 py-2.5 text-center text-slate-600">{l.quantity}</td>
+                      <td className="px-3 py-2.5 text-center text-slate-600">{formatMoney(l.unit_price)}</td>
+                      <td className="px-3 py-2.5 text-center text-amber-600 font-bold">{returned || "—"}</td>
+                      <td className={`px-3 py-2.5 text-center font-black ${returnable === 0 ? "text-slate-300" : "text-emerald-700"}`}>{returnable}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200 bg-slate-50 shrink-0">
+          <button onClick={onClose}
+            className="rounded-lg border border-slate-200 px-5 py-2 text-[13px] font-bold text-slate-600 hover:bg-slate-100">
+            رجوع للقائمة
+          </button>
+          <button onClick={() => onConfirm(detail || invoice)}
+            className="flex items-center gap-2 rounded-lg bg-emerald-700 px-6 py-2 text-[13px] font-black text-white hover:bg-emerald-800 transition-colors">
+            <CheckCircle2 className="h-4 w-4" /> اختيار هذه الفاتورة
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Customer Create Modal ─────────────────────────────────────────────────────
+function CustomerCreateModal({ open, onClose, onCreated }) {
+  const [name, setName] = useState("");
+  const [phones, setPhones] = useState([""]);
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  function reset() { setName(""); setPhones([""]); setNote(""); setError(""); }
+
+  async function handleSave() {
+    if (!name.trim()) { setError("اسم العميل مطلوب"); return; }
+    setSaving(true);
+    try {
+      const validPhones = phones.filter(p => p.trim());
+      const r = await api.post("/api/customers", {
+        name: name.trim(),
+        phone: validPhones[0] || "",
+        additional_phones: validPhones.length > 1 ? JSON.stringify(validPhones.slice(1)) : undefined,
+        notes: note.trim() || undefined,
+      });
+      reset();
+      onCreated(r.data.data);
+    } catch (e) {
+      setError(e.response?.data?.message || "فشل إنشاء العميل");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50 backdrop-blur-sm" dir="rtl">
+      <div className="w-[480px] rounded-2xl bg-white shadow-2xl flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
+          <h2 className="text-[15px] font-black text-slate-900">إضافة عميل جديد</h2>
+          <button onClick={() => { reset(); onClose(); }} className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-slate-200">
+            <X className="h-5 w-5 text-slate-500" />
+          </button>
+        </div>
+        <div className="flex flex-col gap-4 p-6">
+          <div>
+            <label className="mb-1.5 block text-[11px] font-bold text-slate-500">اسم العميل *</label>
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="مثلاً: أحمد محمد..."
+              className="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-200" />
+          </div>
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <label className="text-[11px] font-bold text-slate-500">أرقام الهاتف</label>
+              <button onClick={() => setPhones(p => [...p, ""])}
+                className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 hover:text-emerald-800">
+                <Phone className="h-3 w-3" /> إضافة هاتف
+              </button>
+            </div>
+            <div className="flex flex-col gap-2">
+              {phones.map((ph, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <input value={ph} onChange={e => setPhones(p => p.map((x, j) => j === i ? e.target.value : x))}
+                    placeholder={i === 0 ? "الهاتف الرئيسي..." : `هاتف ${i + 1}...`}
+                    className="flex-1 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-200" />
+                  {i > 0 && (
+                    <button onClick={() => setPhones(p => p.filter((_, j) => j !== i))}
+                      className="flex h-8 w-8 items-center justify-center rounded-md text-rose-400 hover:bg-rose-50">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="mb-1.5 block text-[11px] font-bold text-slate-500">ملاحظة (اختياري)</label>
+            <textarea value={note} onChange={e => setNote(e.target.value)} placeholder="أي ملاحظات..."
+              rows={2} className="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-200 resize-none" />
+          </div>
+          {error && <p className="text-[12px] font-bold text-rose-600">{error}</p>}
+        </div>
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 bg-slate-50">
+          <button onClick={() => { reset(); onClose(); }}
+            className="rounded-lg border border-slate-200 px-5 py-2 text-[13px] font-bold text-slate-600 hover:bg-slate-100">إلغاء</button>
+          <button onClick={handleSave} disabled={saving}
+            className="rounded-lg bg-emerald-700 px-6 py-2 text-[13px] font-black text-white hover:bg-emerald-800 disabled:opacity-50 transition-colors">
+            {saving ? "جاري الحفظ..." : "إنشاء وتحديد"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Main Component ────────────────────────────────────────────────────────────
 export default function SalesReturnFormPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const editReturnId = location.state?.edit_return_id || null;
   const isEditMode = !!editReturnId;
 
-  const [rightPanel, setRightPanel] = useState("products");
+  const [mode, setMode] = useState(null);
+  const [isLocked, setIsLocked] = useState(false);
+
   const [cart, setCart] = useState([]);
+  const [invoiceLines, setInvoiceLines] = useState([]);
   const [loadedInvoice, setLoadedInvoice] = useState(null);
+
   const [customer, setCustomer] = useState(null);
   const [customers, setCustomers] = useState([]);
-  const [refundMethod, setRefundMethod] = useState("cash_back");
-  const [warehouses, setWarehouses] = useState([]);
-  const [selectedWarehouse, setSelectedWarehouse] = useState("");
-  const [treasuries, setTreasuries] = useState([]);
-  const [selectedTreasury, setSelectedTreasury] = useState("");
-  const [reason, setReason] = useState("");
-  const [productSearch, setProductSearch] = useState("");
-  const [productResults, setProductResults] = useState([]);
-  const [invoiceSearch, setInvoiceSearch] = useState("");
-  const [invoiceResults, setInvoiceResults] = useState([]);
-  const [invoiceSearchLoading, setInvoiceSearchLoading] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [message, setMessage] = useState({ text: "", type: "" });
-  const [originalDocNo, setOriginalDocNo] = useState(null);
-  const [originalCreatedAt, setOriginalCreatedAt] = useState(null);
+  const [customerLockedFromInvoice, setCustomerLockedFromInvoice] = useState(false);
+  const [customerCreateOpen, setCustomerCreateOpen] = useState(false);
   const [customerBalance, setCustomerBalance] = useState(null);
   const [ajalDebt, setAjalDebt] = useState(0);
+
+  const [refundMethod, setRefundMethod] = useState("cash_back");
+  const [reason, setReason] = useState("other");
+  const [reasonOther, setReasonOther] = useState("");
+
   const [editActivation, setEditActivation] = useState(null);
+
+  const [itemQuery, setItemQuery] = useState("");
+  const [itemResults, setItemResults] = useState([]);
+  const [stagingItem, setStagingItem] = useState(null);
+  const [stagingQty, setStagingQty] = useState("1");
+  const [stagingPrice, setStagingPrice] = useState("");
+  const [stagingPurchasePrice, setStagingPurchasePrice] = useState("");
+  const [stagingWarehouseId, setStagingWarehouseId] = useState("");
+  const [stagingUnitId, setStagingUnitId] = useState("");
+  const [lookupOpen, setLookupOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+
+  const [warehouses, setWarehouses] = useState([]);
+  const [units, setUnits] = useState([]);
+
+  const [invoicePickerOpen, setInvoicePickerOpen] = useState(false);
+  const [pickerSelectedInvoice, setPickerSelectedInvoice] = useState(null);
+
+  const [isSaving, setIsSaving] = useState(false);
+  const [message, setMessage] = useState({ text: "", type: "" });
+  const [showWarningModal, setShowWarningModal] = useState(false);
+  const [showEditWarnModal, setShowEditWarnModal] = useState(false);
+  const [showSwitchInvoiceWarning, setShowSwitchInvoiceWarning] = useState(false);
+
+  const itemInputRef = useRef(null);
+  const stagingWHRef = useRef(null);
+  const stagingUnitRef = useRef(null);
+  const stagingQtyRef = useRef(null);
+  const stagingPriceRef = useRef(null);
+  const addBtnRef = useRef(null);
 
   const { docNo, createdAt: invoiceCreatedAt, isActive: invoiceIsActive, activate: activateInvoice, reset: resetActivation } =
     useInvoiceActivation("sales_return", editActivation);
 
-  const invoiceSearchRef = useRef(null);
+  const total = useMemo(() => {
+    if (mode === "direct") return cart.reduce((acc, l) => acc + l.unit_price * l.quantity, 0);
+    if (mode === "invoice") return invoiceLines.filter(l => l.checked).reduce((acc, l) => acc + l.unit_price * l.qty_to_return, 0);
+    return 0;
+  }, [mode, cart, invoiceLines]);
 
-  const total = useMemo(() => cart.reduce((acc, l) => acc + (l.unit_price * l.quantity), 0), [cart]);
-
-  // Load warehouses, treasuries, customers
   useEffect(() => {
     api.get("/api/warehouses").then(r => {
       const wh = r.data.data || [];
       setWarehouses(wh);
-      if (wh.length) setSelectedWarehouse(String(wh[0].id));
+      if (wh.length) setStagingWarehouseId(String(wh[0].id));
     }).catch(() => {});
-    api.get("/api/treasuries").then(r => {
-      const rows = r.data.data || [];
-      setTreasuries(rows);
-      if (rows.length) setSelectedTreasury(String(rows[0].id));
+    api.get("/api/units").then(r => {
+      const u = r.data.data || [];
+      setUnits(u);
+      if (u.length) setStagingUnitId(String(u[0].id));
     }).catch(() => {});
     api.get("/api/customers?limit=500").then(r => setCustomers(r.data.data || [])).catch(() => {});
   }, []);
 
-  // Load existing return for edit mode
   useEffect(() => {
     if (!isEditMode) return;
+    setIsLocked(true);
     api.get(`/api/invoices/returns/${editReturnId}`).then(r => {
       const sr = r.data.data;
-      setOriginalDocNo(sr.doc_no);
-      setOriginalCreatedAt(sr.created_at);
       setEditActivation({ docNo: sr.doc_no || "", createdAt: sr.created_at || new Date().toISOString() });
       setRefundMethod(sr.refund_method || "cash_back");
-      setReason(sr.reason || "");
-      if (sr.warehouse_id) setSelectedWarehouse(String(sr.warehouse_id));
-      if (sr.treasury_id) setSelectedTreasury(String(sr.treasury_id));
+      setReason(sr.reason || "other");
       if (sr.customer_id) setCustomer({ id: sr.customer_id, name: sr.customer_name || String(sr.customer_id) });
-      setCart((sr.lines || []).map((l, idx) => ({
-        key: `edit-${l.id || idx}`,
-        invoice_line_id: l.invoice_line_id || null,
-        item_id: l.item_id,
-        item_name: l.item_name_ar || l.item_name || l.name,
-        unit_price: Number(l.unit_price || 0),
-        quantity: Number(l.quantity),
-        max_qty: Number(l.quantity),
-      })));
       if (sr.invoice_id) {
-        api.get(`/api/invoices/${sr.invoice_id}`).then(inv => setLoadedInvoice(inv.data.data)).catch(() => {});
+        setMode("invoice");
+        api.get(`/api/invoices/${sr.invoice_id}`).then(inv => {
+          const invData = inv.data.data;
+          setLoadedInvoice(invData);
+          const returnedIds = new Set((sr.lines || []).map(l => l.invoice_line_id));
+          setInvoiceLines((invData.lines || []).map(l => {
+            const returnLine = (sr.lines || []).find(rl => rl.invoice_line_id === l.id);
+            const alreadyReturned = Number(l.returned_quantity || 0);
+            return {
+              invoice_line_id: l.id,
+              item_id: l.item_id,
+              item_name: l.item_name_ar || l.item_name || l.name,
+              unit_price: Number(l.unit_price || 0),
+              original_qty: Number(l.quantity),
+              already_returned: alreadyReturned,
+              qty_to_return: returnLine ? Number(returnLine.quantity) : 0,
+              checked: !!returnLine,
+            };
+          }).filter(l => l.original_qty - l.already_returned > 0 || returnedIds.has(l.invoice_line_id)));
+        }).catch(() => {});
+      } else {
+        setMode("direct");
+        setCart((sr.lines || []).map((l, idx) => ({
+          key: `edit-${l.id || idx}`,
+          item_id: l.item_id,
+          item_name: l.item_name_ar || l.item_name || l.name,
+          unit_price: Number(l.unit_price || 0),
+          quantity: Number(l.quantity),
+          warehouse_id: l.warehouse_id || "",
+          unit_id: l.unit_id || "",
+        })));
       }
     }).catch(() => {});
   }, [isEditMode, editReturnId]);
 
-  // Fetch customer balance + ajal debt when customer changes
   useEffect(() => {
     if (!customer?.id) { setCustomerBalance(null); setAjalDebt(0); return; }
     api.get(`/api/customers/${customer.id}`).then(r => setCustomerBalance(Number(r.data.data?.opening_balance || 0))).catch(() => {});
     api.get(`/api/ajal-debts?customer_id=${customer.id}&status=pending`).then(r => {
-      const rows = r.data.data || [];
-      setAjalDebt(rows.reduce((s, d) => s + Number(d.remaining_amount || 0), 0));
+      setAjalDebt((r.data.data || []).reduce((s, d) => s + Number(d.remaining_amount || 0), 0));
     }).catch(() => {});
   }, [customer?.id]);
 
-  // Product search debounce
   useEffect(() => {
-    if (!productSearch.trim()) { setProductResults([]); return; }
+    if (!itemQuery.trim() || stagingItem) { setItemResults([]); setLookupOpen(false); return; }
     const t = setTimeout(() => {
-      api.get(`/api/items?search=${encodeURIComponent(productSearch)}&limit=20`)
-        .then(r => setProductResults(r.data.data || [])).catch(() => {});
+      api.get(`/api/items?search=${encodeURIComponent(itemQuery)}&limit=20`)
+        .then(r => { setItemResults(r.data.data || []); setLookupOpen(true); setActiveIndex(-1); })
+        .catch(() => {});
     }, 250);
     return () => clearTimeout(t);
-  }, [productSearch]);
+  }, [itemQuery, stagingItem]);
 
-  async function handleInvoiceSearch() {
-    if (!invoiceSearch.trim()) return;
-    setInvoiceSearchLoading(true);
-    try {
-      const byId = invoiceSearch.match(/^\d+$/)
-        ? await api.get(`/api/invoices/${invoiceSearch}`).then(r => r.data.data ? [r.data.data] : []).catch(() => [])
-        : [];
-      const bySearch = await api.get(`/api/invoices?search=${encodeURIComponent(invoiceSearch)}&limit=20`)
-        .then(r => r.data.data || []).catch(() => []);
-      const merged = [...byId, ...bySearch.filter(i => !byId.find(x => x.id === i.id))];
-      setInvoiceResults(merged.filter(i => i && i.status !== "cancelled" && !i.amended_by));
-    } finally {
-      setInvoiceSearchLoading(false);
+  useEffect(() => {
+    if (!customer) setRefundMethod(prev => prev === "store_credit" ? "cash_back" : prev);
+  }, [customer]);
+
+  function handleFieldKeyDown(e, nextRef, prevRef, isEnterSubmit = false) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (isEnterSubmit) addStagingToCart();
+      else nextRef?.current?.focus();
+    } else if (e.key === "Enter" && e.shiftKey) {
+      e.preventDefault();
+      prevRef?.current?.focus();
     }
   }
 
+  function selectItemForStaging(item) {
+    setStagingItem(item);
+    setStagingPrice(String(item.sale_price || "0"));
+    setStagingPurchasePrice(String(item.purchase_price || item.unit_cost || "0"));
+    setStagingQty("1");
+    setItemQuery(item.name_ar || item.name);
+    setItemResults([]);
+    setLookupOpen(false);
+    setActiveIndex(-1);
+    setTimeout(() => stagingWHRef.current?.focus(), 30);
+  }
+
+  function addStagingToCart() {
+    if (!stagingItem) return;
+    const qty = Math.max(0, Number(stagingQty) || 0);
+    const price = Math.max(0, Number(stagingPrice) || 0);
+    if (!qty) return;
+    if (!invoiceIsActive) activateInvoice();
+    setCart(prev => [...prev, {
+      key: `direct-${stagingItem.id}-${Date.now()}`,
+      item_id: stagingItem.id,
+      item_name: stagingItem.name_ar || stagingItem.name,
+      unit_price: price,
+      quantity: qty,
+      warehouse_id: stagingWarehouseId,
+      unit_id: stagingUnitId,
+    }]);
+    setStagingItem(null); setStagingQty("1"); setStagingPrice(""); setStagingPurchasePrice("");
+    setItemQuery(""); setItemResults([]); setLookupOpen(false); setActiveIndex(-1);
+    setTimeout(() => itemInputRef.current?.focus(), 30);
+  }
+
+  function removeCartLine(key) { setCart(prev => prev.filter(l => l.key !== key)); }
+  function updateCartQty(key, delta) {
+    setCart(prev => prev.map(l => l.key !== key ? l : { ...l, quantity: Math.max(0, l.quantity + delta) }).filter(l => l.quantity > 0));
+  }
+
+  function selectMode(m) {
+    if (m === "invoice") { setMode(m); setInvoicePickerOpen(true); }
+    else { setMode(m); activateInvoice(); }
+  }
+
+  function resetToIdle() {
+    setMode(null); setCart([]); setInvoiceLines([]); setLoadedInvoice(null);
+    setCustomer(null); setCustomerLockedFromInvoice(false); setReason("other"); setReasonOther("");
+    setItemQuery(""); setItemResults([]); setStagingItem(null); setStagingQty("1");
+    setStagingPrice(""); setStagingPurchasePrice(""); setInvoicePickerOpen(false);
+    setPickerSelectedInvoice(null); resetActivation();
+  }
+
+  function handleBack() {
+    if (mode === null || isEditMode) { navigate("/sales/returns"); return; }
+    setShowWarningModal(true);
+  }
+
   function loadInvoice(inv) {
-    activateInvoice();
     setLoadedInvoice(inv);
-    setCart((inv.lines || []).map(l => ({
-      key: `inv-${l.id}`,
+    setInvoiceLines((inv.lines || []).map(l => ({
       invoice_line_id: l.id,
       item_id: l.item_id,
       item_name: l.item_name_ar || l.item_name || l.name,
       unit_price: Number(l.unit_price || 0),
-      quantity: Number(l.quantity),
-      max_qty: Math.max(0, Number(l.quantity) - Number(l.returned_quantity || 0)),
-    })).filter(l => l.max_qty > 0));
-    if (inv.customer_id) setCustomer({ id: inv.customer_id, name: inv.customer_name || String(inv.customer_id) });
-    setRightPanel("products");
-    setInvoiceResults([]);
-    setInvoiceSearch("");
+      original_qty: Number(l.quantity),
+      already_returned: Number(l.returned_quantity || 0),
+      qty_to_return: 0,
+      checked: false,
+    })).filter(l => l.original_qty - l.already_returned > 0));
+    if (inv.customer_id) {
+      setCustomer({ id: inv.customer_id, name: inv.customer_name || String(inv.customer_id) });
+      setCustomerLockedFromInvoice(true);
+    }
   }
 
-  function addProductToCart(item) {
-    activateInvoice();
-    setCart(prev => {
-      const existing = prev.find(l => l.item_id === item.id && !l.invoice_line_id);
-      if (existing) return prev.map(l => l === existing ? { ...l, quantity: l.quantity + 1 } : l);
-      return [...prev, {
-        key: `direct-${item.id}-${Date.now()}`,
-        item_id: item.id,
-        item_name: item.name,
-        unit_price: Number(item.sale_price || 0),
-        quantity: 1,
-        max_qty: Infinity,
-        invoice_line_id: null,
-      }];
-    });
-    setProductSearch("");
-    setProductResults([]);
+  function handleDetailConfirm(inv) {
+    loadInvoice(inv); setInvoicePickerOpen(false); setPickerSelectedInvoice(null); activateInvoice();
   }
 
-  function updateQty(key, delta) {
-    setCart(prev => prev
-      .map(l => l.key !== key ? l : { ...l, quantity: Math.max(0, Math.min(l.max_qty, l.quantity + delta)) })
-      .filter(l => l.quantity > 0));
+  function toggleInvoiceLine(invoice_line_id) {
+    setInvoiceLines(prev => prev.map(l => {
+      if (l.invoice_line_id !== invoice_line_id) return l;
+      const checked = !l.checked;
+      return { ...l, checked, qty_to_return: checked ? Math.max(0, l.original_qty - l.already_returned) : 0 };
+    }));
   }
 
-  function setQty(key, val) {
-    setCart(prev => prev
-      .map(l => l.key !== key ? l : { ...l, quantity: Math.max(0, Math.min(l.max_qty, Number(val) || 0)) })
-      .filter(l => l.quantity > 0));
+  function setInvoiceLineQty(invoice_line_id, val) {
+    setInvoiceLines(prev => prev.map(l => {
+      if (l.invoice_line_id !== invoice_line_id) return l;
+      const max = l.original_qty - l.already_returned;
+      return { ...l, qty_to_return: Math.max(0, Math.min(max, Number(val) || 0)) };
+    }));
   }
 
-  function removeLine(key) { setCart(prev => prev.filter(l => l.key !== key)); }
+  function handleTodayInvoicesClick() {
+    if (mode === "invoice" && loadedInvoice) setShowSwitchInvoiceWarning(true);
+    else setInvoicePickerOpen(true);
+  }
 
   async function handleSave() {
-    if (!cart.length) { setMessage({ text: "أضف أصناف للمرتجع أولاً", type: "error" }); return; }
-    setIsSaving(true);
-    setMessage({ text: "", type: "" });
+    const lines = mode === "direct"
+      ? cart.map(l => ({ item_id: l.item_id, quantity: l.quantity, unit_price: l.unit_price, warehouse_id: l.warehouse_id || null, unit_id: l.unit_id || null, invoice_line_id: null }))
+      : invoiceLines.filter(l => l.checked && l.qty_to_return > 0).map(l => ({ invoice_line_id: l.invoice_line_id, item_id: l.item_id, quantity: l.qty_to_return, unit_price: l.unit_price }));
+    if (!lines.length) { setMessage({ text: "أضف أصناف للمرتجع أولاً", type: "error" }); return; }
+    const payload = {
+      doc_no: docNo || undefined, customer_id: customer?.id || null,
+      refund_method: refundMethod, treasury_id: null,
+      reason: reason === "other" ? (reasonOther || "other") : reason, lines,
+    };
+    setIsSaving(true); setMessage({ text: "", type: "" });
     try {
-      const payload = {
-        doc_no: docNo || undefined,
-        customer_id: customer?.id || null,
-        warehouse_id: Number(selectedWarehouse),
-        refund_method: refundMethod,
-        treasury_id: refundMethod === "cash_back" ? Number(selectedTreasury) : null,
-        reason: reason || "other",
-        lines: cart.map(l => ({
-          invoice_line_id: l.invoice_line_id || null,
-          item_id: l.item_id,
-          quantity: l.quantity,
-          unit_price: l.unit_price,
-        })),
-      };
       const savedDocNo = docNo;
       if (isEditMode) {
         await api.put(`/api/invoices/returns/${editReturnId}`, payload);
+        setIsLocked(true);
         setMessage({ text: "تم تعديل المرتجع بنجاح", type: "success" });
         setTimeout(() => setMessage({ text: "", type: "" }), 3000);
-      } else if (loadedInvoice) {
+      } else if (mode === "invoice" && loadedInvoice) {
         await api.post(`/api/invoices/${loadedInvoice.id}/return`, payload);
-        // Reset to idle
-        setCart([]);
-        setLoadedInvoice(null);
-        setCustomer(null);
-        setReason("");
-        resetActivation();
+        resetToIdle();
         setMessage({ text: `تم تسجيل المرتجع ${savedDocNo || ""} بنجاح`, type: "success" });
         setTimeout(() => setMessage({ text: "", type: "" }), 4000);
       } else {
         await api.post("/api/invoices/general-return", payload);
-        // Reset to idle
-        setCart([]);
-        setLoadedInvoice(null);
-        setCustomer(null);
-        setReason("");
-        resetActivation();
-        setMessage({ text: `تم تسجيل المرتجع العام ${savedDocNo || ""} بنجاح`, type: "success" });
+        resetToIdle();
+        setMessage({ text: `تم تسجيل المرتجع ${savedDocNo || ""} بنجاح`, type: "success" });
         setTimeout(() => setMessage({ text: "", type: "" }), 4000);
       }
     } catch (e) {
@@ -225,309 +627,450 @@ export default function SalesReturnFormPage() {
     } finally { setIsSaving(false); }
   }
 
-  return (
-    <div className="flex h-screen flex-col bg-emerald-50/30 font-sans overflow-hidden" dir="rtl">
-
-      {/* ── Header ─────────────────────────────────────────────────────── */}
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-emerald-200 bg-white px-6 shadow-sm">
-        <div className="flex items-center gap-4">
+  // ══ IDLE SCREEN ══
+  if (mode === null && !isEditMode) {
+    return (
+      <div dir="rtl" className="flex h-full flex-col bg-slate-50 overflow-hidden">
+        <div className="flex items-center px-6 pt-5 pb-2">
           <button onClick={() => navigate("/sales/returns")}
-            className="flex h-8 w-8 items-center justify-center rounded-sm border border-emerald-200 text-emerald-600 hover:bg-emerald-50 transition-colors">
+            className="flex h-8 w-8 items-center justify-center rounded-sm border border-slate-200 text-slate-500 hover:bg-slate-100 transition-colors">
             <ArrowLeft className="h-4 w-4" />
           </button>
-          <div>
-            <h1 className="text-[14px] font-black text-slate-800 uppercase tracking-tight">
-              {isEditMode ? "تعديل مرتجع مبيعات" : loadedInvoice ? `مرتجع فاتورة #${loadedInvoice.invoice_no}` : "مرتجع مبيعات جديد"}
-            </h1>
-            <span className="text-[10px] font-bold text-emerald-600">
-              {isEditMode
-                ? `${originalDocNo || ""} · ${originalCreatedAt ? new Date(originalCreatedAt).toLocaleString("ar-EG") : ""}`
-                : loadedInvoice ? `${loadedInvoice.customer_name || "بدون عميل"} · ${formatMoney(loadedInvoice.total)} ج.م`
-                : "أضف أصناف مباشرة أو ابحث عن فاتورة"}
-            </span>
-          </div>
         </div>
-
-        <div className="flex items-center gap-2">
-          {/* Message */}
+        <div className="flex flex-1 flex-col items-center justify-center gap-8 px-4">
+          <div className="flex flex-col items-center gap-2 text-center">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+              <RotateCcw className="h-8 w-8" />
+            </div>
+            <h1 className="text-xl font-black text-slate-800">مرتجع مبيعات</h1>
+            <p className="text-[13px] text-slate-500">اختر نوع المرتجع</p>
+          </div>
+          <div className="flex gap-6">
+            <button onClick={() => selectMode("direct")}
+              className="group flex w-56 flex-col items-center gap-3 rounded-lg border-2 border-slate-200 bg-white px-6 py-8 text-center shadow-sm transition-all hover:border-emerald-400 hover:bg-emerald-50 hover:shadow-md">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-600 transition-colors group-hover:bg-emerald-100 group-hover:text-emerald-700">
+                <RotateCcw className="h-6 w-6" />
+              </div>
+              <div>
+                <div className="text-[15px] font-black text-slate-800">مرتجع مباشر</div>
+                <div className="mt-1 text-[12px] text-slate-500 leading-relaxed">أضف أصناف مباشرة بدون فاتورة</div>
+              </div>
+            </button>
+            <button onClick={() => selectMode("invoice")}
+              className="group flex w-56 flex-col items-center gap-3 rounded-lg border-2 border-slate-200 bg-white px-6 py-8 text-center shadow-sm transition-all hover:border-emerald-400 hover:bg-emerald-50 hover:shadow-md">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-600 transition-colors group-hover:bg-emerald-100 group-hover:text-emerald-700">
+                <Search className="h-6 w-6" />
+              </div>
+              <div>
+                <div className="text-[15px] font-black text-slate-800">من فاتورة سابقة</div>
+                <div className="mt-1 text-[12px] text-slate-500 leading-relaxed">ابحث عن فاتورة وحدد المرتجعات</div>
+              </div>
+            </button>
+          </div>
           {message.text && (
-            <div className={`flex items-center gap-1.5 rounded-sm px-3 py-1.5 text-[11px] font-bold border ${
-              message.type === "success"
-                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                : "bg-rose-50 text-rose-700 border-rose-200"
-            }`}>
-              {message.type === "success" ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />}
+            <div className={`flex items-center gap-2 rounded-md px-4 py-2 text-[13px] font-bold ${message.type === "success" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-rose-50 text-rose-700 border border-rose-200"}`}>
+              {message.type === "success" ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
               {message.text}
             </div>
           )}
-          {/* Doc number + date — always shown, idle = "—" */}
-          <div className="flex gap-1.5">
-            <input disabled value={invoiceIsActive ? (docNo || originalDocNo || "") : "—"}
-              className="h-8 w-28 rounded-sm border border-emerald-200 bg-emerald-50 px-2 text-[11px] font-mono font-black text-emerald-600 cursor-not-allowed outline-none" />
-            <input disabled value={invoiceIsActive && (invoiceCreatedAt || originalCreatedAt) ? new Date(invoiceCreatedAt || originalCreatedAt).toLocaleString("ar-EG") : "—"}
-              className="h-8 w-48 rounded-sm border border-emerald-200 bg-emerald-50 px-2 text-[11px] font-mono font-black text-emerald-600 cursor-not-allowed outline-none" />
-          </div>
-          <button onClick={handleSave} disabled={isSaving || !cart.length}
-            className="flex h-9 items-center gap-2 rounded-sm bg-emerald-700 px-6 text-[13px] font-black text-white hover:bg-emerald-600 disabled:opacity-40 transition-all active:scale-95 shadow-sm">
-            {isSaving ? "جاري الحفظ..." : isEditMode ? "تأكيد التعديل" : "تأكيد المرتجع"}
+        </div>
+        <InvoicePickerModal open={invoicePickerOpen} onClose={() => { setInvoicePickerOpen(false); setMode(null); }} onSelectInvoice={p => setPickerSelectedInvoice(p)} customers={customers} />
+        {pickerSelectedInvoice && <InvoiceDetailModal invoice={pickerSelectedInvoice} onClose={() => setPickerSelectedInvoice(null)} onConfirm={handleDetailConfirm} />}
+        <CustomerCreateModal open={customerCreateOpen} onClose={() => setCustomerCreateOpen(false)} onCreated={c => { setCustomers(prev => [c, ...prev]); setCustomer({ id: c.id, name: c.name }); setCustomerCreateOpen(false); }} />
+      </div>
+    );
+  }
+
+  // ══ ACTIVE SCREEN ══
+  return (
+    <div dir="rtl" className="flex h-full flex-col bg-slate-50 overflow-hidden">
+      <header className="flex h-14 shrink-0 items-center justify-between border-b border-emerald-200 bg-white px-6 shadow-sm">
+        <div className="flex items-center gap-3 min-w-0">
+          <button onClick={handleBack} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border border-slate-200 text-slate-500 transition-colors hover:bg-slate-50">
+            <ArrowLeft className="h-4 w-4" />
           </button>
+          <div className="flex flex-col shrink-0">
+            <h1 className="text-[14px] font-black text-slate-800">
+              {isEditMode ? "تعديل مرتجع مبيعات" : mode === "invoice" && loadedInvoice ? `مرتجع فاتورة #${loadedInvoice.invoice_no || loadedInvoice.doc_no}` : "مرتجع مبيعات جديد"}
+            </h1>
+            <span className="text-[10px] font-bold text-slate-400">
+              {isEditMode ? (isLocked ? "محفوظة — اضغط تعديل للتغيير" : "وضع التعديل") : mode === "direct" ? "مرتجع مباشر" : "مرتجع من فاتورة"}
+            </span>
+          </div>
+          {isLocked && (
+            <div className="flex shrink-0 items-center gap-1.5 rounded-sm border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700">
+              <Lock className="h-3 w-3" /> محفوظة
+            </div>
+          )}
+          {mode && (
+            <div className="flex gap-1.5">
+              <input readOnly value={invoiceIsActive ? (docNo || "") : "—"} className="h-7 w-28 rounded-sm border border-slate-200 bg-slate-100 px-2 text-[11px] font-mono font-black text-slate-400 cursor-not-allowed outline-none" />
+              <input readOnly value={invoiceIsActive && invoiceCreatedAt ? new Date(invoiceCreatedAt).toLocaleString("ar-EG") : "—"} className="h-7 w-44 rounded-sm border border-slate-200 bg-slate-100 px-2 text-[11px] font-mono font-black text-slate-400 cursor-not-allowed outline-none" />
+            </div>
+          )}
+          {mode === "invoice" && loadedInvoice && (
+            <Link to={`/sales/returns?invoice_id=${loadedInvoice.id}`} className="flex items-center gap-1 text-[11px] font-bold text-emerald-600 hover:underline shrink-0">
+              <ExternalLink className="h-3.5 w-3.5" /> عرض كل مرتجعات هذه الفاتورة
+            </Link>
+          )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {message.text && (
+            <div className={`flex items-center gap-1.5 rounded-sm px-3 py-1 text-[12px] font-bold ${message.type === "success" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-rose-50 text-rose-700 border border-rose-200"}`}>
+              {message.type === "success" ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />} {message.text}
+            </div>
+          )}
+          <button disabled className="flex h-9 items-center gap-2 rounded-sm border border-slate-200 bg-white px-4 text-[13px] font-black text-slate-400 cursor-not-allowed opacity-50">
+            <Printer className="h-4 w-4" /> طباعة
+          </button>
+          {isEditMode && isLocked && (
+            <button onClick={() => setShowEditWarnModal(true)} className="flex h-9 items-center gap-2 rounded-sm bg-indigo-600 px-5 text-[13px] font-black text-white hover:bg-indigo-700 transition-all">
+              <Pencil className="h-4 w-4" /> تعديل
+            </button>
+          )}
+          {isEditMode && !isLocked && (
+            <button onClick={() => setMessage({ text: "حذف المرتجع غير متاح حالياً", type: "error" })} className="flex h-9 items-center gap-2 rounded-sm border border-rose-200 bg-rose-50 px-4 text-[13px] font-black text-rose-600 hover:bg-rose-100 transition-all">
+              <Trash2 className="h-4 w-4" /> حذف
+            </button>
+          )}
+          {mode && !isLocked && (
+            <button onClick={handleSave} disabled={isSaving || !total} className="flex h-9 items-center gap-2 rounded-sm bg-emerald-700 px-6 text-[13px] font-black text-white hover:bg-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
+              {isSaving ? "جاري الحفظ..." : isEditMode ? "حفظ التعديلات" : "حفظ المرتجع"}
+            </button>
+          )}
         </div>
       </header>
 
-      {/* ── Body ───────────────────────────────────────────────────────── */}
-      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-1 overflow-hidden">
+        {/* Left Panel */}
+        <aside className="flex w-[360px] shrink-0 flex-col border-l border-slate-200 bg-white overflow-y-auto">
+          <div className="flex flex-col gap-4 p-4">
+            <button onClick={handleTodayInvoicesClick} className="flex w-full items-center justify-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-2 text-[12px] font-bold text-emerald-700 hover:bg-emerald-100 transition-colors">
+              <Clock className="h-4 w-4" /> فواتير المبيعات
+            </button>
 
-        {/* ── Left: Cart ─────────────────────────────────────────────── */}
-        <div className="flex flex-col w-[400px] shrink-0 border-l border-emerald-200 bg-white shadow-sm">
-
-          {/* Settings panel */}
-          <div className="border-b border-emerald-100 p-4 space-y-3 bg-emerald-50/50">
-            {/* Customer */}
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] font-black text-emerald-700 uppercase tracking-widest">العميل</label>
-              <select
-                value={customer?.id || ""}
-                onChange={e => {
-                  const c = customers.find(c => String(c.id) === e.target.value) || null;
-                  setCustomer(c);
-                  if (c) activateInvoice();
-                }}
-                className="w-full border border-emerald-200 rounded-sm px-2 py-1.5 text-[12px] font-bold text-slate-800 outline-none focus:border-emerald-500 bg-white"
-              >
-                <option value="">بدون عميل</option>
+            <div>
+              <div className="mb-1.5 flex items-center justify-between">
+                <label className="text-[11px] font-bold text-slate-500">العميل</label>
+                {!isLocked && !customerLockedFromInvoice && (
+                  <button onClick={() => setCustomerCreateOpen(true)} className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 hover:text-emerald-800">
+                    <UserPlus className="h-3 w-3" /> عميل جديد
+                  </button>
+                )}
+              </div>
+              <select value={customer?.id || ""} onChange={e => { const c = customers.find(x => String(x.id) === e.target.value); setCustomer(c ? { id: c.id, name: c.name } : null); }}
+                disabled={isLocked || customerLockedFromInvoice}
+                className="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] text-slate-800 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-200 disabled:cursor-not-allowed disabled:opacity-60">
+                <option value="">— بدون عميل —</option>
                 {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
-              {/* Customer balance panel */}
-              {customer && customerBalance !== null && (
-                <div className="space-y-1 mt-1">
-                  <div className="flex items-center justify-between rounded-sm bg-white border border-emerald-200 px-2.5 py-1.5">
-                    <span className="text-[10px] font-bold text-slate-500">رصيد العميل الحالي</span>
-                    <span className={`text-[12px] font-black font-mono ${customerBalance > 0 ? "text-rose-600" : "text-emerald-700"}`}>{customerBalance.toFixed(2)}</span>
+              {customerLockedFromInvoice && !isLocked && <p className="mt-1 text-[10px] text-slate-400">العميل محدد من الفاتورة الأصلية</p>}
+            </div>
+
+            {customer && customerBalance !== null && (
+              <div>
+                <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-[12px]">
+                  <div className="flex justify-between text-slate-600 mb-1.5">
+                    <span className="font-bold">رصيد الحساب</span>
+                    <span className={`font-black ${customerBalance >= 0 ? "text-rose-600" : "text-emerald-600"}`}>{formatMoney(customerBalance)} ج.م</span>
                   </div>
-                  {total > 0 && (
-                    <div className="flex items-center justify-between rounded-sm bg-emerald-50 border border-emerald-200 px-2.5 py-1.5">
-                      <span className="text-[10px] font-bold text-emerald-600">الرصيد بعد المرتجع</span>
-                      <span className={`text-[12px] font-black font-mono ${customerBalance - total > 0 ? "text-rose-600" : "text-emerald-700"}`}>{(customerBalance - total).toFixed(2)}</span>
-                    </div>
-                  )}
-                  {ajalDebt > 0 && (
-                    <div className="flex items-center justify-between rounded-sm bg-amber-50 border border-amber-200 px-2.5 py-1.5">
-                      <span className="text-[10px] font-bold text-amber-600">ديون آجل معلقة</span>
-                      <span className="text-[12px] font-black font-mono text-amber-700">{ajalDebt.toFixed(2)}</span>
-                    </div>
-                  )}
-                  {customer && (
-                    <Link to={`/definitions/customers/${customer.id}`} className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-emerald-700 pt-0.5">
-                      <ExternalLink className="h-3 w-3" /> عرض سجل العميل
-                    </Link>
-                  )}
                 </div>
+                <div className="flex items-center justify-between rounded-sm bg-emerald-50 border border-emerald-200 px-2.5 py-1.5 mt-2">
+                  <span className="text-[10px] font-bold text-emerald-600">الرصيد بعد المرتجع</span>
+                  <span className={`text-[12px] font-black font-mono ${(customerBalance - total) >= 0 ? "text-rose-600" : "text-emerald-700"}`}>{formatMoney(customerBalance - total)} ج.م</span>
+                </div>
+                {ajalDebt > 0 && (
+                  <div className="flex items-center justify-between rounded-sm bg-amber-50 border border-amber-200 px-2.5 py-1.5 mt-1.5">
+                    <span className="text-[10px] font-bold text-amber-600">ديون آجل معلقة</span>
+                    <span className="text-[12px] font-black font-mono text-amber-700">{formatMoney(ajalDebt)} ج.م</span>
+                  </div>
+                )}
+                <Link to={`/definitions/customers/${customer.id}`} className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-emerald-700 pt-0.5 mt-1.5">
+                  <ExternalLink className="h-3 w-3" /> عرض سجل العميل
+                </Link>
+              </div>
+            )}
+
+            <div>
+              <label className="mb-1.5 block text-[11px] font-bold text-slate-500">طريقة الاسترداد</label>
+              <div className="flex gap-2">
+                {[{ value: "cash_back", label: "نقداً", requiresCustomer: false }, { value: "store_credit", label: "رصيد حساب", requiresCustomer: true }].map(opt => {
+                  const disabled = isLocked || (opt.requiresCustomer && !customer);
+                  return (
+                    <button key={opt.value} onClick={() => !disabled && setRefundMethod(opt.value)} disabled={disabled}
+                      className={`flex-1 rounded-md border py-2 text-[12px] font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${refundMethod === opt.value ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-[11px] font-bold text-slate-500">السبب</label>
+              <select value={reason} onChange={e => setReason(e.target.value)} disabled={isLocked}
+                className="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] text-slate-800 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-200 disabled:cursor-not-allowed disabled:opacity-60">
+                {REASONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+              </select>
+              {reason === "other" && !isLocked && (
+                <input value={reasonOther} onChange={e => setReasonOther(e.target.value)} placeholder="اذكر السبب..."
+                  className="mt-2 w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] text-slate-800 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-200" />
               )}
             </div>
 
-            {/* Refund method */}
-            <div className="flex gap-2">
-              <button onClick={() => setRefundMethod("cash_back")}
-                className={`flex-1 rounded-sm border py-2 text-[11px] font-black transition-all ${
-                  refundMethod === "cash_back"
-                    ? "border-emerald-600 bg-emerald-600 text-white shadow-sm"
-                    : "border-slate-200 bg-white text-slate-600 hover:border-emerald-300"
-                }`}>
-                نقداً
-              </button>
-              <button onClick={() => setRefundMethod("credit_note")}
-                className={`flex-1 rounded-sm border py-2 text-[11px] font-black transition-all ${
-                  refundMethod === "credit_note"
-                    ? "border-emerald-600 bg-emerald-600 text-white shadow-sm"
-                    : "border-slate-200 bg-white text-slate-600 hover:border-emerald-300"
-                }`}>
-                رصيد حساب
-              </button>
-            </div>
-
-            {/* Treasury (only for cash) */}
-            {refundMethod === "cash_back" && (
-              <select value={selectedTreasury} onChange={e => setSelectedTreasury(e.target.value)}
-                className="w-full border border-emerald-200 rounded-sm px-2 py-1.5 text-[12px] font-bold text-slate-800 outline-none focus:border-emerald-500 bg-white">
-                {treasuries.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
-            )}
-
-            {/* Warehouse */}
-            <select value={selectedWarehouse} onChange={e => setSelectedWarehouse(e.target.value)}
-              className="w-full border border-emerald-200 rounded-sm px-2 py-1.5 text-[12px] font-bold text-slate-800 outline-none focus:border-emerald-500 bg-white">
-              {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-            </select>
-
-            {/* Reason */}
-            <input value={reason} onChange={e => setReason(e.target.value)}
-              placeholder="سبب الإرجاع (اختياري)..."
-              className="w-full border border-emerald-200 rounded-sm px-2 py-1.5 text-[12px] font-bold text-slate-800 outline-none focus:border-emerald-500 bg-white" />
-          </div>
-
-          {/* Cart lines */}
-          <div className="flex-1 min-h-0 overflow-y-auto">
-            {cart.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full gap-2 text-slate-300">
-                <RotateCcw className="h-8 w-8" />
-                <span className="text-[12px] font-bold">لا يوجد أصناف بعد</span>
-                <span className="text-[11px]">أضف صنفاً أو حمّل فاتورة من اليمين</span>
+            {mode === "invoice" && (
+              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] text-slate-600">
+                {invoiceLines.filter(l => l.checked).length > 0 ? `تم اختيار ${invoiceLines.filter(l => l.checked).length} أصناف` : "لم يتم اختيار أصناف بعد"}
               </div>
-            ) : cart.map(line => (
-              <div key={line.key} className="flex items-center gap-2 border-b border-slate-100 px-3 py-2.5 hover:bg-emerald-50/30 transition-colors">
-                <div className="flex-1 min-w-0">
-                  <div className="text-[12px] font-black text-slate-800 truncate">{line.item_name}</div>
-                  <div className="text-[11px] font-bold text-emerald-600 font-mono">
-                    {formatMoney(line.unit_price)} × {line.quantity} = {formatMoney(line.unit_price * line.quantity)} ج.م
-                  </div>
-                  {line.max_qty !== Infinity && (
-                    <div className="text-[10px] font-bold text-slate-400">الحد الأقصى: {line.max_qty}</div>
-                  )}
-                </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <button onClick={() => updateQty(line.key, -1)}
-                    className="h-6 w-6 flex items-center justify-center rounded-sm border border-slate-200 text-slate-500 hover:bg-slate-50 active:scale-90 transition-all">
-                    <Minus className="h-3 w-3" />
-                  </button>
-                  <input type="number" value={line.quantity}
-                    onChange={e => setQty(line.key, e.target.value)}
-                    onFocus={e => e.target.select()}
-                    className="w-11 h-6 text-center font-mono font-black text-[12px] border border-emerald-200 rounded-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-200" />
-                  <button onClick={() => updateQty(line.key, 1)}
-                    disabled={line.max_qty !== Infinity && line.quantity >= line.max_qty}
-                    className="h-6 w-6 flex items-center justify-center rounded-sm border border-slate-200 text-slate-500 hover:bg-slate-50 active:scale-90 transition-all disabled:opacity-30">
-                    <Plus className="h-3 w-3" />
-                  </button>
-                </div>
-                <button onClick={() => removeLine(line.key)}
-                  className="h-6 w-6 flex items-center justify-center text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-sm transition-colors">
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ))}
-          </div>
-
-          {/* Total */}
-          <div className="flex items-center justify-between bg-emerald-800 px-5 py-4 shrink-0">
-            <span className="text-[11px] font-black text-emerald-300 uppercase tracking-widest">إجمالي المرتجع</span>
-            <div className="flex items-baseline gap-1.5">
-              <span className="text-[28px] font-black font-mono text-white">{formatMoney(total)}</span>
-              <span className="text-[11px] font-black text-emerald-400">ج.م</span>
-            </div>
-          </div>
-        </div>
-
-        {/* ── Right: Panel ───────────────────────────────────────────── */}
-        <div className="flex flex-1 flex-col min-h-0">
-
-          {/* Toggle bar */}
-          <div className="flex items-center gap-2 border-b border-emerald-200 bg-white px-4 py-2.5 shrink-0">
-            <button onClick={() => setRightPanel("products")}
-              className={`px-4 py-1.5 rounded-sm text-[12px] font-black border transition-all ${
-                rightPanel === "products"
-                  ? "border-emerald-700 bg-emerald-700 text-white"
-                  : "border-slate-200 text-slate-500 hover:bg-emerald-50 hover:border-emerald-300"
-              }`}>
-              إضافة صنف مباشر
-            </button>
-            <button onClick={() => { setRightPanel("search"); setTimeout(() => invoiceSearchRef.current?.focus(), 50); }}
-              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-sm text-[12px] font-black border transition-all ${
-                rightPanel === "search"
-                  ? "border-emerald-600 bg-emerald-600 text-white"
-                  : "border-slate-200 text-slate-500 hover:bg-emerald-50 hover:border-emerald-300"
-              }`}>
-              <History className="h-3.5 w-3.5" /> بحث متقدم في الفواتير
-            </button>
-            {loadedInvoice && (
-              <span className="mr-auto text-[11px] font-black text-emerald-600 flex items-center gap-1">
-                <CheckCircle2 className="h-3.5 w-3.5" /> مرتبط بفاتورة #{loadedInvoice.invoice_no}
-              </span>
             )}
           </div>
 
-          {rightPanel === "products" ? (
-            /* Product search */
-            <div className="flex flex-col flex-1 min-h-0 p-4 gap-3">
-              <div className="relative">
-                <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-emerald-400" />
-                <input
-                  autoFocus
-                  value={productSearch}
-                  onChange={e => setProductSearch(e.target.value)}
-                  placeholder="بحث بالاسم أو الباركود أو الكود..."
-                  className="w-full border border-emerald-200 rounded-sm py-2.5 pr-10 pl-3 text-[13px] font-bold text-slate-800 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-200 bg-white shadow-sm"
-                />
-              </div>
-              <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5">
-                {productResults.map(item => (
-                  <button key={item.id} onClick={() => addProductToCart(item)}
-                    className="w-full flex items-center justify-between rounded-sm border border-slate-200 bg-white px-4 py-3 text-right hover:border-emerald-400 hover:bg-emerald-50/50 transition-all active:scale-[0.99] shadow-sm">
-                    <div>
-                      <div className="text-[13px] font-black text-slate-800">{item.name}</div>
-                      <div className="text-[11px] font-mono text-slate-400">{item.barcode || item.code || "—"}</div>
+          <div className="mt-auto border-t border-emerald-200 bg-emerald-700 px-5 py-4">
+            <div className="flex items-center justify-between">
+              <span className="text-[13px] font-bold text-emerald-200">إجمالي المرتجع</span>
+              <span className="text-[18px] font-black text-white">{formatMoney(total)} ج.م</span>
+            </div>
+          </div>
+        </aside>
+
+        {/* Right Panel */}
+        <main className="flex flex-1 flex-col overflow-hidden bg-slate-50 p-4">
+
+          {mode === "direct" && (
+            <div className="flex flex-1 flex-col gap-4 overflow-hidden">
+              {!isLocked && (
+                <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm shrink-0">
+                  <div className="mb-3 text-[12px] font-bold text-slate-500">إضافة صنف</div>
+                  <div className="relative mb-3">
+                    <div className={`flex items-center gap-2 rounded-md border px-3 py-2 ${lookupOpen ? "border-emerald-400 bg-white" : "border-slate-200 bg-slate-50"}`}>
+                      <Search className="h-4 w-4 shrink-0 text-slate-400" />
+                      <input ref={itemInputRef} value={itemQuery}
+                        onChange={e => { setItemQuery(e.target.value); if (stagingItem) { setStagingItem(null); setStagingPrice(""); setStagingPurchasePrice(""); } }}
+                        placeholder="ابحث عن صنف بالاسم أو الباركود..."
+                        className="flex-1 bg-transparent text-[13px] text-slate-800 outline-none placeholder:text-slate-400"
+                        onKeyDown={e => {
+                          if (!lookupOpen || !itemResults.length) return;
+                          if (e.key === "ArrowDown") { e.preventDefault(); setActiveIndex(i => Math.min(i + 1, itemResults.length - 1)); }
+                          else if (e.key === "ArrowUp") { e.preventDefault(); setActiveIndex(i => Math.max(i - 1, 0)); }
+                          else if (e.key === "Enter" && activeIndex >= 0) { e.preventDefault(); selectItemForStaging(itemResults[activeIndex]); }
+                          else if (e.key === "Escape") { setLookupOpen(false); setActiveIndex(-1); }
+                        }} />
+                      {stagingItem && (
+                        <button onClick={() => { setStagingItem(null); setStagingPrice(""); setStagingPurchasePrice(""); setItemQuery(""); setItemResults([]); setLookupOpen(false); setTimeout(() => itemInputRef.current?.focus(), 30); }}
+                          className="text-slate-400 hover:text-slate-600"><X className="h-4 w-4" /></button>
+                      )}
                     </div>
-                    <div className="text-[13px] font-black text-emerald-700 font-mono">{formatMoney(item.sale_price)} ج.م</div>
-                  </button>
-                ))}
-                {productSearch && productResults.length === 0 && (
-                  <div className="flex items-center justify-center py-10 text-slate-400 text-[12px] font-bold">لا توجد نتائج</div>
-                )}
-              </div>
-            </div>
-          ) : (
-            /* Invoice search */
-            <div className="flex flex-col flex-1 min-h-0 p-4 gap-3">
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-emerald-400" />
-                  <input
-                    ref={invoiceSearchRef}
-                    value={invoiceSearch}
-                    onChange={e => setInvoiceSearch(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && handleInvoiceSearch()}
-                    placeholder="رقم الفاتورة، اسم العميل، أو اسم الصنف..."
-                    className="w-full border border-emerald-200 rounded-sm py-2.5 pr-10 pl-3 text-[13px] font-bold text-slate-800 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-200 bg-white shadow-sm"
-                  />
-                </div>
-                <button onClick={handleInvoiceSearch} disabled={invoiceSearchLoading}
-                  className="px-5 rounded-sm bg-emerald-700 text-white text-[12px] font-black hover:bg-emerald-600 disabled:opacity-60 transition-all active:scale-95 shadow-sm">
-                  {invoiceSearchLoading ? "..." : "بحث"}
-                </button>
-              </div>
-
-              <div className="flex-1 min-h-0 overflow-y-auto space-y-2">
-                {invoiceResults.map(inv => (
-                  <div key={inv.id} className="rounded-sm border border-slate-200 bg-white p-4 shadow-sm hover:border-emerald-300 transition-colors">
-                    <div className="flex items-start justify-between mb-2">
-                      <div>
-                        <span className="text-[14px] font-black text-slate-800">فاتورة #{inv.invoice_no}</span>
-                        <span className="mr-2 text-[11px] font-bold text-slate-400">{new Date(inv.created_at).toLocaleDateString("ar-EG")}</span>
-                        {inv.status === "partially_returned" && (
-                          <span className="mr-1 text-[10px] font-black text-amber-600 bg-amber-50 border border-amber-200 rounded-sm px-1.5 py-0.5">مرتجع جزئياً</span>
-                        )}
+                    {lookupOpen && itemResults.length > 0 && (
+                      <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-50 rounded-xl border border-slate-100 bg-white shadow-xl max-h-60 overflow-y-auto">
+                        {itemResults.map((item, idx) => (
+                          <button key={item.id} onMouseDown={e => e.preventDefault()} onClick={() => selectItemForStaging(item)}
+                            className={`flex w-full items-center justify-between px-3 py-2.5 text-right transition-colors border-b border-slate-100 last:border-0 ${idx === activeIndex ? "bg-emerald-50" : "hover:bg-emerald-50"}`}>
+                            <div className="flex items-center gap-2">
+                              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-slate-100 border border-slate-200">
+                                <Package className="h-4 w-4 text-slate-300" />
+                              </div>
+                              <div>
+                                <div className="text-[13px] font-black text-slate-800">{item.name_ar || item.name}</div>
+                                <div className="text-[10px] font-bold text-slate-400">{item.item_code || item.barcode || `#${item.id}`}</div>
+                              </div>
+                            </div>
+                            <div className="text-[12px] font-black text-emerald-700">{formatMoney(item.sale_price)} ج.م</div>
+                          </button>
+                        ))}
                       </div>
-                      <button onClick={() => loadInvoice(inv)}
-                        className="px-4 py-1.5 rounded-sm bg-emerald-700 text-white text-[11px] font-black hover:bg-emerald-600 active:scale-95 transition-all">
-                        تحميل وإرجاع
+                    )}
+                  </div>
+                  <div className={`rounded-lg border px-4 py-3 transition-opacity ${stagingItem ? "border-emerald-200 bg-emerald-50" : "border-slate-100 bg-slate-50 opacity-40 pointer-events-none"}`}>
+                    {stagingItem && <div className="mb-2 text-[12px] font-black text-emerald-800 truncate">{stagingItem.name_ar || stagingItem.name}</div>}
+                    <div className="flex items-end gap-3 flex-wrap">
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-bold text-slate-500">المستودع</label>
+                        <select ref={stagingWHRef} value={stagingWarehouseId} onChange={e => setStagingWarehouseId(e.target.value)} onKeyDown={e => handleFieldKeyDown(e, stagingUnitRef, itemInputRef)}
+                          className="rounded-sm border border-slate-200 bg-white px-2 py-1.5 text-[12px] text-slate-800 outline-none focus:border-emerald-400 min-w-[120px]">
+                          {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                        </select>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-bold text-slate-500">الوحدة</label>
+                        <select ref={stagingUnitRef} value={stagingUnitId} onChange={e => setStagingUnitId(e.target.value)} onKeyDown={e => handleFieldKeyDown(e, stagingQtyRef, stagingWHRef)}
+                          className="rounded-sm border border-slate-200 bg-white px-2 py-1.5 text-[12px] text-slate-800 outline-none focus:border-emerald-400 min-w-[90px]">
+                          {units.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                        </select>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-bold text-slate-500">الكمية</label>
+                        <input ref={stagingQtyRef} type="number" min="1" value={stagingQty} onChange={e => setStagingQty(e.target.value)} onKeyDown={e => handleFieldKeyDown(e, stagingPriceRef, stagingUnitRef)}
+                          className="w-16 rounded-sm border border-slate-200 bg-white px-2 py-1.5 text-center text-[13px] font-black text-slate-800 outline-none focus:border-emerald-400" />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-bold text-slate-500">سعر البيع</label>
+                        <input ref={stagingPriceRef} type="number" min="0" value={stagingPrice} onChange={e => setStagingPrice(e.target.value)} onKeyDown={e => handleFieldKeyDown(e, addBtnRef, stagingQtyRef, true)}
+                          className="w-24 rounded-sm border border-slate-200 bg-white px-2 py-1.5 text-center text-[13px] font-black text-slate-800 outline-none focus:border-emerald-400" />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[10px] font-bold text-slate-400">سعر الشراء</label>
+                        <input type="number" value={stagingPurchasePrice} disabled tabIndex={-1}
+                          className="w-24 rounded-sm border border-slate-100 bg-slate-100 px-2 py-1.5 text-center text-[13px] font-bold text-slate-400 outline-none cursor-not-allowed" />
+                      </div>
+                      <button ref={addBtnRef} onClick={addStagingToCart} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addStagingToCart(); } }}
+                        className="mb-0.5 flex items-center gap-1.5 rounded-md bg-emerald-700 px-4 py-1.5 text-[12px] font-black text-white hover:bg-emerald-800 transition-colors">
+                        <Plus className="h-3.5 w-3.5" /> إضافة
                       </button>
                     </div>
-                    <div className="flex items-center gap-3 text-[11px] font-bold text-slate-500">
-                      <span>{inv.customer_name || "بدون عميل"}</span>
-                      <span>·</span>
-                      <span className="font-mono text-emerald-700">{formatMoney(inv.total)} ج.م</span>
-                      <span>·</span>
-                      <span>{(inv.lines || []).length} أصناف</span>
-                    </div>
                   </div>
-                ))}
-                {invoiceSearch && !invoiceSearchLoading && invoiceResults.length === 0 && (
-                  <div className="flex items-center justify-center py-10 text-slate-400 text-[12px] font-bold">لا توجد نتائج — جرب رقم الفاتورة مباشرة</div>
-                )}
-              </div>
+                </div>
+              )}
+              {cart.length > 0 ? (
+                <div className="flex-1 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+                  <table className="w-full text-right">
+                    <thead className="border-b border-slate-200 bg-slate-50 sticky top-0">
+                      <tr>
+                        <th className="px-4 py-3 text-[11px] font-bold text-slate-500">الصنف</th>
+                        <th className="px-3 py-3 text-[11px] font-bold text-slate-500 text-center">السعر</th>
+                        <th className="px-3 py-3 text-[11px] font-bold text-slate-500 text-center">الكمية</th>
+                        <th className="px-3 py-3 text-[11px] font-bold text-slate-500 text-center">الإجمالي</th>
+                        {!isLocked && <th className="px-3 py-3 w-10"></th>}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cart.map(l => (
+                        <tr key={l.key} className="border-b border-slate-100 hover:bg-slate-50">
+                          <td className="px-4 py-3 text-[13px] font-bold text-slate-800">{l.item_name}</td>
+                          <td className="px-3 py-3 text-center text-[13px] text-slate-600">{formatMoney(l.unit_price)}</td>
+                          <td className="px-3 py-3 text-center">
+                            {!isLocked ? (
+                              <div className="flex items-center justify-center gap-1">
+                                <button onClick={() => updateCartQty(l.key, -1)} className="flex h-6 w-6 items-center justify-center rounded-sm border border-slate-200 text-slate-500 hover:bg-slate-100"><Minus className="h-3 w-3" /></button>
+                                <span className="w-8 text-center text-[13px] font-black text-slate-700">{l.quantity}</span>
+                                <button onClick={() => updateCartQty(l.key, 1)} className="flex h-6 w-6 items-center justify-center rounded-sm border border-slate-200 text-slate-500 hover:bg-slate-100"><Plus className="h-3 w-3" /></button>
+                              </div>
+                            ) : <span className="text-[13px] font-black text-slate-700">{l.quantity}</span>}
+                          </td>
+                          <td className="px-3 py-3 text-center text-[13px] font-bold text-emerald-700">{formatMoney(l.unit_price * l.quantity)}</td>
+                          {!isLocked && <td className="px-3 py-3 text-center"><button onClick={() => removeCartLine(l.key)} className="text-rose-400 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button></td>}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-slate-200 bg-white text-slate-400">
+                  <RotateCcw className="h-10 w-10 opacity-30" />
+                  <div className="text-[13px] font-bold">ابحث عن صنف وأضفه للمرتجع</div>
+                </div>
+              )}
             </div>
           )}
-        </div>
+
+          {mode === "invoice" && (
+            <div className="flex flex-1 flex-col gap-4 overflow-hidden">
+              {!loadedInvoice ? (
+                <div className="flex flex-1 flex-col items-center justify-center gap-4 text-slate-400">
+                  <Search className="h-12 w-12 opacity-20" />
+                  <p className="text-[14px] font-black">لم يتم اختيار فاتورة بعد</p>
+                  <button onClick={() => setInvoicePickerOpen(true)} className="flex items-center gap-2 rounded-lg bg-emerald-700 px-5 py-2.5 text-[13px] font-black text-white hover:bg-emerald-800 transition-colors">
+                    <Search className="h-4 w-4" /> اختيار فاتورة
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-1 flex-col gap-4 overflow-hidden">
+                  <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 shrink-0">
+                    <div className="flex items-center gap-4 text-[13px]">
+                      <span className="font-black text-emerald-800">فاتورة #{loadedInvoice.invoice_no || loadedInvoice.doc_no}</span>
+                      {loadedInvoice.customer_name && <span className="text-slate-600">العميل: <strong>{loadedInvoice.customer_name}</strong></span>}
+                      <span className="text-slate-500">{formatDate(loadedInvoice.created_at)}</span>
+                      <span className="font-bold text-emerald-700">الإجمالي: {formatMoney(loadedInvoice.total)} ج.م</span>
+                    </div>
+                    {!isLocked && (
+                      <button onClick={() => setInvoicePickerOpen(true)} className="flex items-center gap-1.5 text-[12px] font-bold text-rose-600 hover:text-rose-800">
+                        <X className="h-3.5 w-3.5" /> تغيير الفاتورة
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex-1 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+                    <table className="w-full text-right">
+                      <thead className="border-b border-slate-200 bg-slate-50 sticky top-0">
+                        <tr>
+                          <th className="px-3 py-3 text-[11px] font-bold text-slate-500 w-8"></th>
+                          <th className="px-4 py-3 text-[11px] font-bold text-slate-500">الصنف</th>
+                          <th className="px-3 py-3 text-[11px] font-bold text-slate-500 text-center">الكمية الأصلية</th>
+                          <th className="px-3 py-3 text-[11px] font-bold text-slate-500 text-center">المُرتجع سابقاً</th>
+                          <th className="px-3 py-3 text-[11px] font-bold text-slate-500 text-center">الكمية للإرجاع</th>
+                          <th className="px-3 py-3 text-[11px] font-bold text-slate-500 text-center">الكمية بعد الإرجاع</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {invoiceLines.map(l => {
+                          const afterReturn = l.original_qty - l.already_returned - (l.checked ? l.qty_to_return : 0);
+                          return (
+                            <tr key={l.invoice_line_id} className={`border-b border-slate-100 transition-colors ${l.checked ? "bg-emerald-50/50" : "hover:bg-slate-50"}`}>
+                              <td className="px-3 py-3 text-center">
+                                <input type="checkbox" checked={l.checked} onChange={() => !isLocked && toggleInvoiceLine(l.invoice_line_id)} disabled={isLocked}
+                                  className="h-4 w-4 rounded border-slate-300 accent-emerald-600 cursor-pointer disabled:cursor-not-allowed" />
+                              </td>
+                              <td className="px-4 py-3 text-[13px] font-bold text-slate-800">{l.item_name}</td>
+                              <td className="px-3 py-3 text-center text-[13px] text-slate-600">{l.original_qty}</td>
+                              <td className="px-3 py-3 text-center text-[13px] text-slate-500">{l.already_returned || "—"}</td>
+                              <td className="px-3 py-3 text-center">
+                                <input type="number" min="0" max={l.original_qty - l.already_returned} value={l.qty_to_return}
+                                  onChange={e => setInvoiceLineQty(l.invoice_line_id, e.target.value)}
+                                  disabled={!l.checked || isLocked}
+                                  className="w-16 rounded-sm border border-slate-200 px-2 py-1 text-center text-[13px] font-black text-slate-800 outline-none focus:border-emerald-400 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed" />
+                              </td>
+                              <td className={`px-3 py-3 text-center text-[13px] font-bold ${afterReturn < 0 ? "text-rose-600" : "text-slate-700"}`}>{afterReturn}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                    {invoiceLines.length === 0 && (
+                      <div className="flex flex-col items-center justify-center gap-2 py-12 text-slate-400">
+                        <AlertCircle className="h-8 w-8 opacity-30" />
+                        <div className="text-[13px]">لا توجد أصناف قابلة للإرجاع في هذه الفاتورة</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </main>
       </div>
+
+      <Modal open={showWarningModal} onClose={() => setShowWarningModal(false)} title="تأكيد الإلغاء">
+        <div className="flex flex-col gap-5">
+          <p className="text-[14px] text-slate-700">هل تريد إلغاء المرتجع الحالي؟ سيتم فقدان البيانات غير المحفوظة.</p>
+          <div className="flex gap-3 justify-end">
+            <button onClick={() => setShowWarningModal(false)} className="rounded-md border border-slate-200 px-5 py-2 text-[13px] font-bold text-slate-600 hover:bg-slate-50">لا، متابعة</button>
+            <button onClick={() => { setShowWarningModal(false); resetToIdle(); }} className="rounded-md bg-rose-600 px-5 py-2 text-[13px] font-bold text-white hover:bg-rose-700">نعم، إلغاء</button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={showEditWarnModal} onClose={() => setShowEditWarnModal(false)} title="تعديل المرتجع">
+        <div className="flex flex-col gap-5">
+          <p className="text-[14px] text-slate-700">هل تريد تعديل هذا المرتجع؟ سيتم فتح المرتجع للتعديل.</p>
+          <div className="flex gap-3 justify-end">
+            <button onClick={() => setShowEditWarnModal(false)} className="rounded-md border border-slate-200 px-5 py-2 text-[13px] font-bold text-slate-600 hover:bg-slate-50">إلغاء</button>
+            <button onClick={() => { setShowEditWarnModal(false); setIsLocked(false); }} className="rounded-md bg-indigo-600 px-5 py-2 text-[13px] font-bold text-white hover:bg-indigo-700">نعم، تعديل</button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={showSwitchInvoiceWarning} onClose={() => setShowSwitchInvoiceWarning(false)} title="تغيير الفاتورة">
+        <div className="flex flex-col gap-5">
+          <p className="text-[14px] text-slate-700">يوجد مرتجع قيد التحرير. هل تريد حفظه أولاً قبل اختيار فاتورة أخرى؟</p>
+          <div className="flex gap-3 justify-end">
+            <button onClick={() => setShowSwitchInvoiceWarning(false)} className="rounded-md border border-slate-200 px-5 py-2 text-[13px] font-bold text-slate-600 hover:bg-slate-50">إلغاء</button>
+            <button onClick={() => { setShowSwitchInvoiceWarning(false); setLoadedInvoice(null); setInvoiceLines([]); setInvoicePickerOpen(true); }} className="rounded-md bg-rose-600 px-5 py-2 text-[13px] font-bold text-white hover:bg-rose-700">تجاهل وتغيير</button>
+            <button onClick={async () => { setShowSwitchInvoiceWarning(false); await handleSave(); setLoadedInvoice(null); setInvoiceLines([]); setInvoicePickerOpen(true); }} className="rounded-md bg-emerald-700 px-5 py-2 text-[13px] font-bold text-white hover:bg-emerald-800">حفظ ثم تغيير</button>
+          </div>
+        </div>
+      </Modal>
+
+      <InvoicePickerModal open={invoicePickerOpen && !isEditMode} onClose={() => { setInvoicePickerOpen(false); if (!loadedInvoice) setMode(null); }} onSelectInvoice={p => setPickerSelectedInvoice(p)} customers={customers} />
+      {pickerSelectedInvoice && <InvoiceDetailModal invoice={pickerSelectedInvoice} onClose={() => setPickerSelectedInvoice(null)} onConfirm={handleDetailConfirm} />}
+      <CustomerCreateModal open={customerCreateOpen} onClose={() => setCustomerCreateOpen(false)} onCreated={c => { setCustomers(prev => [c, ...prev]); setCustomer({ id: c.id, name: c.name }); setCustomerCreateOpen(false); }} />
     </div>
   );
 }
