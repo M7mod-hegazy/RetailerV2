@@ -6,6 +6,7 @@ function dailySales(startDate, endDate, opts = {}) {
   const db = getDb();
   const params = [];
   const { customer_id, category_id, item_id } = opts;
+  if (customer_id || category_id || item_id || opts.cashier_id || opts.status || opts.payment_type) return _detailSalesQuery(startDate, endDate, opts);
   const costCol = getCostColumn(opts.cost_method);
   return db.prepare(`
     SELECT DATE(i.created_at) AS date,
@@ -67,10 +68,89 @@ function detailedSales(startDate, endDate, opts = {}) {
   );
 }
 
+function _detailSalesQuery(startDate, endDate, opts = {}) {
+  const db = getDb();
+  const params = [];
+  const { customer_id, category_id, item_id, status, payment_type, cashier_id } = opts;
+  return db.prepare(`
+    SELECT i.invoice_no, i.doc_no,
+      DATE(i.created_at) AS date,
+      COALESCE(c.name, 'نقدي') AS customer_name,
+      u.full_name AS cashier,
+      i.customer_id,
+      i.payment_type, i.status,
+      i.subtotal, i.discount, i.total,
+      i.total - i.discount AS net_sales,
+      COUNT(il.id) AS item_count
+    FROM invoices i
+    LEFT JOIN customers c ON c.id = i.customer_id
+    LEFT JOIN users u ON u.id = COALESCE(i.user_id, (SELECT user_id FROM shifts WHERE id = i.shift_id))
+    LEFT JOIN invoice_lines il ON il.invoice_id = i.id
+    WHERE i.status != 'cancelled' ${addDateFilter("i.created_at", startDate, endDate, params)}
+      ${customer_id ? " AND i.customer_id = ?" : ""}
+      ${category_id ? " AND i.id IN (SELECT DISTINCT il2.invoice_id FROM invoice_lines il2 JOIN items it2 ON it2.id = il2.item_id WHERE it2.category_id = ?)" : ""}
+      ${item_id ? " AND i.id IN (SELECT DISTINCT il2.invoice_id FROM invoice_lines il2 WHERE il2.item_id = ?)" : ""}
+      ${status ? " AND i.status = ?" : ""}
+      ${payment_type ? " AND i.payment_type = ?" : ""}
+      ${cashier_id ? " AND COALESCE(i.user_id, (SELECT user_id FROM shifts WHERE id = i.shift_id)) = ?" : ""}
+    GROUP BY i.id
+    ORDER BY i.created_at DESC
+  `).all(
+    ...params,
+    ...(customer_id ? [customer_id] : []),
+    ...(category_id ? [category_id] : []),
+    ...(item_id ? [item_id] : []),
+    ...(status ? [status] : []),
+    ...(payment_type ? [payment_type] : []),
+    ...(cashier_id ? [cashier_id] : []),
+  );
+}
+
+function _detailItemSalesQuery(startDate, endDate, opts = {}) {
+  const db = getDb();
+  const params = [];
+  const { customer_id, category_id, item_id, status, payment_type, cashier_id } = opts;
+  const costCol = getCostColumn(opts.cost_method);
+  return db.prepare(`
+    SELECT i.invoice_no, DATE(i.created_at) AS date,
+      COALESCE(c.name, 'نقدي') AS customer_name,
+      u.full_name AS cashier,
+      it.code AS item_code, it.name AS item_name,
+      COALESCE(cat.name, 'غير مصنف') AS category_name,
+      il.quantity, il.unit_price, il.discount AS line_discount, il.line_total,
+      (il.quantity * ${costCol}) AS line_cost,
+      il.line_total - (il.quantity * ${costCol}) AS line_profit,
+      i.payment_type, i.status
+    FROM invoice_lines il
+    JOIN invoices i ON i.id = il.invoice_id
+    JOIN items it ON it.id = il.item_id
+    LEFT JOIN item_categories cat ON cat.id = it.category_id
+    LEFT JOIN customers c ON c.id = i.customer_id
+    LEFT JOIN users u ON u.id = COALESCE(i.user_id, (SELECT user_id FROM shifts WHERE id = i.shift_id))
+    WHERE i.status != 'cancelled' ${addDateFilter("i.created_at", startDate, endDate, params)}
+      ${customer_id ? " AND i.customer_id = ?" : ""}
+      ${category_id ? " AND it.category_id = ?" : ""}
+      ${item_id ? " AND it.id = ?" : ""}
+      ${status ? " AND i.status = ?" : ""}
+      ${payment_type ? " AND i.payment_type = ?" : ""}
+      ${cashier_id ? " AND COALESCE(i.user_id, (SELECT user_id FROM shifts WHERE id = i.shift_id)) = ?" : ""}
+    ORDER BY i.created_at DESC, il.id
+  `).all(
+    ...params,
+    ...(customer_id ? [customer_id] : []),
+    ...(category_id ? [category_id] : []),
+    ...(item_id ? [item_id] : []),
+    ...(status ? [status] : []),
+    ...(payment_type ? [payment_type] : []),
+    ...(cashier_id ? [cashier_id] : []),
+  );
+}
+
 function salesByItem(startDate, endDate, opts = {}) {
   const db = getDb();
   const params = [];
   const { category_id, item_id } = opts;
+  if (opts.customer_id || opts.cashier_id || opts.status || opts.payment_type || category_id || item_id) return _detailItemSalesQuery(startDate, endDate, opts);
   const costCol = getCostColumn(opts.cost_method);
   return db.prepare(`
     SELECT COALESCE(it.code, 'ITEM-' || it.id) AS item_code,
@@ -101,6 +181,7 @@ function salesByCategory(startDate, endDate, opts = {}) {
   const db = getDb();
   const params = [];
   const { category_id } = opts;
+  if (opts.customer_id || opts.cashier_id || opts.status || opts.payment_type || opts.item_id) return _detailItemSalesQuery(startDate, endDate, opts);
   const costCol = getCostColumn(opts.cost_method);
   return db.prepare(`
     SELECT COALESCE(c.name, 'غير مصنف') AS category_name,
@@ -128,6 +209,7 @@ function salesByCashier(startDate, endDate, opts = {}) {
   const db = getDb();
   const params = [];
   const { cashier_id } = opts;
+  if (cashier_id || opts.customer_id || opts.status || opts.payment_type || opts.category_id || opts.item_id) return _detailSalesQuery(startDate, endDate, opts);
   return db.prepare(`
     SELECT u.full_name AS cashier,
       COUNT(DISTINCT i.id) AS invoice_count,
@@ -152,6 +234,7 @@ function salesByPayment(startDate, endDate, opts = {}) {
   const db = getDb();
   const params = [];
   const { customer_id, category_id } = opts;
+  if (customer_id || opts.cashier_id || opts.status || category_id || opts.item_id) return _detailSalesQuery(startDate, endDate, opts);
   return db.prepare(`
     SELECT i.payment_type,
       COUNT(DISTINCT i.id) AS invoice_count,
@@ -232,6 +315,7 @@ function grossNetSales(startDate, endDate, opts = {}) {
   const db = getDb();
   const params = [];
   const { customer_id, category_id, item_id } = opts;
+  if (customer_id || category_id || item_id) return _detailSalesQuery(startDate, endDate, opts);
   const costCol = getCostColumn(opts.cost_method);
   return db.prepare(`
     SELECT DATE(i.created_at) AS date,
@@ -393,7 +477,44 @@ function shiftHistory(startDate, endDate, opts = {}) {
   `).all();
 }
 
+function salesReturnsSummary(startDate, endDate, opts = {}) {
+  const db = getDb();
+  const params = [];
+  const { customer_id } = opts;
+  return db.prepare(`
+    SELECT DATE(sr.created_at) AS date,
+      COUNT(*) AS return_count,
+      COALESCE(SUM(sr.total), 0) AS returns_total,
+      COUNT(DISTINCT sr.customer_id) AS customer_count,
+      COALESCE(SUM(srl.quantity), 0) AS items_returned
+    FROM sales_returns sr
+    LEFT JOIN sales_return_lines srl ON srl.sales_return_id = sr.id
+    WHERE sr.status = 'active' ${addDateFilter("sr.created_at", startDate, endDate, params)}
+      ${customer_id ? " AND sr.customer_id = ?" : ""}
+    GROUP BY DATE(sr.created_at)
+    ORDER BY date DESC
+  `).all(...params, ...(customer_id ? [customer_id] : []));
+}
+
+function salesReturnsByCustomer(startDate, endDate, opts = {}) {
+  const db = getDb();
+  const params = [];
+  return db.prepare(`
+    SELECT COALESCE(c.name, 'نقدي') AS customer_name,
+      COUNT(sr.id) AS return_count,
+      COALESCE(SUM(sr.total), 0) AS returns_total,
+      MAX(DATE(sr.created_at)) AS last_return_date
+    FROM sales_returns sr
+    LEFT JOIN customers c ON c.id = sr.customer_id
+    WHERE sr.status = 'active' ${addDateFilter("sr.created_at", startDate, endDate, params)}
+    GROUP BY c.id
+    ORDER BY returns_total DESC
+  `).all(...params);
+}
+
 module.exports = {
+  _detailSalesQuery,
+  _detailItemSalesQuery,
   dailySales,
   detailedSales,
   salesByItem,
@@ -404,6 +525,8 @@ module.exports = {
   periodComparison,
   grossNetSales,
   salesReturns,
+  salesReturnsSummary,
+  salesReturnsByCustomer,
   discountAnalysis,
   marginByItem,
   marginByCategory,

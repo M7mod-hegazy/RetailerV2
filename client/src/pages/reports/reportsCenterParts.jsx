@@ -1,7 +1,7 @@
-import React, { useState, useRef, useEffect, useMemo } from "react";
+import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronDown, Check, CalendarDays, Search, X, Package, User } from "lucide-react";
-import { PREVIEW_COLUMNS, GHOST_ROWS, COL_TYPE_STYLE } from "./reportsCenterConfig";
+import { ChevronDown, Check, CalendarDays, Search, X, Package, User, List, LayoutList, BarChart3, Filter } from "lucide-react";
+import { PREVIEW_COLUMNS, GHOST_ROWS, CAT_PREVIEW_COLUMNS, CAT_GHOST_ROWS, COL_TYPE_STYLE, FILTER_DIMENSIONS } from "./reportsCenterConfig";
 import SearchInput from "../../components/ui/SearchInput";
 import Highlight from "../../components/ui/Highlight";
 import { fuzzyFilterRows } from "../../utils/search";
@@ -320,6 +320,8 @@ function getPreviewColumns(report, catId) {
   if (Array.isArray(report?.columns) && report.columns.length) {
     return report.columns.map(normalizeCol).filter(Boolean);
   }
+  const catCols = CAT_PREVIEW_COLUMNS[catId];
+  if (catCols) return catCols.map(normalizeCol).filter(Boolean);
   return (PREVIEW_COLUMNS[catId] || []).map(normalizeCol).filter(Boolean);
 }
 
@@ -367,7 +369,7 @@ export function ColumnPreviewStrip({ catId, colVisibility, report }) {
 export function GhostPreviewRows({ catId, colVisibility, report }) {
   const cols = getPreviewColumns(report, catId);
   const visible = cols.filter((c) => colVisibility[c.key] !== false);
-  const ghostRows = GHOST_ROWS[catId] || [];
+  const ghostRows = CAT_GHOST_ROWS[catId] || GHOST_ROWS[catId] || [];
 
   // Generate rows: use GHOST_ROWS objects if available, otherwise build from columns
   const rows = ghostRows.length
@@ -496,5 +498,400 @@ export function LookupEntityFilter({ entity, value, onChange, placeholder }) {
         </>
       )}
     </div>
+  );
+}
+
+// ─── Classification Selector ────────────────────────────────────────────
+export function ClassificationSelector({ classifications, value, onChange, formatLabel }) {
+  const fmt = formatLabel || ((x) => x);
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    const fn = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", fn);
+    return () => document.removeEventListener("mousedown", fn);
+  }, []);
+  const selected = classifications.find((c) => c.id === value);
+  return (
+    <div className="relative w-full" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center justify-between rounded-[10px] border border-zinc-200 bg-white px-3 py-2.5 text-[12px] font-bold text-zinc-900 outline-none transition-all hover:border-emerald-400 focus:border-emerald-500 shadow-sm"
+      >
+        <span className="truncate">{selected ? fmt(selected.label_key) : "اختر تصنيف..."}</span>
+        <ChevronDown size={14} className={`text-zinc-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -4, scale: 0.97 }}
+            animate={{ opacity: 1, y: 4, scale: 1 }}
+            exit={{ opacity: 0, y: -4, scale: 0.97 }}
+            transition={{ duration: 0.13 }}
+            className="absolute left-0 right-0 z-50 rounded-[12px] border border-zinc-200 bg-white p-1 shadow-xl"
+          >
+            <div className="max-h-56 overflow-y-auto scrollbar-hide">
+              {classifications.map((cls) => (
+                <button
+                  key={cls.id}
+                  type="button"
+                  onClick={() => { onChange(cls.id); setOpen(false); }}
+                  className={`flex w-full items-center justify-between rounded-[6px] px-2.5 py-2 text-[12px] font-bold transition-colors ${
+                    value === cls.id ? "bg-emerald-500/10 text-emerald-600" : "text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900"
+                  }`}
+                >
+                  <span>{fmt(cls.label_key)}</span>
+                  <div className="flex items-center gap-1.5">
+                    {cls.availableModes.includes("summary") && <span className="text-[9px] text-zinc-400 bg-zinc-100 px-1.5 py-0.5 rounded">ملخص</span>}
+                    {cls.availableModes.includes("detailed") && <span className="text-[9px] text-zinc-400 bg-zinc-100 px-1.5 py-0.5 rounded">تفصيلي</span>}
+                    {value === cls.id && <Check size={13} className="text-emerald-500" />}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// ─── Data Mode Toggle ───────────────────────────────────────────────────
+export function DataModeToggle({ availableModes, value, onChange }) {
+  if (!availableModes || availableModes.length <= 1) return null;
+  return (
+    <div className="flex bg-zinc-100 rounded-[10px] p-0.5 shadow-inner">
+      {availableModes.map((mode) => (
+        <button
+          key={mode}
+          type="button"
+          onClick={() => onChange(mode)}
+          className={`flex items-center gap-1.5 px-3.5 py-2 rounded-[8px] text-[11px] font-bold transition-all ${
+            value === mode
+              ? "bg-white text-zinc-900 shadow-sm border border-zinc-200"
+              : "text-zinc-500 hover:text-zinc-700"
+          }`}
+        >
+          {mode === "detailed" ? <List size={13} /> : <LayoutList size={13} />}
+          {mode === "detailed" ? "تفصيلي" : "ملخص"}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─── Multi-Select Checkboxes ────────────────────────────────────────────
+export function MultiSelectCheckboxes({ options, value = [], onChange, label, formatLabel }) {
+  const fmt = formatLabel || ((x) => x);
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    const fn = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", fn);
+    return () => document.removeEventListener("mousedown", fn);
+  }, []);
+  const selectedCount = value.length;
+  return (
+    <div className="relative w-full" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center justify-between rounded-[10px] border border-zinc-200 bg-white px-3 py-2.5 text-[12px] font-bold text-zinc-900 outline-none transition-all hover:border-emerald-400 shadow-sm"
+      >
+        <span className="truncate">
+          {selectedCount > 0 ? `${label}: ${selectedCount} مختار` : label}
+        </span>
+        <Filter size={14} className="text-zinc-400" />
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 4 }}
+            exit={{ opacity: 0, y: -4 }}
+            className="absolute left-0 right-0 z-50 rounded-[12px] border border-zinc-200 bg-white p-2 shadow-xl"
+          >
+            <div className="max-h-48 overflow-y-auto space-y-0.5">
+              {options.map((opt) => {
+                const checked = value.includes(opt.value);
+                return (
+                  <label
+                    key={opt.value}
+                    className="flex items-center gap-2.5 cursor-pointer rounded-[6px] px-2 py-1.5 hover:bg-zinc-50 transition-colors"
+                  >
+                    <div
+                      onClick={() => {
+                        const next = checked
+                          ? value.filter((v) => v !== opt.value)
+                          : [...value, opt.value];
+                        onChange(next);
+                      }}
+                      className={`w-4 h-4 rounded-[4px] border-2 flex items-center justify-center transition-all shrink-0 ${
+                        checked ? "bg-emerald-500 border-emerald-500" : "border-zinc-300 hover:border-emerald-400"
+                      }`}
+                    >
+                      {checked && <Check size={10} className="text-white" strokeWidth={3} />}
+                    </div>
+                    <span className="text-[12px] font-bold text-zinc-700">{fmt(opt.label_key)}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// ─── Source Card ────────────────────────────────────────────────────────
+export function SourceCard({ source, classifications, selectedClassification, selectedMode, onClassificationChange, onModeChange, onEnter }) {
+  const Icon = source.icon;
+  return (
+    <div className="group relative flex flex-col rounded-[24px] bg-white border border-zinc-200 p-6 shadow-sm hover:shadow-md hover:border-emerald-300 transition-all duration-300">
+      <div className="flex items-start justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[14px] bg-zinc-50 border border-zinc-100" style={{ color: source.color }}>
+            <Icon size={22} strokeWidth={2} />
+          </div>
+          <div>
+            <h3 className="text-[15px] font-black text-zinc-900">{source.label}</h3>
+            <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">{source.id}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-3 mt-1">
+        <ClassificationSelector
+          classifications={classifications}
+          value={selectedClassification}
+          onChange={onClassificationChange}
+        />
+        {classifications.find((c) => c.id === selectedClassification) && (
+          <DataModeToggle
+            availableModes={classifications.find((c) => c.id === selectedClassification)?.availableModes || ["detailed"]}
+            value={selectedMode}
+            onChange={onModeChange}
+          />
+        )}
+      </div>
+
+      <button
+        onClick={onEnter}
+        disabled={!selectedClassification}
+        className="mt-4 w-full flex items-center justify-center gap-2 rounded-[12px] bg-zinc-900 px-4 py-3 text-[13px] font-bold text-white transition-all hover:bg-emerald-600 hover:shadow-lg disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98]"
+      >
+        <BarChart3 size={15} />
+        عرض التقرير
+      </button>
+    </div>
+  );
+}
+
+// ─── Dimension Filter — smart dispatcher ──────────────────────────
+export function DimensionFilter({ dimension, value, onChange, formatLabel }) {
+  const fmt = formatLabel || ((x) => x);
+  if (dimension.type === "lookup") {
+    const entityLabel = {
+      category: "تصنيف", product: "منتج", customer: "عميل",
+      supplier: "مورد", user: "مستخدم", warehouse: "مخزن",
+    }[dimension.entity] || dimension.entity;
+    return (
+      <div className="space-y-1.5">
+        <label className="block text-[11px] font-bold text-zinc-500">{fmt(dimension.label)}</label>
+        <LookupEntityFilter entity={dimension.entity} value={value || ""}
+          onChange={(v) => onChange(dimension.key, v)}
+          placeholder={`بحث عن ${entityLabel}...`} />
+      </div>
+    );
+  }
+  if (dimension.type === "select") {
+    return (
+      <div className="space-y-1.5">
+        <label className="block text-[11px] font-bold text-zinc-500">{fmt(dimension.label)}</label>
+        <select value={value || ""} onChange={(e) => onChange(dimension.key, e.target.value)}
+          className="w-full h-10 px-3 rounded-xl border border-zinc-200 bg-zinc-50 text-[13px] text-zinc-900 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all font-medium">
+          <option value="">الكل</option>
+          {(dimension.options || []).map((opt) => (
+            <option key={opt.value} value={opt.value}>{fmt(opt.label || opt.label_key)}</option>
+          ))}
+        </select>
+      </div>
+    );
+  }
+  return null;
+}
+
+// ─── Filter Panel (always-visible top panel) ──────────────────────
+const filterGroupVariants = {
+  hidden: { opacity: 0, y: -6, height: 0 },
+  visible: { opacity: 1, y: 0, height: "auto" },
+};
+
+export function FilterPanelTop({
+  sourceKey, clsDef, filters, onFilterChange, dateRange, onDateChange,
+  datePresets, onDatePreset, costMethod, onCostChange, scope, onScopeChange,
+  hasProfit, supportsDates, supportsScope, isFetching,
+}) {
+  const dimensions = useMemo(() => {
+    if (!clsDef?.dimensions || !sourceKey) return [];
+    const pool = FILTER_DIMENSIONS[sourceKey] || [];
+    return clsDef.dimensions.map((key) => pool.find((d) => d.key === key)).filter(Boolean);
+  }, [clsDef, sourceKey]);
+
+  const activeCount = useMemo(() => {
+    let count = 0;
+    if (filters.q) count++;
+    dimensions.forEach((d) => { if (filters[d.key]) count++; });
+    if (costMethod && costMethod !== "wacc") count++;
+    if (scope?.type !== "all") count++;
+    return count;
+  }, [filters, dimensions, costMethod, scope]);
+
+  const [collapsed, setCollapsed] = useState(false);
+
+  return (
+    <motion.div layout className="bg-white rounded-[24px] border border-zinc-200 shadow-sm overflow-hidden">
+      {/* Collapse header */}
+      <button
+        onClick={() => setCollapsed(!collapsed)}
+        className="w-full flex items-center justify-between px-6 py-2.5 text-[11px] font-bold text-zinc-500 hover:bg-zinc-50 transition-colors border-b border-zinc-100"
+      >
+        <span className="flex items-center gap-2">
+          <Filter size={14} />
+          {collapsed ? "إظهار الفلاتر" : "إخفاء الفلاتر"}
+          {activeCount > 0 && (
+            <span className="bg-emerald-100 text-emerald-700 text-[10px] px-2 py-0.5 rounded-full font-black">
+              {activeCount}
+            </span>
+          )}
+        </span>
+        <motion.div animate={{ rotate: collapsed ? 0 : 180 }} transition={{ duration: 0.2 }}>
+          <ChevronDown size={14} />
+        </motion.div>
+      </button>
+
+      <AnimatePresence initial={false}>
+        {!collapsed && (
+          <motion.div
+            key="filter-body"
+            initial="hidden"
+            animate="visible"
+            exit="hidden"
+            variants={filterGroupVariants}
+            transition={{ duration: 0.25, ease: "easeInOut" }}
+          >
+            <div className="p-6">
+              {/* Loading indicator bar */}
+              <motion.div
+                className="h-0.5 bg-emerald-500/30 rounded-full mb-4 overflow-hidden"
+                initial={false}
+              >
+                <motion.div
+                  className="h-full bg-emerald-500 rounded-full"
+                  animate={isFetching ? { x: ["-100%", "200%"], opacity: [0.3, 1, 0.3] } : { x: "100%", opacity: 0 }}
+                  transition={isFetching ? { duration: 1, repeat: Infinity, ease: "linear" } : { duration: 0.3 }}
+                />
+              </motion.div>
+
+              {/* Search + Date + Dimensions grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+                {/* Search */}
+                <div className="space-y-1.5">
+                  <label className="block text-[11px] font-bold text-zinc-500">بحث عام</label>
+                  <div className="relative">
+                    <Search size={15} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+                    <input type="text" value={filters.q || ""}
+                      onChange={(e) => onFilterChange("q", e.target.value)}
+                      placeholder="ابحث..."
+                      className="w-full h-10 pr-10 pl-3 rounded-xl border border-zinc-200 bg-zinc-50 text-[13px] text-zinc-900 font-bold focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all"
+                    />
+                  </div>
+                </div>
+
+                {/* Date range */}
+                {supportsDates && datePresets && (
+                  <div className="space-y-1.5 lg:col-span-2 xl:col-span-2">
+                    <label className="flex items-center justify-between text-[11px] font-bold text-zinc-500">
+                      <span>الفترة الزمنية</span>
+                      <div className="flex gap-1">
+                        {datePresets.map((p) => (
+                          <button key={p.label} onClick={() => onDatePreset?.(p)}
+                            className="text-[10px] text-zinc-400 hover:text-zinc-900 bg-zinc-100 hover:bg-zinc-200 px-2 py-0.5 rounded-md transition-colors"
+                          >
+                            {p.label}
+                          </button>
+                        ))}
+                      </div>
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input type="date" value={dateRange?.from || ""}
+                        onChange={(e) => onDateChange?.("from", e.target.value)}
+                        className="flex-1 h-10 px-3 rounded-xl border border-zinc-200 bg-zinc-50 text-[13px] font-bold focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all text-zinc-900"
+                      />
+                      <span className="text-zinc-400 shrink-0">–</span>
+                      <input type="date" value={dateRange?.to || ""}
+                        onChange={(e) => onDateChange?.("to", e.target.value)}
+                        className="flex-1 h-10 px-3 rounded-xl border border-zinc-200 bg-zinc-50 text-[13px] font-bold focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all text-zinc-900"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Dimension filters */}
+                {dimensions.map((dim) => (
+                  <motion.div
+                    key={dim.key}
+                    layout
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    {dim.type === "select" ? (
+                      <div className="space-y-1.5">
+                        <label className="block text-[11px] font-bold text-zinc-500">{dim.label}</label>
+                        <select value={filters[dim.key] || ""}
+                          onChange={(e) => onFilterChange(dim.key, e.target.value)}
+                          className="w-full h-10 px-3 rounded-xl border border-zinc-200 bg-zinc-50 text-[13px] text-zinc-900 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all font-medium"
+                        >
+                          <option value="">الكل</option>
+                          {(dim.options || []).map((opt) => (
+                            <option key={opt.value} value={opt.value}>{opt.label || opt.label_key}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : dim.type === "lookup" ? (
+                      <div className="space-y-1.5">
+                        <label className="block text-[11px] font-bold text-zinc-500">{dim.label}</label>
+                        <LookupEntityFilter entity={dim.entity} value={filters[dim.key] || ""}
+                          onChange={(v) => onFilterChange(dim.key, v)}
+                          placeholder={`بحث عن ${({ category: "تصنيف", product: "منتج", customer: "عميل", supplier: "مورد", user: "مستخدم", warehouse: "مخزن" })[dim.entity] || ""}...`}
+                        />
+                      </div>
+                    ) : null}
+                  </motion.div>
+                ))}
+
+                {/* Cost method */}
+                {hasProfit && (
+                  <div className="space-y-1.5">
+                    <label className="block text-[11px] font-bold text-zinc-500">طريقة التكلفة</label>
+                    <select value={costMethod || "wacc"} onChange={(e) => onCostChange?.(e.target.value)}
+                      className="w-full h-10 px-3 rounded-xl border border-zinc-200 bg-zinc-50 text-[13px] text-zinc-900 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all font-medium"
+                    >
+                      {[{ value: "wacc", label: "متوسط التكلفة" }, { value: "last_purchase", label: "آخر سعر شراء" }, { value: "fifo", label: "FIFO" }, { value: "purchase_price", label: "سعر الشراء" }].map((m) => (
+                        <option key={m.value} value={m.value}>{m.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
   );
 }

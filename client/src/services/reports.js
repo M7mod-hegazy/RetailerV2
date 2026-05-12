@@ -13,6 +13,18 @@ export const reportsApi = {
     return api.get(`/api/reports/run/${slug}?${query.toString()}`).then((res) => res.data);
   },
 
+  fetchSourceReport(sourceKey, classification, dataMode, params = {}) {
+    const query = new URLSearchParams({ classification, dataMode });
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== "") query.set(k, v);
+    });
+    return api.get(`/api/reports/source/${sourceKey}/run?${query.toString()}`).then((res) => res.data);
+  },
+
+  fetchSourceClassifications(sourceKey) {
+    return api.get(`/api/reports/source/${sourceKey}/classifications`).then((res) => res.data?.data || null);
+  },
+
   exportReport(slug, format, params = {}) {
     const { onProgress, columns, ...rest } = params;
     const query = new URLSearchParams({ format, ...rest });

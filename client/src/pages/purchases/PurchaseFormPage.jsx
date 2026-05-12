@@ -4,13 +4,14 @@ import {
   Warehouse, ChevronDown, ArrowLeft, X, CreditCard, Wallet, Banknote,
   AlertTriangle, Clock, ExternalLink, TrendingUp, Building2, Phone,
   ImageIcon, ZoomIn, Printer, CheckCircle2, Layers, Lock, Pencil,
-  FilePlus, Sparkles,
+  FilePlus, Sparkles, Receipt, RefreshCw, ArrowUpDown,
 } from "lucide-react";
 import api from "../../services/api";
 import { Link, useNavigate, useParams, useLocation } from "react-router-dom";
 import Modal from "../../components/ui/Modal";
 import DataGrid from "../../components/ui/DataGrid";
 import PrintPreviewModal from "../../components/print/PrintPreviewModal";
+import ConfirmDialog from "../../components/ui/ConfirmDialog";
 import toast from "react-hot-toast";
 import SearchInput from "../../components/ui/SearchInput";
 import Highlight from "../../components/ui/Highlight";
@@ -60,6 +61,102 @@ function LookupList({ items, onPick, activeIndex, query, emptyLabel = "لا تو
             </div>
           </button>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function formatMoney(value) {
+  return Number(value || 0).toLocaleString("ar-EG", {
+    minimumFractionDigits: 3, maximumFractionDigits: 3,
+  });
+}
+
+function formatArabicDateTime(date) {
+  return new Intl.DateTimeFormat("ar-EG", {
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit",
+  }).format(date);
+}
+
+function toDateInput(date = new Date()) {
+  return date.toISOString().slice(0, 10);
+}
+
+const PAYMENT_METHOD_LABELS = {
+  cash: "نقدي", bank_transfer: "حوالة بنكية", credit: "آجل",
+  future_due: "استحقاق لاحق", multi: "متعدد",
+};
+
+const PURCHASE_STATUS_STYLES = {
+  active: { label: "نشط", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  voided: { label: "ملغي", cls: "bg-rose-50 text-rose-700 border-rose-200" },
+  cancelled: { label: "ملغي", cls: "bg-slate-100 text-slate-500 border-slate-200" },
+};
+
+function PurchasePreviewModal({ purchase, onClose }) {
+  const navigate = useNavigate();
+  const [detail, setDetail] = useState(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    if (!purchase) return;
+    setLoading(true);
+    const id = purchase.purchase_id || purchase.id;
+    api.get(`/api/purchases/${id}`)
+      .then(r => setDetail(r.data.data))
+      .catch(() => setDetail(purchase))
+      .finally(() => setLoading(false));
+  }, [purchase?.purchase_id, purchase?.id]);
+  if (!purchase) return null;
+  return (
+    <div className="flex flex-col gap-4">
+      {loading ? (
+        <div className="flex items-center justify-center h-32 text-slate-400 font-black animate-pulse">جاري التحميل...</div>
+      ) : (
+        <>
+          <div className="flex items-center justify-between rounded-sm bg-emerald-50 border border-emerald-200 px-4 py-3">
+            <div className="flex items-center gap-4 text-[13px] flex-wrap">
+              <span className="font-black text-emerald-800">فاتورة #{detail?.doc_no || purchase.doc_no}</span>
+              <span className="text-slate-600">المورد: <strong>{(detail || purchase).supplier_name || "—"}</strong></span>
+              <span className="text-slate-500">{(detail || purchase).created_at ? formatArabicDateTime(new Date((detail || purchase).created_at)) : "—"}</span>
+              <span className="font-bold text-emerald-700">الإجمالي: {formatMoney((detail || purchase).total)} ج.م</span>
+            </div>
+          </div>
+          <div className="max-h-[320px] overflow-auto rounded-sm border border-slate-200">
+            <table className="w-full text-[12px] border-collapse">
+              <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
+                <tr>
+                  <th className="px-3 py-2.5 text-center font-black text-slate-500">الكود</th>
+                  <th className="px-4 py-2.5 text-right font-black text-slate-500">الصنف</th>
+                  <th className="px-3 py-2.5 text-center font-black text-slate-500">الكمية</th>
+                  <th className="px-3 py-2.5 text-center font-black text-slate-500">التكلفة</th>
+                  <th className="px-3 py-2.5 text-center font-black text-slate-500">الإجمالي</th>
+                </tr>
+              </thead>
+              <tbody>
+                {((detail || purchase).lines || []).map((l, i) => (
+                  <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
+                    <td className="px-3 py-2.5 text-center font-mono text-[11px] font-black text-slate-500">{l.item_code || l.code || l.barcode || "—"}</td>
+                    <td className="px-4 py-2.5 font-bold text-slate-800">{l.item_name_ar || l.item_name || l.name}</td>
+                    <td className="px-3 py-2.5 text-center text-slate-600">{l.quantity}</td>
+                    <td className="px-3 py-2.5 text-center text-slate-600">{formatMoney(l.unit_cost)}</td>
+                    <td className="px-3 py-2.5 text-center font-mono font-black text-emerald-700">{formatMoney(l.line_total || (l.quantity * l.unit_cost))}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+      <div className="flex items-center justify-between border-t border-slate-200 pt-4">
+        <button onClick={onClose}
+          className="rounded-sm border border-slate-200 px-5 py-2 text-[13px] font-bold text-slate-600 hover:bg-slate-100">
+          رجوع
+        </button>
+        <button onClick={() => navigate(`/purchases/${purchase.purchase_id || purchase.id}`)}
+          className="flex items-center gap-2 rounded-sm bg-emerald-700 px-6 py-2 text-[13px] font-black text-white hover:bg-emerald-800 transition-colors">
+          <Pencil className="h-4 w-4" /> فتح الفاتورة
+        </button>
       </div>
     </div>
   );
@@ -144,6 +241,115 @@ export default function PurchaseFormPage() {
   const whSelectRef     = useRef(null);
   const unitSelectRef   = useRef(null);
   const addBtnRef       = useRef(null);
+
+  // Today's Purchases modal states
+  const [todayPurchOpen, setTodayPurchOpen] = useState(false);
+  const [todayPurchases, setTodayPurchases] = useState([]);
+  const [todayPurchSummary, setTodayPurchSummary] = useState({ count: 0, total: 0 });
+  const [todayPurchLoading, setTodayPurchLoading] = useState(false);
+  const [todayPurchDateFrom, setTodayPurchDateFrom] = useState(toDateInput());
+  const [todayPurchDateTo, setTodayPurchDateTo] = useState(toDateInput());
+  const [todayPurchSort, setTodayPurchSort] = useState("created_at");
+  const [todayPurchDir, setTodayPurchDir] = useState("desc");
+  const [todayPurchUserId, setTodayPurchUserId] = useState("");
+  const [todayPurchUsersList, setTodayPurchUsersList] = useState([]);
+  const [todayPurchDocSearch, setTodayPurchDocSearch] = useState("");
+  const [todayPurchItemSearch, setTodayPurchItemSearch] = useState("");
+  const [todayPurchRawItems, setTodayPurchRawItems] = useState([]);
+  const [todayPurchAllItems, setTodayPurchAllItems] = useState([]);
+  const [todayPurchItemLookupOpen, setTodayPurchItemLookupOpen] = useState(false);
+  const [todayPurchActiveItemIndex, setTodayPurchActiveItemIndex] = useState(0);
+  const [todayPurchSupplierQuery, setTodayPurchSupplierQuery] = useState("");
+  const [todayPurchSupplierLookupOpen, setTodayPurchSupplierLookupOpen] = useState(false);
+  const [todayPurchActiveSupplierIndex, setTodayPurchActiveSupplierIndex] = useState(0);
+  const [todayPurchSupplierId, setTodayPurchSupplierId] = useState("");
+  const [todayPurchPreviewInvoice, setTodayPurchPreviewInvoice] = useState(null);
+  const [todayPurchPreviewOpen, setTodayPurchPreviewOpen] = useState(false);
+  const [todayPurchVoidOpen, setTodayPurchVoidOpen] = useState(false);
+  const [todayPurchVoidTarget, setTodayPurchVoidTarget] = useState(null);
+
+  const todayPurchFilteredItems = useMemo(() => {
+    if (!todayPurchItemSearch.trim() || !todayPurchAllItems.length) return [];
+    return fuzzyFilterRows(todayPurchAllItems, todayPurchItemSearch, ["name", "code", "barcode"]).slice(0, 8);
+  }, [todayPurchItemSearch, todayPurchAllItems]);
+
+  const todayPurchFilteredSuppliers = useMemo(() => {
+    if (!todayPurchSupplierLookupOpen) return [];
+    const q = todayPurchSupplierQuery.trim().toLowerCase();
+    if (!q) return suppliers.slice(0, 8);
+    return suppliers.filter(s => String(s.name).toLowerCase().includes(q) || String(s.phone || "").includes(q)).slice(0, 8);
+  }, [todayPurchSupplierLookupOpen, todayPurchSupplierQuery, suppliers]);
+
+  function aggregatePurchaseResults(data) {
+    const map = {};
+    (data || []).forEach(line => {
+      const id = line.purchase_id;
+      if (!map[id]) {
+        map[id] = {
+          id, doc_no: line.doc_no, supplier_name: line.supplier_name,
+          supplier_id: line.supplier_id, created_at: line.created_at,
+          total: 0, items_count: 0, status: line.status,
+        };
+      }
+      map[id].total += Number(line.unit_cost || 0) * Number(line.quantity || 0);
+      map[id].items_count += 1;
+    });
+    return Object.values(map);
+  }
+
+  async function loadTodayPurchases() {
+    setTodayPurchLoading(true);
+    try {
+      if (todayPurchItemSearch.trim()) {
+        const params = new URLSearchParams({ q: todayPurchItemSearch.trim() });
+        if (todayPurchDocSearch.trim()) params.set("doc_search", todayPurchDocSearch.trim());
+        if (todayPurchSupplierQuery.trim()) params.set("supplier_search", todayPurchSupplierQuery.trim());
+        if (todayPurchSupplierId) params.set("supplier_id", todayPurchSupplierId);
+        if (todayPurchUserId) params.set("user_id", todayPurchUserId);
+        params.set("date_from", todayPurchDateFrom);
+        params.set("date_to", todayPurchDateTo);
+        const r = await api.get(`/api/purchases/items-search?${params}`);
+        const raw = r.data.data || [];
+        setTodayPurchRawItems(raw);
+        setTodayPurchases([]);
+        const aggregated = aggregatePurchaseResults(raw);
+        setTodayPurchSummary({ count: aggregated.length, total: aggregated.reduce((s, x) => s + x.total, 0) });
+      } else {
+        const params = new URLSearchParams({ date_from: todayPurchDateFrom, date_to: todayPurchDateTo, sort: todayPurchSort, dir: todayPurchDir });
+        if (todayPurchUserId) params.set("user_id", todayPurchUserId);
+        if (todayPurchSupplierId) params.set("supplier_id", todayPurchSupplierId);
+        if (todayPurchSupplierQuery.trim() && !todayPurchSupplierId) {
+          params.set("supplier_search", todayPurchSupplierQuery.trim());
+        }
+        if (todayPurchDocSearch.trim()) params.set("search", todayPurchDocSearch.trim());
+        const r = await api.get(`/api/purchases?${params}`);
+        let data = r.data.data || [];
+        if (todayPurchSupplierQuery.trim() && !todayPurchSupplierId) {
+          const q = todayPurchSupplierQuery.trim().toLowerCase();
+          data = data.filter((inv) => String(inv.supplier_name || "").toLowerCase().includes(q));
+        }
+        setTodayPurchases(data);
+        setTodayPurchRawItems([]);
+        setTodayPurchSummary(r.data.summary || { count: 0, total: 0 });
+      }
+    } catch (e) { console.error("loadTodayPurchases error:", e); }
+    finally { setTodayPurchLoading(false); }
+  }
+
+  useEffect(() => {
+    if (!todayPurchOpen) return;
+    api.get("/api/items").then(r => setTodayPurchAllItems(r.data.data || [])).catch(() => {});
+    if (!todayPurchUsersList.length) {
+      api.get("/api/users").then(r => setTodayPurchUsersList(r.data.data || [])).catch(() => {});
+    }
+  }, [todayPurchOpen]);
+
+  useEffect(() => {
+    if (!todayPurchOpen) return;
+    const timer = setTimeout(() => { loadTodayPurchases(); }, 300);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [todayPurchOpen, todayPurchDateFrom, todayPurchDateTo, todayPurchSort, todayPurchDir, todayPurchUserId, todayPurchItemSearch, todayPurchDocSearch, todayPurchSupplierQuery, todayPurchSupplierId]);
 
   const handleFieldKeyDown = (e, nextRef, prevRef, isEnterSubmit = false) => {
     if (e.key === "Enter") {
@@ -435,9 +641,6 @@ export default function PurchaseFormPage() {
       {/* Header */}
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-300 bg-white px-6">
         <div className="flex items-center gap-4">
-          <Link to="/purchases" className="flex h-8 w-8 items-center justify-center rounded-sm border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors">
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
           <div className="flex flex-col">
             <h1 className="text-[14px] font-black text-slate-800">
               {isEditMode ? `فاتورة مشتريات #${refNo}` : "فاتورة مشتريات جديدة"}
@@ -472,6 +675,14 @@ export default function PurchaseFormPage() {
               {priceChangedLines.length} أسعار بيع ستتغير
             </div>
           )}
+
+          {/* Today's Purchases button */}
+          <button
+            onClick={() => setTodayPurchOpen(true)}
+            className="flex h-9 items-center gap-2 rounded-sm border border-emerald-200 bg-emerald-50 px-4 text-[13px] font-black text-emerald-700 hover:bg-emerald-100 transition-all"
+          >
+            <Receipt className="h-4 w-4" /> مشتريات اليوم
+          </button>
 
           {/* Delete button — always visible */}
           <button
@@ -1166,6 +1377,214 @@ export default function PurchaseFormPage() {
           </div>
         </div>
       </Modal>
+
+      {/* Today's Purchases Modal */}
+      <Modal open={todayPurchOpen} onClose={() => setTodayPurchOpen(false)} title="مشتريات اليوم" maxWidth="max-w-5xl">
+        <div className="flex flex-col gap-4">
+          {/* Search bars row */}
+          <div className="flex items-center gap-2 p-3 bg-emerald-50 rounded-sm border border-emerald-200">
+            <span className="text-[11px] font-black text-emerald-700 shrink-0">بحث برقم المستند:</span>
+            <input
+              value={todayPurchDocSearch}
+              onChange={e => setTodayPurchDocSearch(e.target.value)}
+              placeholder="PUR-0001..."
+              className="flex-1 rounded-sm border border-emerald-200 bg-white px-3 py-1.5 text-[12px] font-bold text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+            />
+            <span className="text-[11px] font-black text-emerald-700 shrink-0">بحث صنف:</span>
+            <div className="relative flex-1">
+              <input
+                value={todayPurchItemSearch}
+                onChange={e => { setTodayPurchItemSearch(e.target.value); setTodayPurchItemLookupOpen(true); }}
+                onFocus={() => setTodayPurchItemLookupOpen(true)}
+                onBlur={() => setTimeout(() => setTodayPurchItemLookupOpen(false), 150)}
+                onKeyDown={e => {
+                  if (e.key === "ArrowDown") { e.preventDefault(); setTodayPurchActiveItemIndex(i => Math.min(i + 1, todayPurchFilteredItems.length - 1)); setTodayPurchItemLookupOpen(true); }
+                  else if (e.key === "ArrowUp") { e.preventDefault(); setTodayPurchActiveItemIndex(i => Math.max(i - 1, 0)); }
+                  else if (e.key === "Enter") { e.preventDefault(); if (todayPurchFilteredItems.length > 0 && todayPurchActiveItemIndex >= 0) { const picked = todayPurchFilteredItems[todayPurchActiveItemIndex]; setTodayPurchItemSearch(picked.code || picked.barcode || picked.name); setTodayPurchItemLookupOpen(false); } }
+                  else if (e.key === "Escape") { setTodayPurchItemLookupOpen(false); }
+                }}
+                placeholder="اسم الصنف أو الكود..."
+                className="w-full rounded-sm border border-emerald-200 bg-white px-3 py-1.5 text-[12px] font-bold text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+              />
+              {todayPurchItemLookupOpen && (
+                <LookupList items={todayPurchFilteredItems} onPick={(item) => { setTodayPurchItemSearch(item.code || item.barcode || item.name); setTodayPurchItemLookupOpen(false); }}
+                  activeIndex={todayPurchActiveItemIndex} query={todayPurchItemSearch} />
+              )}
+            </div>
+            <button onClick={() => { setTodayPurchDocSearch(""); setTodayPurchItemSearch(""); setTodayPurchItemLookupOpen(false); }} className="flex items-center gap-1.5 rounded-sm bg-emerald-200 px-3 py-1.5 text-[11px] font-black text-emerald-800 hover:bg-emerald-300">
+              مسح
+            </button>
+          </div>
+          {/* Filters */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-1.5">
+              <label className="text-[11px] font-black text-emerald-700 uppercase tracking-widest">من</label>
+              <input type="date" value={todayPurchDateFrom} onChange={(e) => setTodayPurchDateFrom(e.target.value)}
+                className="rounded-sm border border-emerald-200 bg-white px-2 py-1.5 text-[12px] font-bold text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <label className="text-[11px] font-black text-emerald-700 uppercase tracking-widest">إلى</label>
+              <input type="date" value={todayPurchDateTo} onChange={(e) => setTodayPurchDateTo(e.target.value)}
+                className="rounded-sm border border-emerald-200 bg-white px-2 py-1.5 text-[12px] font-bold text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100" />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <label className="text-[11px] font-black text-emerald-700 uppercase tracking-widest">ترتيب</label>
+              <select value={todayPurchSort} onChange={(e) => setTodayPurchSort(e.target.value)}
+                className="rounded-sm border border-emerald-200 bg-white px-2 py-1.5 text-[12px] font-bold text-slate-800 outline-none focus:border-emerald-500">
+                <option value="created_at">الوقت</option>
+                <option value="total">الإجمالي</option>
+                <option value="doc_no">رقم المستند</option>
+                <option value="payment_method">طريقة الدفع</option>
+              </select>
+              <button onClick={() => setTodayPurchDir((d) => d === "asc" ? "desc" : "asc")}
+                className="flex h-8 w-8 items-center justify-center rounded-sm border border-emerald-200 bg-white hover:bg-emerald-100 transition-colors">
+                <ArrowUpDown className="h-3.5 w-3.5 text-emerald-600" />
+              </button>
+            </div>
+            {todayPurchUsersList.length > 0 && (
+              <div className="flex items-center gap-1.5">
+                <label className="text-[11px] font-black text-emerald-700 uppercase tracking-widest">المستخدم</label>
+                <select value={todayPurchUserId} onChange={(e) => setTodayPurchUserId(e.target.value)}
+                  className="rounded-sm border border-emerald-200 bg-white px-2 py-1.5 text-[12px] font-bold text-slate-800 outline-none focus:border-emerald-500">
+                  <option value="">الكل</option>
+                  {todayPurchUsersList.map(u => <option key={u.id} value={u.id}>{u.username}</option>)}
+                </select>
+              </div>
+            )}
+            {/* Supplier filter */}
+            <div className="relative flex items-center gap-1.5">
+              <label className="text-[11px] font-black text-emerald-700 uppercase tracking-widest">المورد</label>
+              <input
+                type="text"
+                value={todayPurchSupplierQuery}
+                onChange={(e) => { setTodayPurchSupplierQuery(e.target.value); setTodayPurchSupplierLookupOpen(true); setTodayPurchActiveSupplierIndex(0); if (!e.target.value) { setTodayPurchSupplierId(""); } }}
+                onFocus={() => setTodayPurchSupplierLookupOpen(true)}
+                onBlur={() => setTimeout(() => setTodayPurchSupplierLookupOpen(false), 200)}
+                onKeyDown={(e) => {
+                  if (!todayPurchSupplierLookupOpen && e.key === "ArrowDown") { setTodayPurchSupplierLookupOpen(true); return; }
+                  if (todayPurchSupplierLookupOpen && todayPurchFilteredSuppliers.length && e.key === "ArrowDown") { e.preventDefault(); setTodayPurchActiveSupplierIndex((v) => Math.min(v + 1, todayPurchFilteredSuppliers.length - 1)); return; }
+                  if (todayPurchSupplierLookupOpen && todayPurchFilteredSuppliers.length && e.key === "ArrowUp") { e.preventDefault(); setTodayPurchActiveSupplierIndex((v) => Math.max(v - 1, 0)); return; }
+                  if (todayPurchSupplierLookupOpen && todayPurchFilteredSuppliers.length && e.key === "Enter") {
+                    e.preventDefault();
+                    const next = todayPurchFilteredSuppliers[todayPurchActiveSupplierIndex] || todayPurchFilteredSuppliers[0];
+                    setTodayPurchSupplierQuery(next.name);
+                    setTodayPurchSupplierId(next.id);
+                    setTodayPurchSupplierLookupOpen(false);
+                    return;
+                  }
+                  if (e.key === "Escape") { setTodayPurchSupplierLookupOpen(false); }
+                }}
+                placeholder="كل الموردين..."
+                className="w-[140px] rounded-sm border border-emerald-200 bg-white px-2 py-1.5 text-[12px] font-bold text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+              />
+              {todayPurchSupplierQuery && (
+                <button onClick={() => { setTodayPurchSupplierQuery(""); setTodayPurchSupplierId(""); }} className="text-slate-400 hover:text-slate-600">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+              {todayPurchSupplierLookupOpen && (
+                <LookupList
+                  items={todayPurchFilteredSuppliers}
+                  onPick={(s) => { setTodayPurchSupplierQuery(s.name); setTodayPurchSupplierId(s.id); setTodayPurchSupplierLookupOpen(false); }}
+                  activeIndex={todayPurchActiveSupplierIndex}
+                  query={todayPurchSupplierQuery}
+                  emptyLabel="لا توجد نتائج"
+                />
+              )}
+            </div>
+            <button onClick={loadTodayPurchases}
+              className="flex items-center gap-1.5 rounded-sm border border-emerald-200 bg-white px-3 py-1.5 text-[12px] font-black text-emerald-700 hover:bg-emerald-100 transition-colors">
+              <RefreshCw className={`h-3.5 w-3.5 ${todayPurchLoading ? "animate-spin" : ""}`} /> تحديث
+            </button>
+          </div>
+
+          {/* Summary strip */}
+          <div className="flex items-center gap-4 rounded-sm bg-emerald-800 px-4 py-3">
+            <div className="flex flex-col">
+              <span className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">عدد الفواتير</span>
+              <span className="font-mono text-[20px] font-black text-white leading-none">{todayPurchSummary.count}</span>
+            </div>
+            <div className="h-8 w-px bg-emerald-700" />
+            <div className="flex flex-col">
+              <span className="text-[10px] font-black text-emerald-300 uppercase tracking-widest">إجمالي المشتريات</span>
+              <span className="font-mono text-[20px] font-black text-emerald-300 leading-none">{formatMoney(todayPurchSummary.total)}</span>
+            </div>
+          </div>
+
+          {/* Table */}
+          <div className="max-h-[420px] overflow-auto rounded-sm border border-emerald-200">
+            <DataGrid
+              data={todayPurchLoading ? [] : (todayPurchItemSearch.trim() ? todayPurchRawItems : todayPurchases)}
+              rowKey={todayPurchItemSearch.trim() ? (r, i) => `${r.id || r.item_id}-${i}` : "id"}
+              emptyMessage={todayPurchLoading ? "جاري التحميل..." : "لا توجد نتائج في هذه الفترة"}
+              className="border-0"
+              onRowClick={r => {
+                if (todayPurchItemSearch.trim()) {
+                  if (r.purchase_id) { setTodayPurchPreviewInvoice({ id: r.purchase_id, purchase_id: r.purchase_id, doc_no: r.doc_no, supplier_name: r.supplier_name, total: Number(r.unit_cost) * Number(r.quantity), created_at: r.created_at }); setTodayPurchPreviewOpen(true); }
+                } else {
+                  setTodayPurchPreviewInvoice(r); setTodayPurchPreviewOpen(true);
+                }
+              }}
+              columns={todayPurchItemSearch.trim() ? [
+                { id: "item_code", header: "كود الصنف", width: 110, cellClass: "px-3 font-mono text-[11px] font-bold text-slate-600", render: (r) => r.item_code || "—" },
+                { id: "item_name", header: "اسم الصنف", width: 180, cellClass: "px-3 text-[12px] font-bold text-slate-800", render: (r) => r.item_name || "—" },
+                { id: "doc_no", header: "المستند", width: 130, cellClass: "px-3 font-mono text-[11px] font-black text-slate-700", render: (r) => r.doc_no || "—" },
+                { id: "supplier_name", header: "المورد", width: 130, cellClass: "px-3 text-[11px] font-bold text-slate-600", render: (r) => r.supplier_name || "—" },
+                { id: "quantity", header: "الكمية", width: 80, cellClass: "px-3 text-center font-mono text-[12px] font-bold text-slate-600", render: (r) => Number(r.quantity) },
+                { id: "unit_cost", header: "التكلفة", width: 100, cellClass: "px-3 font-mono text-[12px] font-black text-slate-700", render: (r) => formatMoney(r.unit_cost) },
+                { id: "line_total", header: "الإجمالي", width: 110, cellClass: "px-3 font-mono text-[13px] font-black text-emerald-700", render: (r) => formatMoney(r.line_total || r.total || (Number(r.unit_cost) * Number(r.quantity))) },
+                { id: "created_at", header: "التاريخ", width: 140, cellClass: "px-3 text-[11px] font-bold text-slate-500 font-mono whitespace-nowrap", render: (r) => r.created_at ? formatArabicDateTime(new Date(r.created_at)) : "—" },
+                { id: "actions", header: "", width: 60, cellClass: "px-3", render: (r) => (
+                  <div className="flex gap-1">
+                    <button onClick={(e) => { e.stopPropagation(); navigate(`/purchases/${r.purchase_id}`); }} className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-blue-50 hover:text-blue-600" title="فتح الفاتورة"><Pencil className="h-3.5 w-3.5" /></button>
+                  </div>
+                )}
+              ] : [
+                { id: "doc_no", header: "رقم المستند", width: 140, sortable: true, headerClass: "text-right px-3 font-black uppercase tracking-widest text-slate-500", cellClass: "px-3 font-mono text-[12px] font-black text-slate-700", render: (inv) => inv.doc_no },
+                { id: "supplier_name", header: "المورد", width: 160, sortable: true, headerClass: "text-right px-3 font-black uppercase tracking-widest text-slate-500", cellClass: "px-3 text-[12px] font-bold text-slate-800", render: (inv) => inv.supplier_name || "—" },
+                { id: "items_count", header: "الأصناف", width: 80, sortable: true, headerClass: "text-center px-3 font-black uppercase tracking-widest text-slate-500", cellClass: "px-3 text-center text-[12px] font-bold text-slate-600", render: (inv) => inv.items_count },
+                { id: "total", header: "الإجمالي", width: 120, sortable: true, headerClass: "text-right px-3 font-black uppercase tracking-widest text-slate-500", cellClass: "px-3 font-mono text-[13px] font-black text-emerald-700", render: (inv) => formatMoney(inv.total) },
+                { id: "payment_method", header: "طريقة الدفع", width: 120, sortable: true, headerClass: "text-right px-3 font-black uppercase tracking-widest text-slate-500", cellClass: "px-3 text-[12px] font-bold text-slate-600", render: (inv) => PAYMENT_METHOD_LABELS[inv.payment_method] || inv.payment_method || "—" },
+                { id: "status", header: "الحالة", width: 100, sortable: true, headerClass: "text-right px-3 font-black uppercase tracking-widest text-slate-500", cellClass: "px-3", render: (inv) => {
+                  const info = PURCHASE_STATUS_STYLES[inv.status] || PURCHASE_STATUS_STYLES.active;
+                  return <span className={`inline-flex items-center rounded-sm border px-1.5 py-0.5 text-[10px] font-black ${info.cls}`}>{info.label}</span>;
+                }},
+                { id: "created_by", header: "المستخدم", width: 110, sortable: false, headerClass: "text-right px-3 font-black uppercase tracking-widest text-slate-500", cellClass: "px-3 text-[11px] font-bold text-slate-600 whitespace-nowrap", render: (inv) => inv.created_by_username || "—" },
+                { id: "created_at", header: "الوقت", width: 150, sortable: true, headerClass: "text-right px-3 font-black uppercase tracking-widest text-slate-500", cellClass: "px-3 text-[11px] font-bold text-slate-500 font-mono whitespace-nowrap", render: (inv) => formatArabicDateTime(new Date(inv.created_at)) },
+                { id: "actions", header: "", width: 90, headerClass: "px-3", cellClass: "px-3", render: (inv) => (
+                  <div className="flex gap-1">
+                    <button onClick={() => navigate(`/purchases/${inv.id}`)} className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-blue-50 hover:text-blue-600" title="فتح الفاتورة"><Pencil className="h-3.5 w-3.5" /></button>
+                    <button onClick={() => { setTodayPurchVoidTarget(inv); setTodayPurchVoidOpen(true); }} className="flex h-6 w-6 items-center justify-center rounded text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="إلغاء"><Trash2 className="h-3.5 w-3.5" /></button>
+                  </div>
+                )}
+              ]}
+            />
+          </div>
+        </div>
+      </Modal>
+
+      {/* Purchase Preview Modal */}
+      <Modal open={todayPurchPreviewOpen} onClose={() => setTodayPurchPreviewOpen(false)} title="معاينة الفاتورة">
+        {todayPurchPreviewInvoice ? <PurchasePreviewModal purchase={todayPurchPreviewInvoice} onClose={() => setTodayPurchPreviewOpen(false)} /> : null}
+      </Modal>
+
+      {/* Void Confirmation */}
+      <ConfirmDialog
+        open={todayPurchVoidOpen}
+        title={`إلغاء الفاتورة ${todayPurchVoidTarget?.doc_no || ""}`}
+        message={`إلغاء الفاتورة ${todayPurchVoidTarget?.doc_no || ""}؟ سيتم عكس التأثير على المخزون والأرصدة.`}
+        onConfirm={async () => {
+          if (!todayPurchVoidTarget) return;
+          try {
+            await api.post(`/api/purchases/${todayPurchVoidTarget.id}/void`);
+            toast.success("تم إلغاء الفاتورة");
+            setTodayPurchVoidOpen(false);
+            setTodayPurchVoidTarget(null);
+            loadTodayPurchases();
+          } catch (e) { toast.error(e.response?.data?.message || "خطأ"); setTodayPurchVoidOpen(false); }
+        }}
+        onCancel={() => { setTodayPurchVoidOpen(false); setTodayPurchVoidTarget(null); }}
+      />
 
       <PrintPreviewModal
         open={printPreview}

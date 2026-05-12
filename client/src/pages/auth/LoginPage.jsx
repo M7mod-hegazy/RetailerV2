@@ -107,8 +107,8 @@ export default function LoginPage() {
           </div>
         ))}
         
-        {/* Architectural Grid Overlay for Depth Depth */}
-        <div className="absolute inset-0 opacity-[0.05]" style={{ backgroundImage: "url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CICA8cGF0aCBkPSJNMCAwaDQwdjQwSDBWMHptMjAgMjB2MjBoMjBWMjBIMjB6IiBmaWxsPSIjMDQ3ODU3IiBmaWxsLW9wYWNpdHk9IjEiIGZpbGwtcnVsZT0iZXZlbm9kZCIvPgo8L3N2Zz4=')" }} />
+        {/* Architectural Grid Overlay for Depth */}
+        <div className="absolute inset-0 opacity-[0.05]" style={{ backgroundImage: "radial-gradient(circle at 1px 1px, #047857 1px, transparent 0)", backgroundSize: "40px 40px" }} />
       </div>
 
       {/* ─── MAIN LAYOUT ─── */}

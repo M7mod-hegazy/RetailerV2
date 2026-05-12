@@ -113,6 +113,43 @@ function reconciliationExceptions(startDate, endDate, opts = {}) {
   `).all(...params);
 }
 
+function dailySessionsReport(startDate, endDate, opts = {}) {
+  const db = getDb();
+  const params = [];
+  return db.prepare(`
+    SELECT DATE(s.opened_at) AS date,
+      u.full_name AS cashier,
+      s.opening_cash, COALESCE(s.closing_cash, 0) AS closing_cash,
+      COALESCE(SUM(i.total), 0) AS sales_total,
+      COALESCE(SUM(i.discount), 0) AS total_discount,
+      COUNT(DISTINCT i.id) AS invoice_count,
+      COALESCE(s.closing_cash, 0) - s.opening_cash - COALESCE(SUM(i.total), 0) AS cash_variance,
+      s.status
+    FROM shifts s
+    JOIN users u ON u.id = s.user_id
+    LEFT JOIN invoices i ON i.shift_id = s.id
+    WHERE 1=1 ${addDateFilter("s.opened_at", startDate, endDate, params)}
+    GROUP BY s.id
+    ORDER BY s.opened_at DESC
+  `).all(...params);
+}
+
+function withdrawalsReport(startDate, endDate, opts = {}) {
+  const db = getDb();
+  const params = [];
+  return db.prepare(`
+    SELECT w.id, w.reference_no, DATE(w.date) AS date,
+      w.amount, w.reason, w.status,
+      t.name AS treasury_name,
+      u.full_name AS created_by
+    FROM withdrawals w
+    LEFT JOIN treasuries t ON t.id = w.treasury_id
+    LEFT JOIN users u ON u.id = w.created_by
+    WHERE 1=1 ${addDateFilter("w.date", startDate, endDate, params)}
+    ORDER BY w.date DESC
+  `).all(...params);
+}
+
 module.exports = {
   cashFlow,
   treasury,
@@ -120,4 +157,6 @@ module.exports = {
   paymentMethodFlow,
   bankCashSplit,
   reconciliationExceptions,
+  dailySessionsReport,
+  withdrawalsReport,
 };

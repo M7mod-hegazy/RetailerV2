@@ -11,14 +11,18 @@ function persist(key, value) {
   try { localStorage.setItem(`reports_${key}`, JSON.stringify(value)); } catch { /* noop */ }
 }
 
+export function buildPrefKey(sourceKey, classification, dataMode) {
+  return `${sourceKey}.${classification}.${dataMode}`;
+}
+
 export const useReportsStore = create((set, get) => ({
-  // Per-report preferences keyed by slug
+  // Per-report preferences keyed by slug or composite sourceKey.classification.dataMode
   preferences: loadPersisted("preferences", {}),
 
-  // Favorites (set of report ids)
+  // Favorites (set of report ids or composite keys)
   favorites: new Set(loadPersisted("favorites", [])),
 
-  // Recent reports (ordered list of report ids with timestamps)
+  // Recent reports (ordered list of slugs/composite keys with timestamps)
   recents: loadPersisted("recents", []),
 
   // Saved presets
@@ -27,65 +31,65 @@ export const useReportsStore = create((set, get) => ({
   // Sidebar open state
   sidebarOpen: true,
 
-  getPreference(slug, key, fallback = null) {
-    return get().preferences?.[slug]?.[key] ?? fallback;
+  getPreference(key, subKey, fallback = null) {
+    return get().preferences?.[key]?.[subKey] ?? fallback;
   },
 
-  setPreference(slug, key, value) {
+  setPreference(key, subKey, value) {
     set((state) => {
       const updated = {
         ...state.preferences,
-        [slug]: { ...(state.preferences[slug] || {}), [key]: value },
+        [key]: { ...(state.preferences[key] || {}), [subKey]: value },
       };
       persist("preferences", updated);
       return { preferences: updated };
     });
   },
 
-  setColumnVisibility(slug, visibility) {
-    get().setPreference(slug, "columnVisibility", visibility);
+  setColumnVisibility(key, visibility) {
+    get().setPreference(key, "columnVisibility", visibility);
   },
 
-  setColumnOrder(slug, order) {
-    get().setPreference(slug, "columnOrder", order);
+  setColumnOrder(key, order) {
+    get().setPreference(key, "columnOrder", order);
   },
 
-  setColumnWidth(slug, colKey, width) {
-    const existing = get().preferences?.[slug]?.columnWidths || {};
-    get().setPreference(slug, "columnWidths", { ...existing, [colKey]: width });
+  setColumnWidth(key, colKey, width) {
+    const existing = get().preferences?.[key]?.columnWidths || {};
+    get().setPreference(key, "columnWidths", { ...existing, [colKey]: width });
   },
 
-  setLastFilters(slug, filters) {
-    get().setPreference(slug, "lastFilters", filters);
+  setLastFilters(key, filters) {
+    get().setPreference(key, "lastFilters", filters);
   },
 
-  setCostMethod(slug, method) {
-    get().setPreference(slug, "costMethod", method);
+  setCostMethod(key, method) {
+    get().setPreference(key, "costMethod", method);
   },
 
-  toggleFavorite(slug) {
+  toggleFavorite(key) {
     set((state) => {
       const next = new Set(state.favorites);
-      if (next.has(slug)) next.delete(slug);
-      else next.add(slug);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       persist("favorites", [...next]);
       return { favorites: next };
     });
   },
 
-  pushRecent(slug) {
+  pushRecent(key) {
     set((state) => {
-      const next = state.recents.filter((r) => r.slug !== slug);
-      next.unshift({ slug, at: Date.now() });
+      const next = state.recents.filter((r) => r.key !== key);
+      next.unshift({ key, at: Date.now() });
       if (next.length > 20) next.length = 20;
       persist("recents", next);
       return { recents: next };
     });
   },
 
-  savePreset(name, slug, filters, costMethod) {
+  savePreset(name, key, filters, costMethod) {
     set((state) => {
-      const next = [...state.presets, { id: Date.now(), name, slug, filters, costMethod }];
+      const next = [...state.presets, { id: Date.now(), name, key, filters, costMethod }];
       persist("presets", next);
       return { presets: next };
     });

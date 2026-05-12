@@ -5,6 +5,13 @@ const accounts = require("./queries/accounts");
 const treasury = require("./queries/treasury");
 const tax = require("./queries/tax");
 const audit = require("./queries/audit");
+const expenses = require("./queries/expenses");
+const revenues = require("./queries/revenues");
+const cheques = require("./queries/cheques");
+const installments = require("./queries/installments");
+const warehouses = require("./queries/warehouses");
+const employees = require("./queries/employees");
+const profit = require("./queries/profit");
 
 const dispatcher = {
   // Sales
@@ -18,6 +25,8 @@ const dispatcher = {
   "period-comparison": sales.periodComparison,
   "gross-net-sales": sales.grossNetSales,
   "sales-returns": sales.salesReturns,
+  "sales-returns-summary": sales.salesReturnsSummary,
+  "sales-returns-by-customer": sales.salesReturnsByCustomer,
   "discount-analysis": sales.discountAnalysis,
   "margin-by-item": sales.marginByItem,
   "margin-by-category": sales.marginByCategory,
@@ -30,6 +39,8 @@ const dispatcher = {
   "purchases-by-supplier": purchases.purchasesBySupplier,
   "purchases-by-item": purchases.purchasesByItem,
   "purchase-returns": purchases.purchaseReturns,
+  "purchase-returns-summary": purchases.purchaseReturnsSummary,
+  "purchase-returns-by-supplier": purchases.purchaseReturnsBySupplier,
   "supplier-pricing": purchases.supplierPricing,
 
   // Inventory
@@ -51,6 +62,9 @@ const dispatcher = {
   "top-customers": accounts.topCustomers,
   "collection-efficiency": accounts.collectionEfficiency,
   "supplier-statement": accounts.supplierStatement,
+  "customer-loyalty": accounts.customerLoyalty,
+  "supplier-purchases-history": accounts.supplierPurchasesHistory,
+  "supplier-returns-history": accounts.supplierReturnsHistory,
 
   // Treasury
   "cash-flow": treasury.cashFlow,
@@ -59,6 +73,8 @@ const dispatcher = {
   "payment-method-flow": treasury.paymentMethodFlow,
   "bank-cash-split": treasury.bankCashSplit,
   "reconciliation-exceptions": treasury.reconciliationExceptions,
+  "daily-sessions": treasury.dailySessionsReport,
+  "withdrawals-report": treasury.withdrawalsReport,
 
   // Tax
   "vat": tax.vat,
@@ -71,6 +87,42 @@ const dispatcher = {
   "exceptions": audit.exceptionsReport,
   "audit-log": audit.auditLog,
   "user-activity": audit.userActivity,
+
+  // Expenses
+  "expense-summary": expenses.expenseSummary,
+  "detailed-expenses": expenses.detailedExpenses,
+  "expenses-by-category": expenses.expensesByCategory,
+  "expenses-by-payment": expenses.expensesByPayment,
+
+  // Revenues
+  "revenue-summary": revenues.revenueSummary,
+  "detailed-revenues": revenues.detailedRevenues,
+  "revenues-by-category": revenues.revenuesByCategory,
+  "revenues-by-payment": revenues.revenuesByPayment,
+
+  // Cheques
+  "cheque-listing": cheques.chequeListing,
+  "bank-transactions": cheques.bankTransactions,
+  "bank-summary": cheques.bankSummary,
+
+  // Installments
+  "installment-plans": installments.installmentPlans,
+  "installment-collections": installments.installmentCollections,
+  "installments-by-customer": installments.installmentsByCustomer,
+  "installment-delinquent": installments.installmentDelinquent,
+
+  // Warehouses
+  "branch-transfers": warehouses.branchTransfers,
+  "warehouse-levels": warehouses.warehouseLevels,
+  "warehouse-levels-summary": warehouses.warehouseLevelsSummary,
+
+  // Employees
+  "employee-adjustments": employees.employeeAdjustments,
+
+  // Profit
+  "profit-by-category": profit.profitByCategory,
+  "profit-by-customer": profit.profitByCustomer,
+  "profit-by-period": profit.profitByPeriod,
 };
 
 function listRows(slug, startDate, endDate, opts = {}) {
@@ -79,4 +131,11 @@ function listRows(slug, startDate, endDate, opts = {}) {
   return fn(startDate, endDate, opts);
 }
 
-module.exports = { listRows, dispatcher };
+function listRowsBySource(sourceKey, classificationId, dataMode, startDate, endDate, opts = {}) {
+  const { resolveQuerySlug } = require("./registry");
+  const slug = resolveQuerySlug(sourceKey, classificationId, dataMode);
+  if (!slug) return [];
+  return listRows(slug, startDate, endDate, opts);
+}
+
+module.exports = { listRows, listRowsBySource, dispatcher };
