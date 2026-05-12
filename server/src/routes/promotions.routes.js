@@ -3,6 +3,8 @@ const PromotionModel = require("../models/promotion.model");
 const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
+const { authRequired } = require('../middleware/auth');
+router.use(authRequired);
 
 router.get("/", requirePagePermission("promotions", "view"), (req, res, next) => {
   try {

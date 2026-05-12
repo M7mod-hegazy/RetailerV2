@@ -12,6 +12,8 @@ const {
 } = require("../services/dailySessionService");
 
 const router = express.Router();
+const { authRequired } = require('../middleware/auth');
+router.use(authRequired);
 
 router.use((_req, _res, next) => {
   try {

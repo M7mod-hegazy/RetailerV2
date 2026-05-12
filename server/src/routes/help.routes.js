@@ -7,6 +7,7 @@ const { getDb } = require('../config/database');
 const TOUR_DISABLE_KEY = '__disable_tours__';
 const TOOLTIP_DISABLE_KEY = '__disable_tooltips__';
 
+router.use(authRequired);
 router.get('/state', authRequired, requirePagePermission("settings", "view"), (req, res, next) => {
   try {
     const db = getDb();

@@ -4,6 +4,8 @@ const QuotationModel = require("../models/quotation.model");
 const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
+const { authRequired } = require('../middleware/auth');
+router.use(authRequired);
 
 function validateLines(lines) {
   if (!Array.isArray(lines) || lines.length === 0) {

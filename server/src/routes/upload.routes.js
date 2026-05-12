@@ -5,6 +5,8 @@ const { upload, getUploadsDir } = require("../middleware/upload");
 const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
+const { authRequired } = require('../middleware/auth');
+router.use(authRequired);
 
 // POST /api/upload  — multipart/form-data, field name: "file"
 // Returns { success: true, url: "/uploads/<filename>" }

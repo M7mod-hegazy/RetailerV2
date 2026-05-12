@@ -7,6 +7,8 @@ const { recalculateWACC } = require("../services/waccService");
 const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
+const { authRequired } = require('../middleware/auth');
+router.use(authRequired);
 
 function ensurePurchaseReturnSettlementSchema(db) {
   try { db.exec("ALTER TABLE purchase_returns ADD COLUMN settlement_type TEXT NOT NULL DEFAULT 'account'"); } catch (_) {}

@@ -5,6 +5,8 @@ const { normalizeDate } = require("../services/dailySessionService");
 const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
+const { authRequired } = require('../middleware/auth');
+router.use(authRequired);
 
 // ── Categories ─────────────────────────────────────────────────────────────
 

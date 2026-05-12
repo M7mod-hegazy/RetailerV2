@@ -5,6 +5,8 @@ const { requirePagePermission } = require("../middleware/permission");
 const router = express.Router();
 
 const DOC_TYPES = [
+const { authRequired } = require('../middleware/auth');
+router.use(authRequired);
   "pos_receipt",
   "sales_invoice",
   "purchase_order",

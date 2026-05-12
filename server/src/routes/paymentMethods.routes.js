@@ -2,6 +2,8 @@ const express = require("express");
 const { requirePagePermission } = require("../middleware/permission");
 const router = express.Router();
 const { getDb } = require("../config/database");
+const { authRequired } = require('../middleware/auth');
+router.use(authRequired);
 
 router.get("/", requirePagePermission("payment_methods", "view"), (_req, res) => {
   try {

@@ -3,6 +3,8 @@ const { getDb } = require("../config/database");
 const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
+const { authRequired } = require('../middleware/auth');
+router.use(authRequired);
 
 function ensureBankOperationColumns(db) {
   try { db.prepare("ALTER TABLE banks ADD COLUMN alert_threshold REAL NOT NULL DEFAULT 0").run(); } catch (_) {}

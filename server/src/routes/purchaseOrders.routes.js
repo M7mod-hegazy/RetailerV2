@@ -5,6 +5,8 @@ const { generateDocNumber } = require("../utils/docNumber");
 const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
+const { authRequired } = require('../middleware/auth');
+router.use(authRequired);
 
 router.get("/", requirePagePermission("purchase_orders", "view"), (req, res) => {
   const db = getDb();

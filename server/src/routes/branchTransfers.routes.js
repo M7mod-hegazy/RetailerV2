@@ -4,6 +4,8 @@ const { adjustStock } = require("../services/stockService");
 const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
+const { authRequired } = require('../middleware/auth');
+router.use(authRequired);
 
 // GET /api/branch-transfers
 router.get("/", requirePagePermission("branch_transfer", "view"), (req, res, next) => {

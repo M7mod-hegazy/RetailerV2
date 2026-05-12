@@ -3,6 +3,8 @@ const { getDb } = require("../config/database");
 const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
+const { authRequired } = require('../middleware/auth');
+router.use(authRequired);
 
 function ensureChequeColumns(db) {
   const columns = db.prepare("PRAGMA table_info(cheques)").all().map((column) => column.name);

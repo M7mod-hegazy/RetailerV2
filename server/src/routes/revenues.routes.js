@@ -5,6 +5,8 @@ const { assertCanWriteForDate, normalizeDate } = require("../services/dailySessi
 const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
+const { authRequired } = require('../middleware/auth');
+router.use(authRequired);
 
 router.get("/categories", requirePagePermission("revenues", "view"), (_req, res) => {
   res.json({ success: true, data: getDb().prepare("SELECT * FROM revenue_categories ORDER BY name ASC").all() });

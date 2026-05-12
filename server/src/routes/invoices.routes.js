@@ -6,6 +6,8 @@ const { getDb } = require("../config/database");
 const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
+const { authRequired } = require('../middleware/auth');
+router.use(authRequired);
 
 router.get("/", requirePagePermission("pos", "view"), (req, res) => {
   try {

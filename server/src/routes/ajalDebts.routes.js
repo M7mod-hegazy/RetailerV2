@@ -5,6 +5,8 @@ const { assertCanWriteForDate, normalizeDate } = require("../services/dailySessi
 const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
+const { authRequired } = require('../middleware/auth');
+router.use(authRequired);
 
 function ensureAjalSchema(db) {
   try { db.exec("ALTER TABLE ajal_debts ADD COLUMN party_type TEXT NOT NULL DEFAULT 'customer'"); } catch (_) {}

@@ -5,6 +5,8 @@ const { assertCanWriteForDate, normalizeDate } = require("../services/dailySessi
 const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
+const { authRequired } = require('../middleware/auth');
+router.use(authRequired);
 
 function getOpenInvoices(db, partyType, partyId) {
   if (partyType !== "customer") return [];

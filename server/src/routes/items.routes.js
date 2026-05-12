@@ -3,6 +3,8 @@ const { getDb } = require("../config/database");
 const { requirePagePermission } = require("../middleware/permission");
 
 const router = express.Router();
+const { authRequired } = require('../middleware/auth');
+router.use(authRequired);
 
 function normalizeImageUrls(payload = {}) {
   if (Array.isArray(payload.image_urls)) {
