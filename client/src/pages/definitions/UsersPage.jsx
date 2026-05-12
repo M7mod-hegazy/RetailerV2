@@ -10,11 +10,13 @@ import {
   Shield,
   User as UserIcon,
   Save,
+  Settings,
 } from "lucide-react";
 import api from "../../services/api";
 import toast from "react-hot-toast";
 import DataTable from "../../components/ui/DataTable";
 import SmartTooltip from "../../components/ui/SmartTooltip";
+import DefaultPermissionsModal from "../../components/modals/DefaultPermissionsModal";
 import { useAuthStore } from "../../stores/authStore";
 import {
   PAGE_PERMISSIONS,
@@ -58,6 +60,7 @@ export default function UsersPage() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState("info");
+  const [defaultPermissionsModalOpen, setDefaultPermissionsModalOpen] = useState(false);
 
   // Permissions state
   const [permissions, setPermissions] = useState(buildEmptyPermissions());
@@ -331,6 +334,16 @@ export default function UsersPage() {
               className="w-full h-12 bg-white/80 rounded-xl pr-12 pl-6 text-sm font-bold text-zinc-800 outline-none focus:bg-white focus:ring-2 focus:ring-zinc-900/10 shadow-sm border border-white"
             />
           </div>
+          {isAdmin && (
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setDefaultPermissionsModalOpen(true)}
+              className="flex items-center gap-2 h-12 px-4 rounded-xl bg-white border border-slate-200 text-[12px] font-black text-zinc-900 hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm"
+            >
+              <Settings className="h-4 w-4" />
+              إعدادات افتراضية
+            </motion.button>
+          )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
@@ -607,6 +620,12 @@ export default function UsersPage() {
           </motion.div>
         </div>
       </main>
+
+      {/* Default Permissions Modal */}
+      <DefaultPermissionsModal
+        open={defaultPermissionsModalOpen}
+        onClose={() => setDefaultPermissionsModalOpen(false)}
+      />
     </div>
   );
 }
