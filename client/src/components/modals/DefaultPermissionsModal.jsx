@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Save, X, AlertCircle } from "lucide-react";
 import api from "../../services/api";
@@ -37,6 +37,16 @@ export default function DefaultPermissionsModal({ open, onClose }) {
   const [permTemplate, setPermTemplate] = useState("user");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const applyingRef = useRef(false);
+  const prevStatesRef = useRef({});
+
+  // Sync dropdown label when permissions change from manual edits
+  useEffect(() => {
+    if (!applyingRef.current) {
+      setPermTemplate(detectTemplate(permissions));
+    }
+    applyingRef.current = false;
+  }, [permissions]);
 
   // Load default permissions on mount
   useEffect(() => {
@@ -74,27 +84,18 @@ export default function DefaultPermissionsModal({ open, onClose }) {
     });
   }
 
-  function handleApplyTemplate() {
-    if (permTemplate === "user") {
-      setPermissions(applyTemplate(DEFAULT_USER_PERMISSIONS));
-      toast.success("تم تطبيق القالب الافتراضي");
-    } else if (permTemplate === "admin") {
-      const full = buildEmptyPermissions();
-      Object.keys(full).forEach((k) => {
-        full[k] = [...ALL_ACTIONS];
-      });
-      setPermissions(full);
-      toast.success("تم تطبيق قالب المدير");
-    } else if (permTemplate === "none") {
-      setPermissions(buildEmptyPermissions());
-      toast.success("تم مسح جميع الصلاحيات");
-    }
+  function detectTemplate(perms) {
+    const allPages = Object.keys(buildEmptyPermissions());
+    const hasAny = allPages.some((k) => (perms[k] || []).length > 0);
+    if (!hasAny) return "none";
+    const allHaveAll = allPages.every((k) => (perms[k] || []).length === ALL_ACTIONS.length);
+    if (allHaveAll) return "admin";
+    return "user";
   }
 
   async function handleSave() {
     setSaving(true);
     try {
-      // Strip pages with no actions to keep payload compact
       const compact = {};
       Object.entries(permissions).forEach(([k, v]) => {
         if (Array.isArray(v) && v.length) compact[k] = v;
@@ -121,7 +122,7 @@ export default function DefaultPermissionsModal({ open, onClose }) {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-black/40 z-40"
+            className="fixed inset-0 bg-black/40 z-[200]"
           />
 
           {/* Modal */}
@@ -129,11 +130,11 @@ export default function DefaultPermissionsModal({ open, onClose }) {
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 z-[200] flex items-center justify-center p-2 md:p-4"
           >
-            <div className="bg-white rounded-3xl shadow-2xl max-h-[90vh] overflow-hidden flex flex-col w-full max-w-6xl" dir="rtl">
+            <div className="bg-white rounded-3xl shadow-2xl max-h-[85vh] overflow-hidden flex flex-col w-full max-w-3xl" dir="rtl">
               {/* Header */}
-              <div className="flex items-center justify-between px-8 py-6 border-b border-slate-100 bg-slate-50">
+              <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100 bg-slate-50">
                 <div className="flex flex-col gap-1">
                   <h2 className="text-2xl font-black text-zinc-900">
                     إعدادات الصلاحيات الافتراضية
@@ -153,7 +154,7 @@ export default function DefaultPermissionsModal({ open, onClose }) {
 
               {/* Content */}
               <div className="flex-1 overflow-y-auto">
-                <div className="p-8 flex flex-col gap-6">
+                <div className="p-6 flex flex-col gap-5">
                   {/* Warning note */}
                   <div className="flex items-start gap-3 rounded-xl bg-blue-50 border border-blue-200 p-4">
                     <AlertCircle className="h-5 w-5 text-blue-600 shrink-0 mt-0.5" />
@@ -174,20 +175,30 @@ export default function DefaultPermissionsModal({ open, onClose }) {
                     </label>
                     <select
                       value={permTemplate}
-                      onChange={(e) => setPermTemplate(e.target.value)}
+                      onChange={(e) => {
+                        const key = e.target.value;
+                        const prevKey = permTemplate;
+                        prevStatesRef.current[prevKey] = permissions;
+                        setPermTemplate(key);
+                        applyingRef.current = true;
+                        if (prevStatesRef.current[key]) {
+                          setPermissions(prevStatesRef.current[key]);
+                        } else if (key === "user") {
+                          setPermissions(applyTemplate(DEFAULT_USER_PERMISSIONS));
+                        } else if (key === "admin") {
+                          const full = buildEmptyPermissions();
+                          Object.keys(full).forEach((k) => { full[k] = [...ALL_ACTIONS]; });
+                          setPermissions(full);
+                        } else if (key === "none") {
+                          setPermissions(buildEmptyPermissions());
+                        }
+                      }}
                       className="flex-1 h-9 bg-white rounded-lg px-2 text-xs font-bold text-zinc-900 outline-none border border-slate-200 focus:border-zinc-400"
                     >
                       <option value="user">مستخدم (افتراضي)</option>
                       <option value="admin">مدير (الكل)</option>
                       <option value="none">بدون صلاحيات</option>
                     </select>
-                    <button
-                      type="button"
-                      onClick={handleApplyTemplate}
-                      className="h-9 px-3 rounded-lg bg-zinc-950 text-white text-[11px] font-black hover:bg-zinc-800 transition"
-                    >
-                      تطبيق
-                    </button>
                   </div>
 
                   {/* Matrix */}
@@ -196,7 +207,7 @@ export default function DefaultPermissionsModal({ open, onClose }) {
                       جاري التحميل...
                     </div>
                   ) : (
-                    <div className="rounded-xl bg-white border border-slate-200 overflow-hidden">
+                    <div className="rounded-xl bg-white border border-slate-200 overflow-x-auto max-h-[55vh]">
                       <table className="w-full text-xs">
                         <thead className="bg-slate-50 sticky top-0">
                           <tr>
@@ -258,7 +269,7 @@ export default function DefaultPermissionsModal({ open, onClose }) {
               </div>
 
               {/* Footer */}
-              <div className="border-t border-slate-100 bg-slate-50 px-8 py-4 flex items-center justify-end gap-3">
+              <div className="border-t border-slate-100 bg-slate-50 px-6 py-3 flex items-center justify-end gap-3">
                 <motion.button
                   whileTap={{ scale: 0.98 }}
                   type="button"
