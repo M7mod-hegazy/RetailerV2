@@ -16,8 +16,9 @@ function VirtualRow({ data: { columns, colWidths, rows, rowKey, onRowClick, rowC
       {columns.map((c) => (
         <div
           key={c.id}
-          className={`px-2 py-2 text-[13px] text-slate-800 border-l border-slate-100/50 truncate flex items-center ${c.cellClass || "text-center"}`}
-          style={{ width: colWidths[c.id], minWidth: colWidths[c.id], maxWidth: colWidths[c.id] }}
+          className={`px-2 py-2 text-[13px] text-slate-800 border-l border-slate-100/50 flex items-center ${c.cellClass || "text-center"}`}
+          style={{ width: colWidths[c.id], minWidth: colWidths[c.id], maxWidth: colWidths[c.id], wordBreak: "break-word", overflowWrap: "break-word" }}
+          title={(row[c.id] || "-")?.toString()}
         >
           {c.render ? c.render(row, index) : (row[c.id] || "-")}
         </div>

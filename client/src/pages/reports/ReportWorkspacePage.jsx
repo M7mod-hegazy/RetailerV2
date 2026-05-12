@@ -20,6 +20,7 @@ import { reportsApi } from "../../services/reports";
 import { useReportsStore } from "../../stores/reportsStore";
 import PrintPreviewModal from "../../components/print/PrintPreviewModal";
 import ReportPrintTemplate from "./templates/ReportPrintTemplate";
+import api from "../../services/api";
 import ProgressBar from "../../components/ui/ProgressBar";
 import { LookupEntityFilter, ScopeSelector } from "./reportsCenterParts";
 import { SCOPE_OPTIONS } from "./reportsCenterConfig";
@@ -70,7 +71,10 @@ function prettifyLabel(rawKey) {
     return_amount: "قيمة المرتجع", vat_reversed: "الضريبة المستردة",
     total_invoices: "إجمالي الفواتير", total_billed: "إجمالي الفوترة",
     collected: "المحصل", outstanding: "المستحق", collection_rate: "نسبة التحصيل %",
-    action_count: "عدد العمليات", returns_amount: "قيمة المرتجعات", returns_count: "عدد المرتجعات"
+    action_count: "عدد العمليات", returns_amount: "قيمة المرتجعات", returns_count: "عدد المرتجعات",
+    warehouse_id: "المخزن", warehouse_name: "اسم المخزن", warehouse: "المخزن",
+    supplier_id: "المورد", customer_id: "العميل", cashier_id: "الكاشير",
+    category_id: "التصنيف", item_category: "تصنيف الصنف",
   };
   return labels[key] || rawKey;
 }
@@ -128,7 +132,7 @@ const EXPORT_CONFIGS = {
   pdf: { label: "PDF", icon: FileImage, color: "#DC2626", bg: "rgba(220,38,38,0.08)" },
   excel: { label: "Excel", icon: FileSpreadsheet, color: "#059669", bg: "rgba(5,150,105,0.08)" },
   word: { label: "Word", icon: FileText, color: "#2563EB", bg: "rgba(37,99,235,0.08)" },
-  print: { label: "Print", icon: Printer, color: "#475569", bg: "rgba(71,85,105,0.08)" },
+  print: { label: "طباعة", icon: Printer, color: "#475569", bg: "rgba(71,85,105,0.08)" },
 };
 
 const DATE_PRESETS = [
@@ -208,7 +212,8 @@ function ExportPill({ format, onExport }) {
   );
 }
 
-function FilterInput({ filter, t, value, onChange }) {
+function FilterInput({ filter, t, value, onChange, dynamicOptions }) {
+  const opts = dynamicOptions || filter.options || [];
   if (filter.type === "lookup") {
     const entityLabel = { category: "تصنيف", product: "منتج", customer: "عميل", supplier: "مورد", user: "مستخدم", warehouse: "مخزن" }[filter.entity] || filter.entity;
     return (
@@ -233,8 +238,8 @@ function FilterInput({ filter, t, value, onChange }) {
           className="w-full h-10 px-3 rounded-xl border border-zinc-200 bg-zinc-50 text-[13px] text-zinc-900 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all font-medium"
         >
           <option value="">الكل</option>
-          {(filter.options || []).map((opt) => (
-            <option key={opt.value} value={opt.value}>{t(opt.label_key) || opt.label_key}</option>
+          {opts.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label || t(opt.label_key) || opt.label_key}</option>
           ))}
         </select>
       </div>
@@ -387,6 +392,12 @@ export default function ReportWorkspacePage() {
   const [printOpen, setPrintOpen] = useState(false);
   const [costMethod, setCostMethod] = useState(initialCostMethod);
   const [exportProgress, setExportProgress] = useState(null);
+  const [paymentTypeOptions, setPaymentTypeOptions] = useState([]);
+  useEffect(() => {
+    api.get("/api/reports/payment-type-options").then((r) => {
+      if (r.data?.data) setPaymentTypeOptions(r.data.data);
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     const init = { from: initialFrom, to: initialTo, q: "" };
@@ -503,6 +514,41 @@ export default function ReportWorkspacePage() {
     return allColumns.filter((c) => columnVisibility[c.id] !== false);
   }, [allColumns, columnVisibility]);
 
+  // Smart column ordering by priority, demoting columns related to active filters
+  const activeFilterIds = useMemo(() => {
+    const ids = new Set();
+    if (filters.customer_id || (scope.type === "customer" && scope.values?.[0])) { ids.add("customer_id"); ids.add("customer_name"); }
+    if (filters.supplier_id || (scope.type === "supplier" && scope.values?.[0])) { ids.add("supplier_id"); ids.add("supplier_name"); }
+    if (filters.category_id || (scope.type === "category" && scope.values?.[0])) { ids.add("category_id"); ids.add("category_name"); }
+    if (filters.item_id || (scope.type === "product" && scope.values?.[0])) { ids.add("item_id"); ids.add("item_name"); }
+    if (filters.warehouse_id || (scope.type === "warehouse" && scope.values?.[0])) { ids.add("warehouse_id"); ids.add("warehouse_name"); }
+    if (filters.cashier_id) { ids.add("cashier_id"); ids.add("cashier_name"); }
+    if (filters.user_id) { ids.add("user_id"); ids.add("user_name"); }
+    return ids;
+  }, [filters, scope]);
+
+  const smartColumns = useMemo(() => {
+    return [...visibleColumns]
+      .map((c) => {
+        let p = c.printPriority || "useful";
+        if (activeFilterIds.has(c.id)) p = "optional";
+        return { ...c, adjustedPriority: p };
+      })
+      .sort((a, b) => {
+        const order = { essential: 0, useful: 1, optional: 2 };
+        return (order[a.adjustedPriority] || 2) - (order[b.adjustedPriority] || 2);
+      });
+  }, [visibleColumns, activeFilterIds]);
+
+  const [showAllColumns, setShowAllColumns] = useState(false);
+  const displayColumns = useMemo(() => {
+    if (showAllColumns) return smartColumns;
+    return smartColumns.filter((c) => c.adjustedPriority !== "optional");
+  }, [smartColumns, showAllColumns]);
+
+  const PRIORITY_LABELS = { essential: "أساسي", useful: "مهم", optional: "اختياري" };
+  const PRIORITY_COLORS = { essential: "text-emerald-600 bg-emerald-50 border-emerald-200", useful: "text-blue-600 bg-blue-50 border-blue-200", optional: "text-zinc-400 bg-zinc-50 border-zinc-200" };
+
   const printReadiness = useMemo(() => {
     const score = visibleColumns.reduce((sum, col) => {
       if (col.type === "money" || col.type === "text") return sum + 1.2;
@@ -510,7 +556,7 @@ export default function ReportWorkspacePage() {
       return sum + 0.9;
     }, 0);
     if (score <= 7) return { label: "جاهز للطباعة", tone: "emerald" };
-    if (score <= 10) return { label: "A4 مزدحم", tone: "amber" };
+    if (score <= 10) return { label: "مزدحم", tone: "amber" };
     return { label: "اختر أعمدة للطباعة", tone: "red" };
   }, [visibleColumns]);
 
@@ -617,30 +663,34 @@ export default function ReportWorkspacePage() {
   const exportFormats = definition?.exportFormats || ["pdf", "excel", "print"];
   const invalidRange = definition?.supportsDates && filters.from > filters.to;
 
-  function handleApplyFilters() {
-    if (invalidRange) { toast.error("تاريخ البداية يجب أن يكون أصغر أو يساوي تاريخ النهاية."); return; }
+  // Debounce for search text
+  function useDebounce(value, delay) {
+    const [dv, setDv] = useState(value);
+    useEffect(() => { const h = setTimeout(() => setDv(value), delay); return () => clearTimeout(h); }, [value, delay]);
+    return dv;
+  }
+  const debouncedQ = useDebounce(filters.q, 300);
+
+  // Live filters — auto-update params on any filter change
+  const filterSignature = JSON.stringify({
+    from: filters.from, to: filters.to, q: debouncedQ, scope, costMethod,
+    dims: (definition?.filters || []).map((f) => filters[f.key] || ""),
+  });
+  useEffect(() => {
+    if (invalidRange) return;
     const params = { page: 1, pageSize: FIXED_PAGE_SIZE };
     if (definition?.supportsDates) { params.start_date = filters.from; params.end_date = filters.to; }
     if (definition?.hasProfit) { params.cost_method = costMethod; setCostMethodAction(reportSlug, costMethod); }
     if (definition?.filters) {
-      definition.filters.forEach((f) => {
-        if (filters[f.key]) params[f.key] = filters[f.key];
-      });
+      definition.filters.forEach((f) => { if (filters[f.key]) params[f.key] = filters[f.key]; });
     }
-    // Apply scope from النطاق التحليلي (ScopeSelector)
-    if (scope.type === "category" && scope.values?.length) {
-      params.category_id = scope.values[0];
-    } else if (scope.type === "product" && scope.values?.length) {
-      params.item_id = scope.values[0];
-    } else if (scope.type === "customer" && scope.values?.length) {
-      params.customer_id = scope.values[0];
-    } else if (scope.type === "supplier" && scope.values?.length) {
-      params.supplier_id = scope.values[0];
-    }
-    if (filters.q) params.q = filters.q;
+    if (scope.type === "category" && scope.values?.length) { params.category_id = scope.values[0];
+    } else if (scope.type === "product" && scope.values?.length) { params.item_id = scope.values[0];
+    } else if (scope.type === "customer" && scope.values?.length) { params.customer_id = scope.values[0];
+    } else if (scope.type === "supplier" && scope.values?.length) { params.supplier_id = scope.values[0]; }
+    if (debouncedQ) params.q = debouncedQ;
     setAppliedParams(params);
-    setFiltersOpen(false);
-  }
+  }, [filterSignature, reportSlug]);
 
   function handleResetFilters() {
     const reset = { from: defaultFrom, to: defaultTo, q: "" };
@@ -649,10 +699,7 @@ export default function ReportWorkspacePage() {
     }
     setFilters(reset);
     setScope({ type: "all", values: [] });
-    const params = { page: 1, pageSize: FIXED_PAGE_SIZE };
-    if (definition?.supportsDates) { params.start_date = defaultFrom; params.end_date = defaultTo; }
-    if (definition?.hasProfit) { params.cost_method = "wacc"; setCostMethod("wacc"); }
-    setAppliedParams(params);
+    setCostMethod("wacc");
   }
 
   function handlePageChange(page) {
@@ -859,7 +906,10 @@ export default function ReportWorkspacePage() {
 
                 {/* Dynamic Filters */}
                 {definition.filters?.map(f => (
-                  <FilterInput key={f.key} filter={f} t={t} value={filters[f.key]} onChange={handleFilterChange} />
+                  <FilterInput key={f.key} filter={f} t={t} value={filters[f.key]}
+                    onChange={handleFilterChange}
+                    dynamicOptions={f.key === 'payment_type' ? paymentTypeOptions : undefined}
+                  />
                 ))}
 
                 {/* Analytical Scope (النطاق التحليلي) */}
@@ -883,11 +933,18 @@ export default function ReportWorkspacePage() {
                 )}
               </div>
 
-              <div className="flex items-center justify-end gap-3 mt-6 pt-6 border-t border-zinc-100">
-                <button onClick={handleResetFilters} className="px-5 py-2.5 rounded-xl text-[13px] font-bold text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 transition-colors">إعادة تعيين</button>
-                <button onClick={handleApplyFilters} disabled={isLoading || invalidRange} className="px-6 py-2.5 rounded-xl text-[13px] font-bold text-white bg-zinc-900 hover:bg-emerald-600 transition-colors shadow-md active:scale-95 disabled:opacity-50 flex items-center gap-2">
-                  تطبيق الفلاتر و عرض
-                </button>
+              <div className="flex items-center justify-between gap-3 mt-6 pt-6 border-t border-zinc-100">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[10px] font-bold text-emerald-700">
+                    <motion.span animate={{ scale: isFetching ? [1, 1.2, 1] : 1 }} transition={{ duration: 0.4, repeat: isFetching ? Infinity : 0 }} className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    {isFetching ? "تحديث..." : "تلقائي"}
+                  </span>
+                  {invalidRange && <span className="text-[10px] font-bold text-red-600">تاريخ البداية يجب أن يكون قبل تاريخ النهاية</span>}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={handleResetFilters} className="px-4 py-2 rounded-xl text-[12px] font-bold text-zinc-500 hover:bg-zinc-100 transition-colors">إعادة تعيين</button>
+                  <button onClick={() => setFiltersOpen(false)} className="px-4 py-2 rounded-xl text-[12px] font-bold bg-zinc-900 text-white hover:bg-zinc-800 transition-colors">إغلاق</button>
+                </div>
               </div>
             </div>
           </motion.div>
@@ -914,8 +971,8 @@ export default function ReportWorkspacePage() {
         </button>
       </div>
 
-      {/* 4. MAIN DATA GRID (Excel Design kept pristine but container enhanced) */}
-      <div className="bg-white rounded-[24px] border border-zinc-200 shadow-sm overflow-hidden flex flex-col relative" style={{ height: "calc(100vh - 280px)", minHeight: "500px" }}>
+      {/* 4. MAIN DATA GRID */}
+      <div className="bg-white rounded-[24px] border border-zinc-200 shadow-sm flex flex-col relative">
         
         {activeTab === "table" ? (
           <>
@@ -959,38 +1016,45 @@ export default function ReportWorkspacePage() {
             {isLoading ? (
               <div className="p-6"><TableSkeleton colCount={Math.min(visibleColumns.length || 6, 8)} /></div>
             ) : visibleColumns.length === 0 ? (
-              <div className="flex flex-col items-center justify-center flex-1 text-center bg-zinc-50/50">
+              <div className="flex flex-col items-center justify-center flex-1 text-center py-24 bg-zinc-50/50">
                 <div className="h-16 w-16 rounded-3xl bg-white border border-zinc-200 flex items-center justify-center text-zinc-300 mb-4 shadow-sm"><Search size={28} /></div>
                 <h3 className="text-[16px] font-black text-zinc-800 mb-1">لا توجد بيانات للعرض</h3>
                 <p className="text-[13px] font-medium text-zinc-500 max-w-xs">يرجى تغيير فلاتر البحث أو تحديد أعمدة لعرضها.</p>
               </div>
             ) : (
-              <DataGrid
-                data={gridData}
-                virtualized={gridData.length > 50}
-                rowClass={(row) => row.isTotalRow ? "bg-emerald-50/50 hover:bg-emerald-50/80 border-t-2 border-emerald-500" : ""}
-                columns={visibleColumns.map((c) => ({
-                  id: c.id,
-                  header: c.header,
-                  width: SKU_COLUMN_KEYS.has(c.id) ? 140 : Math.max(120, Math.min(200, 80 + c.header.length * 8)),
-                  sortable: true,
-                  headerClass: "text-right font-black text-[11px] text-zinc-500 uppercase tracking-wide bg-zinc-50/80 border-b border-zinc-200",
-                  cellClass: "text-right border-b border-zinc-100 py-3",
-                  render: SKU_COLUMN_KEYS.has(c.id)
-                    ? (row) => (<span className={`font-mono text-[13px] font-bold tabular-nums px-2 py-0.5 rounded-md ${row.isTotalRow ? "text-emerald-800 bg-emerald-100/50 border-emerald-200" : "text-zinc-700 bg-zinc-100/50 border border-zinc-200/50"}`} dir="ltr">{row[c.id] != null && row[c.id] !== "" ? String(row[c.id]) : "—"}</span>)
-                    : (row) => {
-                        const val = row[c.id];
-                        if (val == null || val === "") return <span className="text-zinc-300">—</span>;
-                        if (row.isTotalRow && typeof val === "string") return <span className="text-[13px] font-black text-emerald-800">{val}</span>;
-                        const num = Number(val);
-                        const isNum = !isNaN(num) && String(val).trim() !== "";
-                        if (isNum) return (<span className={`tabular-nums text-[13px] ${row.isTotalRow ? "font-black text-emerald-700 text-[14px]" : "font-bold text-zinc-900"}`} dir="ltr">{num.toLocaleString("ar-EG", { maximumFractionDigits: 2 })}</span>);
-                        return <span className={`text-[13px] ${row.isTotalRow ? "font-black text-emerald-800" : "font-medium text-zinc-700"}`}>{String(val)}</span>;
-                      },
-                }))}
-                rowKey={(row) => row.id || JSON.stringify(row)}
-                containerClass="flex-1 overflow-auto scrollbar-thin"
-              />
+              <div className="overflow-x-auto">
+                <DataGrid
+                  data={gridData}
+                  rowClass={(row) => row.isTotalRow ? "bg-emerald-50/50 hover:bg-emerald-50/80 border-t-2 border-emerald-500" : ""}
+                  columns={visibleColumns.map((c) => ({
+                    id: c.id,
+                    header: c.header,
+                    width: SKU_COLUMN_KEYS.has(c.id) ? 140 : Math.max(120, Math.min(200, 80 + c.header.length * 8)),
+                    sortable: true,
+                    headerClass: "text-right font-black text-[11px] text-zinc-500 uppercase tracking-wide bg-zinc-50/80 border-b border-zinc-200",
+                    cellClass: "text-right border-b border-zinc-100 py-3",
+                    render: SKU_COLUMN_KEYS.has(c.id)
+                      ? (row) => (<span className={`font-mono text-[13px] font-bold tabular-nums px-2 py-0.5 rounded-md ${row.isTotalRow ? "text-emerald-800 bg-emerald-100/50 border-emerald-200" : "text-zinc-700 bg-zinc-100/50 border border-zinc-200/50"}`} dir="ltr">{row[c.id] != null && row[c.id] !== "" ? String(row[c.id]) : "—"}</span>)
+                      : c.id === "warehouse_id" || c.id === "supplier_id" || c.id === "customer_id" || c.id === "cashier_id" || c.id === "user_id" || c.id === "category_id"
+                        ? (row) => {
+                            const nameKey = c.id.replace("_id", "_name");
+                            const displayName = row[nameKey] || row[c.id];
+                            if (displayName == null || displayName === "") return <span className="text-zinc-300">—</span>;
+                            return <span className="text-[13px] font-medium text-zinc-700">{String(displayName)}</span>;
+                          }
+                        : (row) => {
+                          const val = row[c.id];
+                          if (val == null || val === "") return <span className="text-zinc-300">—</span>;
+                          if (row.isTotalRow && typeof val === "string") return <span className="text-[13px] font-black text-emerald-800">{val}</span>;
+                          const num = Number(val);
+                          const isNum = !isNaN(num) && String(val).trim() !== "";
+                          if (isNum) return (<span className={`tabular-nums text-[13px] ${row.isTotalRow ? "font-black text-emerald-700 text-[14px]" : "font-bold text-zinc-900"}`} dir="ltr">{num.toLocaleString("ar-EG", { maximumFractionDigits: 2 })}</span>);
+                          return <span className={`text-[13px] ${row.isTotalRow ? "font-black text-emerald-800" : "font-medium text-zinc-700"}`}>{String(val)}</span>;
+                        },
+                  }))}
+                  rowKey={(row) => row.id || JSON.stringify(row)}
+                />
+              </div>
             )}
 
             {/* Pagination */}
@@ -1081,9 +1145,10 @@ export default function ReportWorkspacePage() {
             rows={rows}
             columns={visibleColumns}
             totalRows={totalRows}
-            currentPage={currentPage}
+            currentPage={printSettings.currentPage || 1}
             filters={definition.supportsDates ? { from: appliedParams.start_date, to: appliedParams.end_date } : null}
             settings={printSettings}
+            onPageCount={printSettings.onPageCount}
           />
         )}
       />

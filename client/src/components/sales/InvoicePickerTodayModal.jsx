@@ -157,7 +157,6 @@ export default function InvoicePickerTodayModal({ open, onClose, onSelectInvoice
   const [usersList, setUsersList] = useState([]);
   const [docSearch, setDocSearch] = useState("");
   const [itemSearch, setItemSearch] = useState("");
-  const [rawItems, setRawItems] = useState([]);
   const [allItems, setAllItems] = useState([]);
   const [itemLookupOpen, setItemLookupOpen] = useState(false);
   const [activeItemIndex, setActiveItemIndex] = useState(0);
@@ -191,6 +190,8 @@ export default function InvoicePickerTodayModal({ open, onClose, onSelectInvoice
           id, invoice_no: line.invoice_no || line.doc_no, customer_name: line.customer_name,
           customer_id: line.customer_id, created_at: line.created_at,
           total: 0, items_count: 0, status: line.status,
+          payment_method: line.payment_method,
+          created_by_username: line.created_by_username,
         };
       }
       map[id].total += Number(line.unit_price || 0) * Number(line.quantity || 0);
@@ -204,7 +205,7 @@ export default function InvoicePickerTodayModal({ open, onClose, onSelectInvoice
     try {
       if (itemSearch.trim()) {
         const params = new URLSearchParams({ q: itemSearch.trim() });
-        if (docSearch.trim()) params.set("doc_search", docSearch.trim());
+        if (docSearch.trim()) params.set("invoice_search", docSearch.trim());
         if (customerQuery.trim()) params.set("customer_search", customerQuery.trim());
         if (customerId) params.set("customer_id", customerId);
         if (userId) params.set("user_id", userId);
@@ -212,9 +213,8 @@ export default function InvoicePickerTodayModal({ open, onClose, onSelectInvoice
         params.set("date_to", dateTo);
         const r = await api.get(`/api/invoices/items-search?${params}`);
         const raw = r.data.data || [];
-        setRawItems(raw);
-        setData([]);
         const aggregated = aggregateResults(raw);
+        setData(aggregated);
         setSummary({ count: aggregated.length, total: aggregated.reduce((s, x) => s + x.total, 0) });
       } else {
         const params = new URLSearchParams({ date_from: dateFrom, date_to: dateTo, sort, dir });
@@ -229,7 +229,6 @@ export default function InvoicePickerTodayModal({ open, onClose, onSelectInvoice
           d = d.filter((inv) => String(inv.customer_name || "").toLowerCase().includes(q));
         }
         setData(d);
-        setRawItems([]);
         setSummary(r.data.summary || { count: 0, total: 0 });
       }
     } catch (e) { console.error("load error:", e); }
@@ -251,11 +250,7 @@ export default function InvoicePickerTodayModal({ open, onClose, onSelectInvoice
   }, [open, dateFrom, dateTo, sort, dir, userId, itemSearch, docSearch, customerQuery, customerId]);
 
   function handleRowClick(r) {
-    if (itemSearch.trim()) {
-      if (r.invoice_id) { setDetailItem({ id: r.invoice_id, invoice_no: r.invoice_no || r.doc_no, customer_name: r.customer_name, total: Number(r.unit_price) * Number(r.quantity), created_at: r.created_at }); setDetailOpen(true); }
-    } else {
-      setDetailItem(r); setDetailOpen(true);
-    }
+    setDetailItem(r); setDetailOpen(true);
   }
 
   const docColumns = [
@@ -267,17 +262,6 @@ export default function InvoicePickerTodayModal({ open, onClose, onSelectInvoice
     { id: "status", header: "الحالة", width: 100, sortable: true, headerClass: "text-right px-3 font-black uppercase tracking-widest text-slate-500", cellClass: "px-3", render: (inv) => { const info = INVOICE_STATUS_STYLES[inv.status] || INVOICE_STATUS_STYLES.active; return <span className={`inline-flex items-center rounded-sm border px-1.5 py-0.5 text-[10px] font-black ${info.cls}`}>{info.label}</span>; } },
     { id: "created_by", header: "المستخدم", width: 110, sortable: false, headerClass: "text-right px-3 font-black uppercase tracking-widest text-slate-500", cellClass: "px-3 text-[11px] font-bold text-slate-600 whitespace-nowrap", render: (inv) => inv.created_by_username || "—" },
     { id: "created_at", header: "الوقت", width: 150, sortable: true, headerClass: "text-right px-3 font-black uppercase tracking-widest text-slate-500", cellClass: "px-3 text-[11px] font-bold text-slate-500 font-mono whitespace-nowrap", render: (inv) => formatArabicDateTime(new Date(inv.created_at)) },
-  ];
-
-  const itemColumns = [
-    { id: "item_code", header: "كود الصنف", width: 110, cellClass: "px-3 font-mono text-[11px] font-bold text-slate-600", render: (r) => r.item_code || "—" },
-    { id: "item_name", header: "اسم الصنف", width: 180, cellClass: "px-3 text-[12px] font-bold text-slate-800", render: (r) => r.item_name || "—" },
-    { id: "invoice_no", header: "الفاتورة", width: 130, cellClass: "px-3 font-mono text-[11px] font-black text-slate-700", render: (r) => r.invoice_no || r.doc_no || "—" },
-    { id: "customer_name", header: "العميل", width: 130, cellClass: "px-3 text-[11px] font-bold text-slate-600", render: (r) => r.customer_name || "—" },
-    { id: "quantity", header: "الكمية", width: 80, cellClass: "px-3 text-center font-mono text-[12px] font-bold text-slate-600", render: (r) => Number(r.quantity) },
-    { id: "unit_price", header: "السعر", width: 100, cellClass: "px-3 font-mono text-[12px] font-black text-slate-700", render: (r) => formatMoney(r.unit_price) },
-    { id: "line_total", header: "الإجمالي", width: 110, cellClass: "px-3 font-mono text-[13px] font-black text-emerald-700", render: (r) => formatMoney(r.line_total || r.total || (Number(r.unit_price) * Number(r.quantity))) },
-    { id: "created_at", header: "التاريخ", width: 140, cellClass: "px-3 text-[11px] font-bold text-slate-500 font-mono whitespace-nowrap", render: (r) => r.created_at ? formatArabicDateTime(new Date(r.created_at)) : "—" },
   ];
 
   return (
@@ -393,12 +377,12 @@ export default function InvoicePickerTodayModal({ open, onClose, onSelectInvoice
           </div>
           <div className="max-h-[420px] overflow-auto rounded-sm border border-emerald-200">
             <DataGrid
-              data={loading ? [] : (itemSearch.trim() ? rawItems : data)}
-              rowKey={itemSearch.trim() ? (r, i) => `${r.id || r.item_id}-${i}` : "id"}
+              data={loading ? [] : data}
+              rowKey="id"
               emptyMessage={loading ? "جاري التحميل..." : "لا توجد نتائج في هذه الفترة"}
               className="border-0"
               onRowClick={handleRowClick}
-              columns={itemSearch.trim() ? itemColumns : docColumns}
+              columns={docColumns}
             />
           </div>
         </div>

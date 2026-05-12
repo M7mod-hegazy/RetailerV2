@@ -158,6 +158,11 @@ export default function POSTodayModal({ open, onClose }) {
   const [allItems, setAllItems] = useState([]);
   const [itemLookupOpen, setItemLookupOpen] = useState(false);
   const [activeItemIndex, setActiveItemIndex] = useState(0);
+  const [customerQuery, setCustomerQuery] = useState("");
+  const [customerLookupOpen, setCustomerLookupOpen] = useState(false);
+  const [activeCustomerIndex, setActiveCustomerIndex] = useState(0);
+  const [customerId, setCustomerId] = useState("");
+  const [customers, setCustomers] = useState([]);
   const [previewItem, setPreviewItem] = useState(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [voidOpen, setVoidOpen] = useState(false);
@@ -167,6 +172,13 @@ export default function POSTodayModal({ open, onClose }) {
     if (!itemSearch.trim() || !allItems.length) return [];
     return fuzzyFilterRows(allItems, itemSearch, ["name", "code", "barcode"]).slice(0, 8);
   }, [itemSearch, allItems]);
+
+  const filteredCustomers = useMemo(() => {
+    if (!customerLookupOpen) return [];
+    const q = customerQuery.trim().toLowerCase();
+    if (!q) return customers.slice(0, 8);
+    return customers.filter(c => String(c.name).toLowerCase().includes(q) || String(c.phone || "").includes(q)).slice(0, 8);
+  }, [customerLookupOpen, customerQuery, customers]);
 
   function aggregateResults(data) {
     const map = {};
@@ -190,7 +202,9 @@ export default function POSTodayModal({ open, onClose }) {
     try {
       if (itemSearch.trim()) {
         const params = new URLSearchParams({ q: itemSearch.trim() });
-        if (docSearch.trim()) params.set("doc_search", docSearch.trim());
+        if (docSearch.trim()) params.set("invoice_search", docSearch.trim());
+        if (customerQuery.trim()) params.set("customer_search", customerQuery.trim());
+        if (customerId) params.set("customer_id", customerId);
         if (userId) params.set("user_id", userId);
         params.set("date_from", dateFrom);
         params.set("date_to", dateTo);
@@ -203,9 +217,16 @@ export default function POSTodayModal({ open, onClose }) {
       } else {
         const params = new URLSearchParams({ date_from: dateFrom, date_to: dateTo, sort, dir });
         if (userId) params.set("user_id", userId);
+        if (customerId) params.set("customer_id", customerId);
+        if (customerQuery.trim() && !customerId) params.set("customer_search", customerQuery.trim());
         if (docSearch.trim()) params.set("search", docSearch.trim());
         const r = await api.get(`/api/invoices?${params}`);
-        setData(r.data.data || []);
+        let d = r.data.data || [];
+        if (customerQuery.trim() && !customerId) {
+          const q = customerQuery.trim().toLowerCase();
+          d = d.filter((inv) => String(inv.customer_name || "").toLowerCase().includes(q));
+        }
+        setData(d);
         setRawItems([]);
         setSummary(r.data.summary || { count: 0, total: 0 });
       }
@@ -219,13 +240,16 @@ export default function POSTodayModal({ open, onClose }) {
     if (!usersList.length) {
       api.get("/api/users").then(r => setUsersList(r.data.data || [])).catch(() => {});
     }
+    if (!customers.length) {
+      api.get("/api/customers?limit=500").then(r => setCustomers(r.data.data || [])).catch(() => {});
+    }
   }, [open]);
 
   useEffect(() => {
     if (!open) return;
     const timer = setTimeout(() => { loadData(); }, 300);
     return () => clearTimeout(timer);
-  }, [open, dateFrom, dateTo, sort, dir, userId, itemSearch, docSearch]);
+  }, [open, dateFrom, dateTo, sort, dir, userId, itemSearch, docSearch, customerQuery, customerId]);
 
   function handleVoid(inv) {
     setVoidTarget(inv);
@@ -355,6 +379,34 @@ export default function POSTodayModal({ open, onClose }) {
                 </select>
               </div>
             )}
+            <div className="relative flex items-center gap-1.5">
+              <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest">العميل</label>
+              <input type="text" value={customerQuery}
+                onChange={(e) => { setCustomerQuery(e.target.value); setCustomerLookupOpen(true); setActiveCustomerIndex(0); if (!e.target.value) setCustomerId(""); }}
+                onFocus={() => setCustomerLookupOpen(true)}
+                onBlur={() => setTimeout(() => setCustomerLookupOpen(false), 200)}
+                onKeyDown={(e) => {
+                  if (!customerLookupOpen && e.key === "ArrowDown") { setCustomerLookupOpen(true); return; }
+                  if (customerLookupOpen && filteredCustomers.length && e.key === "ArrowDown") { e.preventDefault(); setActiveCustomerIndex((v) => Math.min(v + 1, filteredCustomers.length - 1)); return; }
+                  if (customerLookupOpen && filteredCustomers.length && e.key === "ArrowUp") { e.preventDefault(); setActiveCustomerIndex((v) => Math.max(v - 1, 0)); return; }
+                  if (customerLookupOpen && filteredCustomers.length && e.key === "Enter") {
+                    e.preventDefault(); const next = filteredCustomers[activeCustomerIndex] || filteredCustomers[0];
+                    setCustomerQuery(next.name); setCustomerId(next.id); setCustomerLookupOpen(false); return;
+                  }
+                  if (e.key === "Escape") setCustomerLookupOpen(false);
+                }}
+                placeholder="كل العملاء..."
+                className="w-[140px] rounded-sm border border-slate-200 bg-white px-2 py-1.5 text-[12px] font-bold text-slate-800 outline-none focus:border-slate-800 focus:ring-2 focus:ring-slate-100" />
+              {customerQuery && (
+                <button onClick={() => { setCustomerQuery(""); setCustomerId(""); }} className="text-slate-400 hover:text-slate-600">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+              {customerLookupOpen && (
+                <LookupList items={filteredCustomers} onPick={(c) => { setCustomerQuery(c.name); setCustomerId(c.id); setCustomerLookupOpen(false); }}
+                  activeIndex={activeCustomerIndex} query={customerQuery} emptyLabel="لا توجد نتائج" />
+              )}
+            </div>
             <button onClick={loadData}
               className="flex items-center gap-1.5 rounded-sm border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-black text-slate-600 hover:border-slate-800 hover:text-slate-900 transition-colors">
               <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> تحديث

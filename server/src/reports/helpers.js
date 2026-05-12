@@ -188,10 +188,18 @@ function getCostColumnForValuation(costMethod) {
   }
 }
 
+// Multi-payment filter: matches direct payment_type OR multi invoices with sub-payment
+function addPaymentTypeFilter(paymentType, tableAlias, params) {
+  if (!paymentType) return "";
+  params.push(paymentType, paymentType);
+  return ` AND (${tableAlias}.payment_type = ? OR (${tableAlias}.payment_type = 'multi' AND EXISTS (SELECT 1 FROM payments WHERE invoice_id = ${tableAlias}.id AND method = ?)))`;
+}
+
 module.exports = {
   addDateFilter,
   labelForKey,
   buildColumnsFromRows,
   getCostColumn,
   getCostColumnForValuation,
+  addPaymentTypeFilter,
 };

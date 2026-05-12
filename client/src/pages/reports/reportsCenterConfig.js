@@ -7,7 +7,7 @@ export const CATEGORIES = [
   { id: "accounts",  label: "الحسابات",   icon: Wallet,     color: "var(--warning-DEFAULT,#f59e0b)" },
   { id: "treasury",  label: "الخزينة",    icon: Receipt,    color: "#06b6d4" },
   { id: "tax",       label: "الضرائب",    icon: FileText,   color: "var(--error-DEFAULT,#ef4444)" },
-  { id: "audit",     label: "التدقيق",    icon: Shield,     color: "var(--text-secondary,#94a3b8)" },
+  { id: "audit",     label: "الأفراد",    icon: Shield,     color: "var(--text-secondary,#94a3b8)" },
   { id: "users",     label: "المستخدمين", icon: Users,      color: "#6366f1" },
 ];
 
@@ -20,6 +20,7 @@ export const SOURCES = [
   { id: "suppliers",       label: "الموردين",            icon: Truck,         color: "var(--warning-DEFAULT,#f59e0b)" },
   { id: "customers",       label: "العملاء",             icon: Users,         color: "#8b5cf6" },
   { id: "employees",       label: "الموظفين",            icon: UserCheck,     color: "var(--text-secondary,#94a3b8)" },
+  { id: "users",           label: "المستخدمين",          icon: Users,         color: "#6366f1" },
   { id: "installments",    label: "أنظمة التقسيط",       icon: CalendarCheck, color: "#14b8a6" },
   { id: "items",           label: "الأصناف",             icon: Package,       color: "var(--primary-DEFAULT,#8b5cf6)" },
   { id: "warehouses",      label: "المخازن",             icon: Layers,        color: "#0ea5e9" },
@@ -28,7 +29,6 @@ export const SOURCES = [
   { id: "treasury",        label: "الخزينة",             icon: Wallet,        color: "#06b6d4" },
   { id: "profit-loader",   label: "محمل ربح المبيعات",  icon: Percent,       color: "#d946ef" },
   { id: "net-profit",      label: "صافي الربح",          icon: LineChart,     color: "#1e40af" },
-  { id: "users",           label: "المستخدمين",          icon: Users,         color: "#6366f1" },
 ];
 
 export const FORMAT_ICONS = {
@@ -252,14 +252,14 @@ export const FILTER_DIMENSIONS = {
     { key: "customer_id", type: "lookup", entity: "customer", label: "العميل" },
     { key: "cashier_id", type: "lookup", entity: "user", label: "الكاشير" },
     { key: "status", type: "select", label: "الحالة", options: [{ value: "paid", label: "مدفوع" }, { value: "unpaid", label: "غير مدفوع" }, { value: "cancelled", label: "ملغي" }] },
-    { key: "payment_type", type: "select", label: "طريقة الدفع", options: [{ value: "cash", label: "نقداً" }, { value: "card", label: "بطاقة" }, { value: "credit", label: "آجل" }, { value: "wallet", label: "محفظة" }] },
+    { key: "payment_type", type: "select", label: "طريقة الدفع", dynamic: true, options: [] },
   ],
   purchases: [
     { key: "supplier_id", type: "lookup", entity: "supplier", label: "المورد" },
     { key: "category_id", type: "lookup", entity: "category", label: "فئة المنتجات" },
     { key: "item_id", type: "lookup", entity: "product", label: "المنتج" },
     { key: "status", type: "select", label: "الحالة", options: [{ value: "paid", label: "مدفوع" }, { value: "unpaid", label: "غير مدفوع" }, { value: "cancelled", label: "ملغي" }] },
-    { key: "payment_type", type: "select", label: "طريقة الدفع", options: [{ value: "cash", label: "نقداً" }, { value: "card", label: "بطاقة" }, { value: "credit", label: "آجل" }, { value: "wallet", label: "محفظة" }] },
+    { key: "payment_type", type: "select", label: "طريقة الدفع", dynamic: true, options: [] },
   ],
   "purchase-returns": [
     { key: "supplier_id", type: "lookup", entity: "supplier", label: "المورد" },

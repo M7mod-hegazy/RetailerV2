@@ -321,4 +321,56 @@ router.get("/source/:sourceKey/classifications", requirePagePermission("reports"
   res.json({ success: true, data: { source, classifications: classes } });
 });
 
+// GET /api/reports/payment-type-options — dynamic payment type filter options
+router.get("/payment-type-options", requirePagePermission("reports", "view"), (_req, res) => {
+  try {
+    const db = getDb();
+    const types = new Map();
+
+    // Collect distinct payment types from invoices
+    const invoiceTypes = db.prepare("SELECT DISTINCT payment_type FROM invoices WHERE payment_type IS NOT NULL AND payment_type != ''").all();
+    invoiceTypes.forEach((r) => types.set(r.payment_type, true));
+
+    // Collect distinct payment types from purchases
+    const purchaseTypes = db.prepare("SELECT DISTINCT payment_type FROM purchases WHERE payment_type IS NOT NULL AND payment_type != ''").all();
+    purchaseTypes.forEach((r) => types.set(r.payment_type, true));
+
+    // Collect distinct payment methods from expenses
+    const expenseMethods = db.prepare("SELECT DISTINCT payment_method FROM expenses WHERE payment_method IS NOT NULL AND payment_method != ''").all();
+    expenseMethods.forEach((r) => types.set(r.payment_method, true));
+
+    // Collect distinct payment methods from revenues
+    const revenueMethods = db.prepare("SELECT DISTINCT payment_method FROM revenues WHERE payment_method IS NOT NULL AND payment_method != ''").all();
+    revenueMethods.forEach((r) => types.set(r.payment_method, true));
+
+    // Look up labels from payment_methods table
+    const methods = db.prepare("SELECT type, category, name FROM payment_methods WHERE is_active = 1").all();
+    const labelMap = {};
+    methods.forEach((m) => {
+      if (m.type) labelMap[m.type] = m.name;
+      if (m.category && !labelMap[m.category]) labelMap[m.category] = m.name;
+    });
+
+    // Special labels for system types
+    const SPECIAL_LABELS = { multi: "متعدد", cash: "نقداً", card: "بطاقة", credit: "آجل", wallet: "محفظة", installments: "تقسيط", bank_transfer: "تحويل بنكي" };
+
+    const options = Array.from(types.keys())
+      .filter((t) => t !== "multi") // exclude multi as a standalone filter option
+      .sort()
+      .map((value) => ({
+        value,
+        label: labelMap[value] || SPECIAL_LABELS[value] || value,
+      }));
+
+    // Include 'multi' at the end
+    if (types.has("multi")) {
+      options.push({ value: "multi", label: "متعدد" });
+    }
+
+    res.json({ success: true, data: options });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
 module.exports = router;

@@ -738,9 +738,22 @@ export function SourceCard({ source, classifications, selectedClassification, se
   );
 }
 
+function useDynamicOptions(dimension) {
+  const [options, setOptions] = useState(dimension?.options || []);
+  useEffect(() => {
+    if (dimension?.dynamic) {
+      api.get("/api/reports/payment-type-options").then((r) => {
+        if (r.data?.data) setOptions(r.data.data);
+      }).catch(() => {});
+    }
+  }, [dimension?.dynamic]);
+  return options;
+}
+
 // ─── Dimension Filter — smart dispatcher ──────────────────────────
 export function DimensionFilter({ dimension, value, onChange, formatLabel }) {
   const fmt = formatLabel || ((x) => x);
+  const dynamicOptions = useDynamicOptions(dimension);
   if (dimension.type === "lookup") {
     const entityLabel = {
       category: "تصنيف", product: "منتج", customer: "عميل",
@@ -756,13 +769,14 @@ export function DimensionFilter({ dimension, value, onChange, formatLabel }) {
     );
   }
   if (dimension.type === "select") {
+    const opts = dimension.dynamic ? dynamicOptions : (dimension.options || []);
     return (
       <div className="space-y-1.5">
         <label className="block text-[11px] font-bold text-zinc-500">{fmt(dimension.label)}</label>
         <select value={value || ""} onChange={(e) => onChange(dimension.key, e.target.value)}
           className="w-full h-10 px-3 rounded-xl border border-zinc-200 bg-zinc-50 text-[13px] text-zinc-900 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all font-medium">
           <option value="">الكل</option>
-          {(dimension.options || []).map((opt) => (
+          {opts.map((opt) => (
             <option key={opt.value} value={opt.value}>{fmt(opt.label || opt.label_key)}</option>
           ))}
         </select>
@@ -788,6 +802,13 @@ export function FilterPanelTop({
     const pool = FILTER_DIMENSIONS[sourceKey] || [];
     return clsDef.dimensions.map((key) => pool.find((d) => d.key === key)).filter(Boolean);
   }, [clsDef, sourceKey]);
+
+  const [paymentTypeOptions, setPaymentTypeOptions] = useState([]);
+  useEffect(() => {
+    api.get("/api/reports/payment-type-options").then((r) => {
+      if (r.data?.data) setPaymentTypeOptions(r.data.data);
+    }).catch(() => {});
+  }, []);
 
   const activeCount = useMemo(() => {
     let count = 0;
@@ -889,39 +910,42 @@ export function FilterPanelTop({
                 )}
 
                 {/* Dimension filters */}
-                {dimensions.map((dim) => (
-                  <motion.div
-                    key={dim.key}
-                    layout
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.95 }}
-                    transition={{ duration: 0.2 }}
-                  >
-                    {dim.type === "select" ? (
-                      <div className="space-y-1.5">
-                        <label className="block text-[11px] font-bold text-zinc-500">{dim.label}</label>
-                        <select value={filters[dim.key] || ""}
-                          onChange={(e) => onFilterChange(dim.key, e.target.value)}
-                          className="w-full h-10 px-3 rounded-xl border border-zinc-200 bg-zinc-50 text-[13px] text-zinc-900 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all font-medium"
-                        >
-                          <option value="">الكل</option>
-                          {(dim.options || []).map((opt) => (
-                            <option key={opt.value} value={opt.value}>{opt.label || opt.label_key}</option>
-                          ))}
-                        </select>
-                      </div>
-                    ) : dim.type === "lookup" ? (
-                      <div className="space-y-1.5">
-                        <label className="block text-[11px] font-bold text-zinc-500">{dim.label}</label>
-                        <LookupEntityFilter entity={dim.entity} value={filters[dim.key] || ""}
-                          onChange={(v) => onFilterChange(dim.key, v)}
-                          placeholder={`بحث عن ${({ category: "تصنيف", product: "منتج", customer: "عميل", supplier: "مورد", user: "مستخدم", warehouse: "مخزن" })[dim.entity] || ""}...`}
-                        />
-                      </div>
-                    ) : null}
-                  </motion.div>
-                ))}
+                {dimensions.map((dim) => {
+                  const opts = dim.dynamic ? paymentTypeOptions : (dim.options || []);
+                  return (
+                    <motion.div
+                      key={dim.key}
+                      layout
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.95 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      {dim.type === "select" ? (
+                        <div className="space-y-1.5">
+                          <label className="block text-[11px] font-bold text-zinc-500">{dim.label}</label>
+                          <select value={filters[dim.key] || ""}
+                            onChange={(e) => onFilterChange(dim.key, e.target.value)}
+                            className="w-full h-10 px-3 rounded-xl border border-zinc-200 bg-zinc-50 text-[13px] text-zinc-900 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all font-medium"
+                          >
+                            <option value="">الكل</option>
+                            {opts.map((opt) => (
+                              <option key={opt.value} value={opt.value}>{opt.label || opt.label_key}</option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : dim.type === "lookup" ? (
+                        <div className="space-y-1.5">
+                          <label className="block text-[11px] font-bold text-zinc-500">{dim.label}</label>
+                          <LookupEntityFilter entity={dim.entity} value={filters[dim.key] || ""}
+                            onChange={(v) => onFilterChange(dim.key, v)}
+                            placeholder={`بحث عن ${({ category: "تصنيف", product: "منتج", customer: "عميل", supplier: "مورد", user: "مستخدم", warehouse: "مخزن" })[dim.entity] || ""}...`}
+                          />
+                        </div>
+                      ) : null}
+                    </motion.div>
+                  );
+                })}
 
                 {/* Cost method */}
                 {hasProfit && (

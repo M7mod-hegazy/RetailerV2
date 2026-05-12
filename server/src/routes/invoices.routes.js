@@ -223,6 +223,8 @@ router.get("/items-search", requirePagePermission("pos", "view"), (req, res, nex
     const rows = db.prepare(`
       SELECT il.id AS line_id, il.invoice_id, i.invoice_no, i.created_at, i.status,
              i.customer_id, c.name AS customer_name,
+             i.payment_type AS payment_method, i.user_id,
+             u.username AS created_by_username,
              il.item_id, it.name AS item_name, it.code AS item_code, it.barcode, it.purchase_price,
              il.quantity, il.unit_price, il.line_total,
              COALESCE((SELECT SUM(srl.quantity) FROM sales_return_lines srl WHERE srl.invoice_line_id = il.id), 0) AS already_returned,
@@ -231,6 +233,7 @@ router.get("/items-search", requirePagePermission("pos", "view"), (req, res, nex
       JOIN invoices i ON i.id = il.invoice_id
       JOIN items it ON it.id = il.item_id
       LEFT JOIN customers c ON c.id = i.customer_id
+      LEFT JOIN users u ON u.id = i.user_id
       ${where}
       ORDER BY i.created_at DESC
       LIMIT 100

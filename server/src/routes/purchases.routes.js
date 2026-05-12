@@ -161,12 +161,15 @@ router.get("/items-search", requirePagePermission("purchases", "view"), (req, re
     const rows = db.prepare(`
       SELECT pl.id AS line_id, pl.purchase_id, p.doc_no, p.created_at, p.status,
              p.supplier_id, s.name AS supplier_name,
+             p.payment_method, p.created_by,
+             u.username AS created_by_username,
              pl.item_id, i.name AS item_name, i.code AS item_code, i.barcode,
              pl.quantity, pl.unit_cost, pl.line_total, pl.selling_price
       FROM purchase_lines pl
       JOIN purchases p ON p.id = pl.purchase_id
       JOIN items i ON i.id = pl.item_id
       LEFT JOIN suppliers s ON s.id = p.supplier_id
+      LEFT JOIN users u ON u.id = p.created_by
       ${where}
       ORDER BY p.created_at DESC
       LIMIT 100

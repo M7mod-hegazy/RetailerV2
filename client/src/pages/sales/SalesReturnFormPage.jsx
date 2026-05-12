@@ -857,8 +857,7 @@ export default function SalesReturnFormPage() {
         </div>
       </Modal>
 
-      <InvoicePickerModal open={invoicePickerOpen && !isEditMode} onClose={() => { setInvoicePickerOpen(false); if (!loadedInvoice) setMode(null); }} onSelectInvoice={p => setPickerSelectedInvoice(p)} customers={customers} />
-      {pickerSelectedInvoice && <InvoiceDetailModal invoice={pickerSelectedInvoice} onClose={() => setPickerSelectedInvoice(null)} onConfirm={handleDetailConfirm} />}
+      <InvoicePickerTodayModal open={invoicePickerOpen && !isEditMode} onClose={() => { setInvoicePickerOpen(false); if (!loadedInvoice) setMode(null); }} onSelectInvoice={handleDetailConfirm} customers={customers} />
       <CustomerCreateModal open={customerCreateOpen} onClose={() => setCustomerCreateOpen(false)} onCreated={c => { setCustomers(prev => [c, ...prev]); setCustomer({ id: c.id, name: c.name }); setCustomerCreateOpen(false); }} />
       <SalesReturnTodayModal open={todayReturnsOpen} onClose={() => setTodayReturnsOpen(false)} />
     </div>

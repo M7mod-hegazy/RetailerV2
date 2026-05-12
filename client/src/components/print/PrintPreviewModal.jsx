@@ -481,7 +481,7 @@ export default function PrintPreviewModal({
               {onExportAllColumns && (
                 <button type="button" onClick={onExportAllColumns}
                   className="w-full flex items-center justify-center gap-1.5 rounded-[10px] border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-[11px] font-bold text-emerald-700 hover:bg-emerald-100 transition-all">
-                  <FileSpreadsheet size={13} /> Excel للكل
+                  <FileSpreadsheet size={13} /> إكسيل للكل
                 </button>
               )}
               <button onClick={onClose}

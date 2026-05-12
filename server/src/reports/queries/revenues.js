@@ -9,7 +9,7 @@ function _detailRevenueQuery(startDate, endDate, opts = {}) {
     SELECT r.doc_no, DATE(r.created_at) AS date,
       COALESCE(c.name, 'غير مصنف') AS category_name,
       r.amount, r.description, r.notes,
-      r.payment_method
+      r.payment_method AS payment_type
     FROM revenues r
     LEFT JOIN revenue_categories c ON c.id = r.category_id
     WHERE 1=1 ${addDateFilter("r.created_at", startDate, endDate, params)}
@@ -44,7 +44,7 @@ function detailedRevenues(startDate, endDate, opts = {}) {
     SELECT r.doc_no, DATE(r.created_at) AS date,
       COALESCE(c.name, 'غير مصنف') AS category_name,
       r.amount, r.description, r.notes,
-      r.payment_method
+      r.payment_method AS payment_type
     FROM revenues r
     LEFT JOIN revenue_categories c ON c.id = r.category_id
     WHERE 1=1 ${addDateFilter("r.created_at", startDate, endDate, params)}

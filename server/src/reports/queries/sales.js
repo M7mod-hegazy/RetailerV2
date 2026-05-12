@@ -1,5 +1,5 @@
 const { getDb } = require("../../config/database");
-const { addDateFilter, getCostColumn } = require("../helpers");
+const { addDateFilter, getCostColumn, addPaymentTypeFilter } = require("../helpers");
 const { getItemsBelowMargin } = require("../../services/waccService");
 
 function dailySales(startDate, endDate, opts = {}) {
@@ -35,6 +35,7 @@ function detailedSales(startDate, endDate, opts = {}) {
   const db = getDb();
   const params = [];
   const { q, status, payment_type, customer_id, category_id, item_id } = opts;
+  const ptFilter = addPaymentTypeFilter(payment_type, "i", params);
   return db.prepare(`
     SELECT i.invoice_no, i.doc_no,
       DATE(i.created_at) AS date,
@@ -50,7 +51,7 @@ function detailedSales(startDate, endDate, opts = {}) {
     LEFT JOIN invoice_lines il ON il.invoice_id = i.id
     WHERE 1=1 ${addDateFilter("i.created_at", startDate, endDate, params)}
       ${status ? " AND i.status = ?" : ""}
-      ${payment_type ? " AND i.payment_type = ?" : ""}
+      ${ptFilter}
       ${customer_id ? " AND i.customer_id = ?" : ""}
       ${category_id ? " AND i.id IN (SELECT DISTINCT il2.invoice_id FROM invoice_lines il2 JOIN items it2 ON it2.id = il2.item_id WHERE it2.category_id = ?)" : ""}
       ${item_id ? " AND i.id IN (SELECT DISTINCT il2.invoice_id FROM invoice_lines il2 WHERE il2.item_id = ?)" : ""}
@@ -60,7 +61,6 @@ function detailedSales(startDate, endDate, opts = {}) {
   `).all(
     ...params,
     ...(status ? [status] : []),
-    ...(payment_type ? [payment_type] : []),
     ...(customer_id ? [customer_id] : []),
     ...(category_id ? [category_id] : []),
     ...(item_id ? [item_id] : []),
@@ -72,6 +72,7 @@ function _detailSalesQuery(startDate, endDate, opts = {}) {
   const db = getDb();
   const params = [];
   const { customer_id, category_id, item_id, status, payment_type, cashier_id } = opts;
+  const ptFilter = addPaymentTypeFilter(payment_type, "i", params);
   return db.prepare(`
     SELECT i.invoice_no, i.doc_no,
       DATE(i.created_at) AS date,
@@ -91,7 +92,7 @@ function _detailSalesQuery(startDate, endDate, opts = {}) {
       ${category_id ? " AND i.id IN (SELECT DISTINCT il2.invoice_id FROM invoice_lines il2 JOIN items it2 ON it2.id = il2.item_id WHERE it2.category_id = ?)" : ""}
       ${item_id ? " AND i.id IN (SELECT DISTINCT il2.invoice_id FROM invoice_lines il2 WHERE il2.item_id = ?)" : ""}
       ${status ? " AND i.status = ?" : ""}
-      ${payment_type ? " AND i.payment_type = ?" : ""}
+      ${ptFilter}
       ${cashier_id ? " AND COALESCE(i.user_id, (SELECT user_id FROM shifts WHERE id = i.shift_id)) = ?" : ""}
     GROUP BY i.id
     ORDER BY i.created_at DESC
@@ -101,7 +102,6 @@ function _detailSalesQuery(startDate, endDate, opts = {}) {
     ...(category_id ? [category_id] : []),
     ...(item_id ? [item_id] : []),
     ...(status ? [status] : []),
-    ...(payment_type ? [payment_type] : []),
     ...(cashier_id ? [cashier_id] : []),
   );
 }
@@ -111,6 +111,7 @@ function _detailItemSalesQuery(startDate, endDate, opts = {}) {
   const params = [];
   const { customer_id, category_id, item_id, status, payment_type, cashier_id } = opts;
   const costCol = getCostColumn(opts.cost_method);
+  const ptFilter = addPaymentTypeFilter(payment_type, "i", params);
   return db.prepare(`
     SELECT i.invoice_no, DATE(i.created_at) AS date,
       COALESCE(c.name, 'نقدي') AS customer_name,
@@ -132,7 +133,7 @@ function _detailItemSalesQuery(startDate, endDate, opts = {}) {
       ${category_id ? " AND it.category_id = ?" : ""}
       ${item_id ? " AND it.id = ?" : ""}
       ${status ? " AND i.status = ?" : ""}
-      ${payment_type ? " AND i.payment_type = ?" : ""}
+      ${ptFilter}
       ${cashier_id ? " AND COALESCE(i.user_id, (SELECT user_id FROM shifts WHERE id = i.shift_id)) = ?" : ""}
     ORDER BY i.created_at DESC, il.id
   `).all(
@@ -141,7 +142,6 @@ function _detailItemSalesQuery(startDate, endDate, opts = {}) {
     ...(category_id ? [category_id] : []),
     ...(item_id ? [item_id] : []),
     ...(status ? [status] : []),
-    ...(payment_type ? [payment_type] : []),
     ...(cashier_id ? [cashier_id] : []),
   );
 }

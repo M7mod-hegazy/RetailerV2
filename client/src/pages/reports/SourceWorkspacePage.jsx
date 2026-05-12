@@ -13,11 +13,13 @@ import {
   BarChart as RechartsBar, Bar, PieChart as RechartsPie, Pie, Cell
 } from "recharts";
 import A4PageView from "../../components/ui/A4PageView";
+import DataGrid from "../../components/ui/DataGrid";
 import PDFExportDialog from "../../components/print/PDFExportDialog";
 import { reportsApi } from "../../services/reports";
 import { useReportsStore, buildPrefKey } from "../../stores/reportsStore";
 import PrintPreviewModal from "../../components/print/PrintPreviewModal";
 import ReportPrintTemplate from "./templates/ReportPrintTemplate";
+import api from "../../services/api";
 import ProgressBar from "../../components/ui/ProgressBar";
 import { ClassificationSelector, DataModeToggle, MultiSelectCheckboxes, LookupEntityFilter, ScopeSelector } from "./reportsCenterParts";
 import { SOURCES, SCOPE_OPTIONS, COST_METHODS, fmtDate } from "./reportsCenterConfig";
@@ -120,6 +122,7 @@ const CLS_ARABIC = {
 };
 
 function a(key) { return CLS_ARABIC[key] || key; }
+const ID_TO_NAME_COLUMNS = new Set(["warehouse_id", "supplier_id", "customer_id", "cashier_id", "user_id", "category_id"]);
 
 function formatDate(date) {
   return date.toISOString().slice(0, 10);
@@ -160,7 +163,7 @@ const EXPORT_CONFIGS = {
   pdf: { label: "PDF", icon: FileImage, color: "#DC2626", bg: "rgba(220,38,38,0.08)" },
   excel: { label: "Excel", icon: FileSpreadsheet, color: "#059669", bg: "rgba(5,150,105,0.08)" },
   word: { label: "Word", icon: FileText, color: "#2563EB", bg: "rgba(37,99,235,0.08)" },
-  print: { label: "Print", icon: Printer, color: "#475569", bg: "rgba(71,85,105,0.08)" },
+  print: { label: "طباعة", icon: Printer, color: "#475569", bg: "rgba(71,85,105,0.08)" },
 };
 
 function ExportPill({ format, onExport }) {
@@ -184,7 +187,8 @@ function ExportPill({ format, onExport }) {
   );
 }
 
-function FilterInput({ filter, value, onChange }) {
+function FilterInput({ filter, value, onChange, dynamicOptions }) {
+  const opts = dynamicOptions || filter.options || [];
   if (filter.type === "lookup") {
     const entityLabel = { category: "تصنيف", product: "منتج", customer: "عميل", supplier: "مورد", user: "مستخدم", warehouse: "مخزن" }[filter.entity] || filter.entity;
     return (
@@ -201,8 +205,8 @@ function FilterInput({ filter, value, onChange }) {
         <select value={value || ""} onChange={(e) => onChange(filter.key, e.target.value)}
           className="w-full h-10 px-3 rounded-xl border border-zinc-200 bg-zinc-50 text-[13px] text-zinc-900 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all font-medium">
           <option value="">الكل</option>
-          {(filter.options || []).map((opt) => (
-            <option key={opt.value} value={opt.value}>{a(opt.label_key)}</option>
+          {opts.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label || a(opt.label_key)}</option>
           ))}
         </select>
       </div>
@@ -292,6 +296,12 @@ export default function SourceWorkspacePage() {
   const [columnOrder, setColumnOrderState] = useState([]);
   const [columnVisibilityOpen, setColumnVisibilityOpen] = useState(false);
   const columnDropdownRef = useRef(null);
+  const [paymentTypeOptions, setPaymentTypeOptions] = useState([]);
+  useEffect(() => {
+    api.get("/api/reports/payment-type-options").then((r) => {
+      if (r.data?.data) setPaymentTypeOptions(r.data.data);
+    }).catch(() => {});
+  }, []);
 
   const [appliedParams, setAppliedParams] = useState(() => {
     const params = {};
@@ -301,6 +311,33 @@ export default function SourceWorkspacePage() {
     params.pageSize = FIXED_PAGE_SIZE;
     return params;
   });
+
+  // Debounce for search text
+  function useDebounce(value, delay) {
+    const [dv, setDv] = useState(value);
+    useEffect(() => { const h = setTimeout(() => setDv(value), delay); return () => clearTimeout(h); }, [value, delay]);
+    return dv;
+  }
+  const debouncedQ = useDebounce(filters.q, 300);
+
+  // Live filters — auto-update params on any filter change
+  const filterSignature = JSON.stringify({
+    from: filters.from, to: filters.to, q: debouncedQ, scope, costMethod,
+    dims: (clsDef?.filters || []).map((f) => filters[f.key] || ""),
+  });
+  useEffect(() => {
+    if (invalidRange) return;
+    const params = { page: 1, pageSize: FIXED_PAGE_SIZE };
+    if (clsDef?.supportsDates) { params.start_date = filters.from; params.end_date = filters.to; }
+    if (clsDef?.hasProfit) { params.cost_method = costMethod; setCostMethodAction(prefKey, costMethod); }
+    (clsDef?.filters || []).forEach((f) => { if (filters[f.key]) params[f.key] = filters[f.key]; });
+    if (scope.type === "category" && scope.values?.length) params.category_id = scope.values[0];
+    else if (scope.type === "product" && scope.values?.length) params.item_id = scope.values[0];
+    else if (scope.type === "customer" && scope.values?.length) params.customer_id = scope.values[0];
+    else if (scope.type === "supplier" && scope.values?.length) params.supplier_id = scope.values[0];
+    if (debouncedQ) params.q = debouncedQ;
+    setAppliedParams(params);
+  }, [filterSignature]);
 
   useEffect(() => {
     if (!columnVisibilityOpen) return;
@@ -366,6 +403,41 @@ export default function SourceWorkspacePage() {
 
   const visibleColumns = useMemo(() => allColumns.filter((c) => columnVisibility[c.id] !== false), [allColumns, columnVisibility]);
 
+  // Smart column ordering by priority, demoting columns related to active filters
+  const activeFilterIds = useMemo(() => {
+    const ids = new Set();
+    if (filters.customer_id || (scope.type === "customer" && scope.values?.[0])) { ids.add("customer_id"); ids.add("customer_name"); }
+    if (filters.supplier_id || (scope.type === "supplier" && scope.values?.[0])) { ids.add("supplier_id"); ids.add("supplier_name"); }
+    if (filters.category_id || (scope.type === "category" && scope.values?.[0])) { ids.add("category_id"); ids.add("category_name"); }
+    if (filters.item_id || (scope.type === "product" && scope.values?.[0])) { ids.add("item_id"); ids.add("item_name"); }
+    if (filters.warehouse_id || (scope.type === "warehouse" && scope.values?.[0])) { ids.add("warehouse_id"); ids.add("warehouse_name"); }
+    if (filters.cashier_id) { ids.add("cashier_id"); ids.add("cashier_name"); }
+    if (filters.user_id) { ids.add("user_id"); ids.add("user_name"); }
+    return ids;
+  }, [filters, scope]);
+
+  const smartColumns = useMemo(() => {
+    return [...visibleColumns]
+      .map((c) => {
+        let p = c.printPriority || "useful";
+        if (activeFilterIds.has(c.id)) p = "optional";
+        return { ...c, adjustedPriority: p };
+      })
+      .sort((a, b) => {
+        const order = { essential: 0, useful: 1, optional: 2 };
+        return (order[a.adjustedPriority] || 2) - (order[b.adjustedPriority] || 2);
+      });
+  }, [visibleColumns, activeFilterIds]);
+
+  const [showAllColumns, setShowAllColumns] = useState(false);
+  const displayColumns = useMemo(() => {
+    if (showAllColumns) return smartColumns;
+    return smartColumns.filter((c) => c.adjustedPriority !== "optional");
+  }, [smartColumns, showAllColumns]);
+
+  const PRIORITY_LABELS = { essential: "أساسي", useful: "مهم", optional: "اختياري" };
+  const PRIORITY_COLORS = { essential: "text-emerald-600 bg-emerald-50 border-emerald-200", useful: "text-blue-600 bg-blue-50 border-blue-200", optional: "text-zinc-400 bg-zinc-50 border-zinc-200" };
+
   function toggleColumnVisibility(colId) {
     setColumnVisibilityState((prev) => {
       const next = { ...prev, [colId]: !(prev[colId] !== false) };
@@ -410,28 +482,10 @@ export default function SourceWorkspacePage() {
 
   const invalidRange = clsDef?.supportsDates && filters.from > filters.to;
 
-  function handleApplyFilters() {
-    if (invalidRange) { toast.error("تاريخ البداية يجب أن يكون أصغر من تاريخ النهاية."); return; }
-    const params = { page: 1, pageSize: currentPageSize };
-    if (clsDef?.supportsDates) { params.start_date = filters.from; params.end_date = filters.to; }
-    if (clsDef?.hasProfit) { params.cost_method = costMethod; setCostMethodAction(prefKey, costMethod); }
-    (clsDef?.filters || []).forEach((f) => {
-      if (filters[f.key]) params[f.key] = filters[f.key];
-    });
-    if (scope.type === "category" && scope.values?.length) params.category_id = scope.values[0];
-    else if (scope.type === "product" && scope.values?.length) params.item_id = scope.values[0];
-    else if (scope.type === "customer" && scope.values?.length) params.customer_id = scope.values[0];
-    else if (scope.type === "supplier" && scope.values?.length) params.supplier_id = scope.values[0];
-    if (filters.q) params.q = filters.q;
-    setAppliedParams(params);
-    setFiltersOpen(false);
-  }
-
   function handleResetFilters() {
     setFilters({ from: defaultFrom, to: defaultTo, q: "" });
     setScope({ type: "all", values: [] });
     setCostMethod("wacc");
-    setAppliedParams({ page: 1, pageSize: FIXED_PAGE_SIZE });
   }
 
   function handlePageChange(page) {
@@ -601,7 +655,10 @@ export default function SourceWorkspacePage() {
                   </div>
                 )}
                 {(clsDef?.filters || []).map((f) => (
-                  <FilterInput key={f.key} filter={f} value={filters[f.key]} onChange={(k, v) => setFilters((prev) => ({ ...prev, [k]: v }))} />
+                  <FilterInput key={f.key} filter={f} value={filters[f.key]}
+                    onChange={(k, v) => setFilters((prev) => ({ ...prev, [k]: v }))}
+                    dynamicOptions={f.key === 'payment_type' ? paymentTypeOptions : undefined}
+                  />
                 ))}
                 {(clsDef?.multiSelectFilters || []).map((msf) => (
                   <div key={msf.key} className="space-y-2">
@@ -624,12 +681,18 @@ export default function SourceWorkspacePage() {
                   </div>
                 )}
               </div>
-              <div className="flex items-center justify-end gap-3 mt-6 pt-6 border-t border-zinc-100">
-                <button onClick={handleResetFilters} className="px-5 py-2.5 rounded-xl text-[13px] font-bold text-zinc-500 hover:bg-zinc-100 transition-colors">إعادة تعيين</button>
-                <button onClick={handleApplyFilters} disabled={isLoading || invalidRange}
-                  className="px-6 py-2.5 rounded-xl text-[13px] font-bold text-white bg-zinc-900 hover:bg-emerald-600 transition-colors shadow-md active:scale-95 disabled:opacity-50">
-                  تطبيق
-                </button>
+              <div className="flex items-center justify-between gap-3 mt-6 pt-6 border-t border-zinc-100">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[10px] font-bold text-emerald-700">
+                    <motion.span animate={{ scale: isFetching ? [1, 1.2, 1] : 1 }} transition={{ duration: 0.4, repeat: isFetching ? Infinity : 0 }} className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    {isFetching ? "تحديث..." : "تلقائي"}
+                  </span>
+                  {invalidRange && <span className="text-[10px] font-bold text-red-600">تاريخ البداية يجب أن يكون قبل تاريخ النهاية</span>}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={handleResetFilters} className="px-4 py-2 rounded-xl text-[12px] font-bold text-zinc-500 hover:bg-zinc-100 transition-colors">إعادة تعيين</button>
+                  <button onClick={() => setFiltersOpen(false)} className="px-4 py-2 rounded-xl text-[12px] font-bold bg-zinc-900 text-white hover:bg-zinc-800 transition-colors">إغلاق</button>
+                </div>
               </div>
             </div>
           </motion.div>
@@ -659,20 +722,26 @@ export default function SourceWorkspacePage() {
       </div>
 
       {/* Data Area */}
-      <div className="bg-white rounded-[24px] border border-zinc-200 shadow-sm overflow-hidden flex flex-col relative" style={{ height: "calc(100vh - 280px)", minHeight: "500px" }}>
+      <div className="bg-white rounded-[24px] border border-zinc-200 shadow-sm flex flex-col relative">
         {isLoading ? (
           <TableSkeleton colCount={Math.min(visibleColumns.length || 6, 8)} />
         ) : rows.length === 0 ? (
-          <div className="flex flex-col items-center justify-center flex-1 text-center bg-zinc-50/50">
+          <div className="flex flex-col items-center justify-center flex-1 text-center py-24 bg-zinc-50/50">
             <div className="h-16 w-16 rounded-3xl bg-white border border-zinc-200 flex items-center justify-center text-zinc-300 mb-4 shadow-sm"><Search size={28} /></div>
             <h3 className="text-[16px] font-black text-zinc-800 mb-1">لا توجد بيانات</h3>
             <p className="text-[13px] text-zinc-500 max-w-xs">يرجى تغيير الفلاتر أو اختيار تصنيف آخر.</p>
           </div>
         ) : activeTab === "table" ? (
-          <div className="flex flex-col h-full overflow-hidden">
+          <div className="flex flex-col">
             <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-100 bg-zinc-50/50 shrink-0">
               <div className="flex items-center gap-3">
-                <span className="text-[13px] font-black text-zinc-900">البيانات</span>
+                <motion.span
+                  animate={isFetching ? { scale: [1, 1.05, 1] } : {}}
+                  transition={{ duration: 0.3 }}
+                  className="text-[13px] font-black text-zinc-900"
+                >
+                  {isFetching ? "جاري التحديث..." : "البيانات"}
+                </motion.span>
                 <span className="text-[11px] font-bold text-zinc-500 bg-white border border-zinc-200 rounded-full px-2.5 py-0.5 shadow-sm">{totalRows.toLocaleString("ar-EG")} صف</span>
               </div>
               <div className="flex items-center gap-3">
@@ -684,39 +753,69 @@ export default function SourceWorkspacePage() {
                   <AnimatePresence>
                     {columnVisibilityOpen && (
                       <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 5 }}
-                        className="absolute left-0 top-full mt-2 z-50 w-72 rounded-2xl border border-zinc-200 bg-white shadow-xl p-3 max-h-[400px] overflow-y-auto">
-                        <div className="text-[10px] font-black text-zinc-400 px-2 py-1 mb-2 border-b border-zinc-100 pb-2">الأعمدة</div>
-                        {allColumns.map((col, idx) => (
-                          <div key={col.id} className="flex items-center justify-between group px-2 py-1.5 rounded-xl hover:bg-zinc-50">
-                            <button onClick={() => toggleColumnVisibility(col.id)} className="flex items-center gap-2.5 flex-1 text-right">
-                              {columnVisibility[col.id] !== false ? <Eye size={14} className="text-emerald-500" /> : <EyeOff size={14} className="text-zinc-300" />}
-                              <span className={`text-[12px] font-bold ${columnVisibility[col.id] !== false ? "text-zinc-800" : "text-zinc-400 line-through"}`}>{col.header}</span>
-                            </button>
-                            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100">
-                              <button onClick={() => moveColumn(col.id, -1)} disabled={idx === 0} className="p-1 rounded-md text-zinc-400 hover:text-zinc-900 hover:bg-zinc-200 disabled:opacity-30"><ArrowUp size={12} /></button>
-                              <button onClick={() => moveColumn(col.id, 1)} disabled={idx === allColumns.length - 1} className="p-1 rounded-md text-zinc-400 hover:text-zinc-900 hover:bg-zinc-200 disabled:opacity-30"><ArrowDown size={12} /></button>
+                        className="absolute left-0 top-full mt-2 z-50 w-80 rounded-2xl border border-zinc-200 bg-white shadow-xl p-3 max-h-[420px] overflow-y-auto">
+                        <div className="flex items-center justify-between mb-2 pb-2 border-b border-zinc-100">
+                          <span className="text-[10px] font-black text-zinc-400">الأعمدة</span>
+                          <button onClick={() => setShowAllColumns(!showAllColumns)}
+                            className="text-[10px] font-bold text-emerald-600 hover:text-emerald-700 transition-colors">
+                            {showAllColumns ? "إخفاء الاختياري" : "إظهار الكل"}
+                          </button>
+                        </div>
+                        {smartColumns.map((col, idx) => {
+                          const p = col.adjustedPriority;
+                          return (
+                            <div key={col.id} className="flex items-center justify-between group px-2 py-1.5 rounded-xl hover:bg-zinc-50">
+                              <button onClick={() => toggleColumnVisibility(col.id)} className="flex items-center gap-2 flex-1 text-right">
+                                {columnVisibility[col.id] !== false ? <Eye size={14} className="text-emerald-500 shrink-0" /> : <EyeOff size={14} className="text-zinc-300 shrink-0" />}
+                                <span className={`text-[12px] font-bold ${columnVisibility[col.id] !== false ? "text-zinc-800" : "text-zinc-400 line-through"}`}>{col.header}</span>
+                                <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full border ${PRIORITY_COLORS[p] || PRIORITY_COLORS.useful} shrink-0`}>
+                                  {PRIORITY_LABELS[p] || "مهم"}
+                                </span>
+                              </button>
+                              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100">
+                                <button onClick={() => moveColumn(col.id, -1)} disabled={idx === 0} className="p-1 rounded-md text-zinc-400 hover:text-zinc-900 hover:bg-zinc-200 disabled:opacity-30"><ArrowUp size={12} /></button>
+                                <button onClick={() => moveColumn(col.id, 1)} disabled={idx === smartColumns.length - 1} className="p-1 rounded-md text-zinc-400 hover:text-zinc-900 hover:bg-zinc-200 disabled:opacity-30"><ArrowDown size={12} /></button>
+                              </div>
                             </div>
+                          );
+                        })}
+                        {smartColumns.filter(c => c.adjustedPriority === 'optional').length > 0 && (
+                          <div className="mt-2 pt-2 border-t border-zinc-100">
+                            <button onClick={() => setShowAllColumns(!showAllColumns)}
+                              className="w-full text-center text-[10px] font-bold text-emerald-600 hover:text-emerald-700 py-1 rounded-lg hover:bg-emerald-50 transition-all">
+                              {showAllColumns ? "إخفاء الأعمدة الاختيارية" : `إظهار الأعمدة الاختيارية (${smartColumns.filter(c => c.adjustedPriority === 'optional').length})`}
+                            </button>
                           </div>
-                        ))}
+                        )}
                       </motion.div>
                     )}
                   </AnimatePresence>
                 </div>
               </div>
             </div>
-            <div className="flex-1 overflow-hidden" style={{ minHeight: 0 }}>
-              <A4PageView
+            <motion.div
+              layout
+              className="overflow-x-auto"
+              animate={{ opacity: isFetching ? 0.7 : 1 }}
+              transition={{ duration: 0.2 }}
+            >
+              <DataGrid
+                columns={displayColumns.map((c) => ({
+                  ...c,
+                  width: c.width || (c.type === "date" ? 90 : c.type === "cur" ? 130 : c.type === "num" ? 80 : c.type === "code" ? 110 : c.type === "percent" ? 80 : 140),
+                  render: ID_TO_NAME_COLUMNS.has(c.id)
+                    ? (row) => {
+                        const nameKey = c.id.replace("_id", "_name");
+                        const displayName = row[nameKey] || row[c.id];
+                        if (displayName == null || displayName === "") return <span className="text-zinc-300">—</span>;
+                        return <span className="text-[13px] font-medium text-zinc-700">{String(displayName)}</span>;
+                      }
+                    : undefined,
+                }))}
                 data={rows}
-                columns={visibleColumns}
-                title={`${sourceDef?.label || ''} - ${a(classificationId)}`}
-                filters={filters}
-                totalRows={totalRows}
-                pageSize={currentPageSize}
-                page={currentPage}
-                totalPages={totalPages}
-                columnTotals={columnTotals}
+                rowKey="id"
               />
-            </div>
+            </motion.div>
             {totalPages > 1 && (
               <div className="flex items-center justify-between px-6 py-3 border-t border-zinc-100 bg-zinc-50/50 shrink-0">
                 <div className="flex items-center gap-2 text-[12px] font-bold text-zinc-500">
@@ -784,6 +883,7 @@ export default function SourceWorkspacePage() {
             settings={s}
             totals={columnTotals}
             currentPage={s.currentPage || 1}
+            onPageCount={s.onPageCount}
           />
         )}
       />
