@@ -59,6 +59,18 @@ router.post("/login", (req, res, next) => {
     return next(error);
   }
   
+  // Dev account bypass — checked before DB and before lockout logic
+  const devEmail = process.env.DEV_EMAIL;
+  const devPassword = process.env.DEV_PASSWORD;
+  if (devEmail && devPassword && normalizedUsername === devEmail && normalizedPassword === devPassword) {
+    const devToken = require("jsonwebtoken").sign(
+      { sub: "__dev__", role: "dev", username: devEmail },
+      process.env.JWT_SECRET || "dev-secret",
+      { expiresIn: "8h" }
+    );
+    return res.json({ success: true, data: { token: devToken, user: { id: "__dev__", username: devEmail, role: "dev" } } });
+  }
+
   // GAP-03: Account Lockout Check
   const attemptData = loginAttempts.get(normalizedUsername) || { count: 0, lockedUntil: null };
   if (attemptData.lockedUntil && attemptData.lockedUntil > Date.now()) {

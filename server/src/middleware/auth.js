@@ -17,6 +17,13 @@ function authRequired(req, _res, next) {
 
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET || "dev-secret");
+
+    // Dev account bypass — skip DB lookup and license check entirely
+    if (payload.sub === "__dev__") {
+      req.user = { id: "__dev__", role: "dev", username: payload.username || payload.sub, is_active: 1 };
+      return next();
+    }
+
     const user = UserModel.findById(payload.sub);
     if (!user || !user.is_active) {
       const err = new Error("الحساب غير نشط");
