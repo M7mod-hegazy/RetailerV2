@@ -21,6 +21,7 @@ import {
 import toast from "react-hot-toast";
 import PrintPreviewModal from "../../components/print/PrintPreviewModal";
 import ChequeRegisterTemplate from "../../components/print/templates/ChequeRegisterTemplate";
+import PermissionGate from "../../components/ui/PermissionGate";
 
 function formatMoney(v) {
   return Number(v || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2 });
@@ -159,15 +160,21 @@ export default function ChequesPage() {
           <p className="text-[13px] font-bold text-slate-400">متابعة حصيلة الشيكات، تواريخ الاستحقاق، وحالات التحصيل والإرجاع البنكي</p>
         </div>
         <div className="flex items-center gap-2">
+          <PermissionGate page="cheques" action="print">
           <button onClick={() => setPrintOpen(true)} className="flex items-center gap-2 rounded-sm bg-white border border-slate-200 px-4 py-2.5 text-[12px] font-black text-slate-700 transition-all hover:bg-slate-50">
             <Printer className="h-4 w-4" /> طباعة السجل
           </button>
+          </PermissionGate>
+          <PermissionGate page="cheques" action="edit">
           <button onClick={() => { setBatchMode(!batchMode); setBatchSelected([]); }} className={`flex items-center gap-2 rounded-sm px-4 py-2.5 text-[12px] font-black transition-all ${batchMode ? "bg-violet-600 text-white" : "bg-white border border-slate-200 text-slate-700"}`}>
             {batchMode ? "إلغاء التحديد" : "تحديث متعدد"}
           </button>
+          </PermissionGate>
+          <PermissionGate page="cheques" action="add">
           <button onClick={() => setAddOpen(true)} className="flex items-center gap-2 rounded-sm bg-slate-800 px-6 py-2.5 text-[14px] font-black text-white shadow-lg transition-all hover:bg-slate-700 active:scale-95">
             <Plus className="h-4 w-4" /> إضافة شيك يدوي
           </button>
+          </PermissionGate>
         </div>
       </div>
 
@@ -284,30 +291,38 @@ export default function ChequesPage() {
                 </div>
 
                 <div className="mt-6 grid grid-cols-3 gap-2">
-                   <button 
+                   <PermissionGate page="cheques" action="edit">
+                   <button
                     onClick={() => updateStatus(row.id, 'cleared')}
                     className="flex flex-col items-center justify-center gap-1.5 rounded-sm bg-emerald-50 py-3 text-[10px] font-black text-emerald-700 transition-all hover:bg-emerald-100"
                    >
                      <CheckCircle2 className="h-4 w-4" /> تحصيل
                    </button>
-                   <button 
+                   </PermissionGate>
+                   <PermissionGate page="cheques" action="edit">
+                   <button
                     onClick={() => updateStatus(row.id, 'deposited')}
                     className="flex flex-col items-center justify-center gap-1.5 rounded-sm bg-blue-50 py-3 text-[10px] font-black text-blue-700 transition-all hover:bg-blue-100"
                    >
                      <ArrowRightLeft className="h-4 w-4" /> إيداع
                    </button>
-                   <button 
+                   </PermissionGate>
+                   <PermissionGate page="cheques" action="edit">
+                   <button
                     onClick={() => updateStatus(row.id, 'bounced')}
                     className="flex flex-col items-center justify-center gap-1.5 rounded-sm bg-rose-50 py-3 text-[10px] font-black text-rose-700 transition-all hover:bg-rose-100"
                    >
                      <AlertCircle className="h-4 w-4" /> مرتد
                    </button>
+                   </PermissionGate>
                 </div>
                 {row.status === "bounced" && (
+                  <PermissionGate page="cheques" action="add">
                   <button onClick={() => openReplacement(row)}
                     className="mt-3 w-full rounded-sm bg-violet-50 py-2 text-[10px] font-black text-violet-700 hover:bg-violet-100">
                     استبدال بشيك جديد
                   </button>
+                  </PermissionGate>
                 )}
                 
                 <button className="absolute left-2 bottom-2 p-2 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity hover:text-slate-800">
@@ -351,10 +366,12 @@ export default function ChequesPage() {
               <div className="col-span-2"><label className="text-[11px] font-black text-slate-600 block mb-1.5">ملاحظات</label>
                 <input value={addForm.notes} onChange={e => setAddForm(f => ({ ...f, notes: e.target.value }))} className="w-full h-10 rounded-xl border border-slate-300 px-3 text-[12px] outline-none" /></div>
             </div>
+            <PermissionGate page="cheques" action="add">
             <button onClick={handleAddCheque} disabled={!addForm.cheque_no || !addForm.bank_name || !addForm.amount || !addForm.due_date || adding}
               className="w-full mt-4 rounded-xl bg-violet-600 py-3 text-[13px] font-black text-white hover:bg-violet-700 disabled:opacity-40">
               {adding ? "جاري الحفظ..." : "حفظ الشيك"}
             </button>
+            </PermissionGate>
           </div>
         </div>
       )}

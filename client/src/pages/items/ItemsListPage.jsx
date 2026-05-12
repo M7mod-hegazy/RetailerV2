@@ -42,6 +42,7 @@ import Highlight from "../../components/ui/Highlight";
 import ItemExportModal from "./ItemExportModal";
 import ItemImportModal from "./ItemImportModal";
 import ItemSmartUpdateModal from "./ItemSmartUpdateModal";
+import PermissionGate from "../../components/ui/PermissionGate";
 
 // ─── pure helpers ─────────────────────────────────────────────────────────────
 
@@ -985,12 +986,15 @@ export default function ItemsListPage() {
                   <span className="text-[13px] font-black text-slate-800 leading-none">{stats.outOfStock}</span>
                </div>
             </div>
+            <PermissionGate page="items" action="add">
             <button
                onClick={() => setNewCategoryOpen(true)}
                className="flex h-[42px] items-center gap-2 rounded-sm bg-slate-100 border border-slate-200 px-4 text-[13px] font-black text-slate-600 hover:bg-slate-200 transition-all active:scale-95 shadow-sm"
             >
                <Plus className="h-3.5 w-3.5" /> فئة جديدة
             </button>
+            </PermissionGate>
+            <PermissionGate page="items" action="add">
             <button
                onClick={() => setImportOpen(true)}
                className="flex h-[42px] items-center gap-2 rounded-sm border border-emerald-200 bg-emerald-50 px-4 text-[12px] font-black text-emerald-700 hover:bg-emerald-100 transition-all shadow-sm"
@@ -998,6 +1002,8 @@ export default function ItemsListPage() {
             >
                <Upload className="h-4 w-4" /> استيراد
             </button>
+            </PermissionGate>
+            <PermissionGate page="items" action="print">
             <button
                onClick={() => setExportOpen(true)}
                className="flex h-[42px] items-center gap-2 rounded-sm border border-sky-200 bg-sky-50 px-4 text-[12px] font-black text-sky-700 hover:bg-sky-100 transition-all shadow-sm"
@@ -1005,6 +1011,8 @@ export default function ItemsListPage() {
             >
                <Download className="h-4 w-4" /> تصدير
             </button>
+            </PermissionGate>
+            <PermissionGate page="items" action="edit">
             <button
                onClick={() => setSmartUpdateOpen(true)}
                className="flex h-[42px] items-center gap-2 rounded-sm border border-amber-200 bg-amber-50 px-4 text-[12px] font-black text-amber-700 hover:bg-amber-100 transition-all shadow-sm"
@@ -1012,6 +1020,7 @@ export default function ItemsListPage() {
             >
                <RefreshCw className="h-4 w-4" /> تحديث ذكي
             </button>
+            </PermissionGate>
          </div>
       </div>
 
@@ -1263,6 +1272,7 @@ export default function ItemsListPage() {
                        <td className="px-4 py-1 text-center">
                           <div className="flex items-center justify-center gap-1.5">
                              {isDeleted ? (
+                               <PermissionGate page="items" action="edit">
                                <button
                                  onClick={() => restoreRow(item)}
                                  className="flex h-8 items-center gap-1.5 rounded-sm bg-emerald-600 px-3 text-[11px] font-black text-white shadow-md hover:bg-emerald-700 active:scale-95 transition-all"
@@ -1270,16 +1280,20 @@ export default function ItemsListPage() {
                                >
                                  <RotateCcw className="h-3 w-3" /> استعادة
                                </button>
+                               </PermissionGate>
                              ) : (
                                <>
                                  {isDirty ? (
+                                   <PermissionGate page="items" action="edit">
                                    <button
                                      onClick={() => saveRow(item.id)}
                                      className="flex h-8 items-center gap-2 rounded-sm bg-slate-800 px-3 text-[11px] font-black text-white shadow-md active:scale-95"
                                    >
                                      <Save className="h-3 w-3" />
                                    </button>
+                                   </PermissionGate>
                                  ) : (
+                                   <PermissionGate page="items" action="add">
                                    <button
                                      onClick={() => duplicateItem(item)}
                                      className="flex h-8 w-8 items-center justify-center rounded-sm bg-slate-100 text-slate-400 hover:bg-slate-800 hover:text-white transition-all shadow-sm"
@@ -1287,13 +1301,16 @@ export default function ItemsListPage() {
                                    >
                                      <Copy className="h-3.5 w-3.5" />
                                    </button>
+                                   </PermissionGate>
                                  )}
+                                 <PermissionGate page="items" action="delete">
                                  <button
                                    onClick={() => deleteRow(item)}
                                    className="flex h-8 w-8 items-center justify-center rounded-sm text-slate-300 hover:bg-rose-50 hover:text-rose-600 transition-all opacity-0 group-hover:opacity-100"
                                  >
                                    <Trash2 className="h-3.5 w-3.5" />
                                  </button>
+                                 </PermissionGate>
                                </>
                              )}
                           </div>
@@ -1351,13 +1368,15 @@ export default function ItemsListPage() {
                         <Shapes className="mx-auto h-4 w-4 text-slate-400" />
                      </td>
                      <td className="px-4 py-3 text-center">
-                        <button 
+                        <PermissionGate page="items" action="add">
+                        <button
                            onClick={createFromNewRow}
                            disabled={!newRow.name.trim() || savingRowId === "new" || (!selectedCatId && !newRow.category_id)}
                            className="flex w-full items-center justify-center gap-2 rounded-sm bg-emerald-600 px-4 py-2.5 text-[12px] font-black text-white shadow-lg transition-all hover:bg-emerald-700 active:scale-95 disabled:opacity-30 disabled:grayscale"
                         >
                            {savingRowId === "new" ? "جاري..." : <><Plus className="h-4 w-4" /> إضافة</>}
                         </button>
+                        </PermissionGate>
                      </td>
                   </tr>
                </tfoot>

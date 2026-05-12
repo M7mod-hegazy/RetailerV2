@@ -7,6 +7,7 @@ import api from "../../services/api";
 import toast from "react-hot-toast";
 import PrintPreviewModal from "../../components/print/PrintPreviewModal";
 import PaymentMethodsReportTemplate from "../../components/print/templates/PaymentMethodsReportTemplate";
+import PermissionGate from "../../components/ui/PermissionGate";
 
 const fmt = (n) => Number(n || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2 });
 
@@ -99,8 +100,12 @@ function MethodsTab() {
         </div>
         {!isSystem && (
           <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <PermissionGate page="payment_methods" action="edit">
             <button onClick={() => openEdit(m)} className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"><Pencil className="h-3.5 w-3.5" /></button>
+            </PermissionGate>
+            <PermissionGate page="payment_methods" action="delete">
             <button onClick={() => handleDelete(m.id, m.name)} className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Trash2 className="h-3.5 w-3.5" /></button>
+            </PermissionGate>
           </div>
         )}
       </div>
@@ -129,11 +134,15 @@ function MethodsTab() {
           <div className="text-[11px] font-black text-slate-500 uppercase tracking-wider">وسائل إضافية</div>
           <div className="flex gap-2">
             {userMethods.length === 0 && (
+              <PermissionGate page="payment_methods" action="add">
               <button onClick={seedDefaults} className="text-[11px] font-black text-violet-600 hover:text-violet-800">+ إضافة الافتراضية</button>
+              </PermissionGate>
             )}
+            <PermissionGate page="payment_methods" action="add">
             <button onClick={openCreate} className="flex h-8 items-center gap-1.5 rounded-xl bg-violet-600 px-3 text-[11px] font-black text-white hover:bg-violet-700">
               <Plus className="h-3.5 w-3.5" /> إضافة
             </button>
+            </PermissionGate>
           </div>
         </div>
         {loading ? (
@@ -269,9 +278,11 @@ function TransactionsTab() {
         <button onClick={load} className="flex h-9 items-center gap-1.5 rounded-xl bg-violet-600 px-3 text-[11px] font-black text-white hover:bg-violet-700">
           <Search className="h-4 w-4" /> بحث
         </button>
+        <PermissionGate page="payment_methods" action="print">
         <button onClick={() => setPrintOpen(true)} className="flex h-9 items-center gap-1.5 rounded-xl bg-slate-800 px-3 text-[11px] font-black text-white hover:bg-slate-900">
           <Printer className="h-4 w-4" /> طباعة
         </button>
+        </PermissionGate>
         <button onClick={load} className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50"><RefreshCw className="h-4 w-4" /></button>
       </div>
 

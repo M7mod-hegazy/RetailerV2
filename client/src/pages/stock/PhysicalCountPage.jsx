@@ -24,6 +24,7 @@ import Input from "../../components/ui/Input";
 import PageWrapper from "../../components/ui/PageWrapper";
 import Select from "../../components/ui/Select";
 import DataGrid from "../../components/ui/DataGrid";
+import PermissionGate from "../../components/ui/PermissionGate";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -355,6 +356,7 @@ export default function PhysicalCountPage() {
                 </p>
               </div>
             </div>
+            <PermissionGate page="physical_count" action="add">
             <button
               onClick={() => setShowForm((p) => !p)}
               className="flex items-center gap-2 rounded bg-slate-900 px-4 py-2 text-[13px] font-black text-white hover:bg-slate-800 transition-colors shadow-sm"
@@ -363,6 +365,7 @@ export default function PhysicalCountPage() {
               بدء جرد جديد
               <ChevronDown className={`w-4 h-4 transition-transform ${showForm ? "rotate-180" : ""}`} />
             </button>
+            </PermissionGate>
           </div>
         </div>
 
@@ -521,10 +524,12 @@ export default function PhysicalCountPage() {
                 </div>
 
                 <div className="mt-6 flex items-center gap-3 border-t border-slate-100 pt-5">
+                  <PermissionGate page="physical_count" action="add">
                   <button onClick={handleCreateSession} disabled={formSubmitting} className="flex items-center justify-center gap-2 rounded bg-slate-900 px-5 py-2.5 text-[13px] font-black text-white hover:bg-slate-800 disabled:opacity-50 transition-colors min-w-[120px]">
                     {formSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ClipboardCheck className="w-4 h-4" />}
                     بدء الجرد
                   </button>
+                  </PermissionGate>
                   <button onClick={() => { setShowForm(false); resetForm(); }} className="rounded px-5 py-2.5 text-[13px] font-black text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors">
                     إلغاء
                   </button>
@@ -595,7 +600,10 @@ export default function PhysicalCountPage() {
                         <div className="flex items-center justify-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                           {s.status === "in_progress" && (
                             <>
+                              <PermissionGate page="physical_count" action="edit">
                               <button onClick={() => loadSession(s.id)} className="rounded bg-slate-100 border border-slate-200 text-slate-700 hover:border-slate-800 hover:text-slate-900 px-3 py-1.5 text-[11px] font-black uppercase tracking-wider transition-all">استئناف</button>
+                              </PermissionGate>
+                              <PermissionGate page="physical_count" action="delete">
                               <button onClick={async () => {
                                   if (!window.confirm("هل تريد إلغاء هذه الجلسة؟")) return;
                                   try {
@@ -610,6 +618,7 @@ export default function PhysicalCountPage() {
                               >
                                 إلغاء
                               </button>
+                              </PermissionGate>
                             </>
                           )}
                           {(s.status === "completed" || s.status === "cancelled") && (
@@ -858,12 +867,15 @@ export default function PhysicalCountPage() {
             </span>
           ) : (
             <div className="flex items-center gap-3">
+              <PermissionGate page="physical_count" action="delete">
               <button
                 onClick={() => setCancelDialog(true)}
                 className="rounded border border-rose-200 text-rose-600 px-5 py-2 text-[13px] font-black hover:bg-rose-50 hover:border-rose-300 transition-colors uppercase tracking-widest"
               >
                 إلغاء الجرد
               </button>
+              </PermissionGate>
+              <PermissionGate page="physical_count" action="edit">
               <button
                 onClick={() => setConfirmDialog(true)}
                 className="rounded bg-emerald-600 text-white px-8 py-2 text-[13px] font-black hover:bg-emerald-700 transition-colors shadow-sm uppercase tracking-widest flex items-center gap-2"
@@ -871,6 +883,7 @@ export default function PhysicalCountPage() {
                 <CheckCircle2 className="w-4 h-4" />
                 اعتماد الجرد وتسوية الأرصدة
               </button>
+              </PermissionGate>
             </div>
           )}
         </div>

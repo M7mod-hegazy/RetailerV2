@@ -4,6 +4,7 @@ import api from "../../services/api";
 import toast from "react-hot-toast";
 import PrintPreviewModal from "../../components/print/PrintPreviewModal";
 import BankStatementTemplate from "../../components/print/templates/BankStatementTemplate";
+import PermissionGate from "../../components/ui/PermissionGate";
 
 const fmt = (n) => Number(n || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2 });
 
@@ -243,13 +244,17 @@ export default function BankOperationsPage() {
         </div>
         <div className="flex items-center gap-2">
           <button onClick={load} className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50"><RefreshCw className="h-4 w-4" /></button>
+          <PermissionGate page="bank_operations" action="edit">
           <button onClick={() => setTransferOpen(true)}
             className="flex h-9 items-center gap-2 rounded-xl bg-blue-600 px-4 text-[12px] font-black text-white hover:bg-blue-700">
             <ArrowLeftRight className="h-4 w-4" /> تحويل بين حسابات
           </button>
+          </PermissionGate>
+          <PermissionGate page="bank_operations" action="add">
           <button onClick={() => setNewBankOpen(!newBankOpen)} className="flex h-9 items-center gap-2 rounded-xl bg-indigo-600 px-4 text-[12px] font-black text-white hover:bg-indigo-700 shadow-lg shadow-indigo-200">
             <Plus className="h-4 w-4" /> إضافة حساب
           </button>
+          </PermissionGate>
         </div>
       </header>
 
@@ -269,7 +274,9 @@ export default function BankOperationsPage() {
             <div><label className="text-[11px] font-black text-slate-500 block mb-1">حد التنبيه</label>
               <input type="number" value={newBank.alert_threshold} onChange={e => setNewBank(f => ({ ...f, alert_threshold: e.target.value }))} className="w-full h-10 rounded-xl border border-slate-300 px-3 text-[12px] text-center outline-none" /></div>
             <div className="flex items-end">
+              <PermissionGate page="bank_operations" action="add">
               <button onClick={createBank} disabled={!newBank.name || saving} className="w-full h-10 rounded-xl bg-indigo-600 text-[12px] font-black text-white hover:bg-indigo-700 disabled:opacity-40">حفظ</button>
+              </PermissionGate>
             </div>
           </div>
         </div>
@@ -308,14 +315,18 @@ export default function BankOperationsPage() {
                   )}
                 </div>
                 <div className="flex gap-2">
+                  <PermissionGate page="bank_operations" action="edit">
                   <button onClick={() => setModal({ bank, mode: "deposit" })}
                     className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-2 text-[12px] font-black text-white hover:bg-emerald-700 transition-colors">
                     <Plus className="h-4 w-4" /> إيداع
                   </button>
+                  </PermissionGate>
+                  <PermissionGate page="bank_operations" action="edit">
                   <button onClick={() => setModal({ bank, mode: "withdraw" })}
                     className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-rose-600 py-2 text-[12px] font-black text-white hover:bg-rose-700 transition-colors">
                     <Minus className="h-4 w-4" /> سحب
                   </button>
+                  </PermissionGate>
                   <button onClick={() => setStatement(bank)}
                     className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-100 transition-colors">
                     <List className="h-4 w-4" />

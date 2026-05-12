@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import api from "../../services/api";
 import toast from "react-hot-toast";
 import { fuzzyFilterRows } from "../../utils/search";
+import PermissionGate from "../../components/ui/PermissionGate";
 
 const fmt = (n) => Number(n || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2 });
 const today = () => new Date().toISOString().slice(0, 10);
@@ -491,9 +492,11 @@ export default function WithdrawalsListPage() {
             <div className="flex flex-col sm:flex-row items-center gap-2">
               
               {/* Add Button */}
+              <PermissionGate page="withdrawals" action="add">
               <button onClick={openCreate} title="تسجيل سحب جديد (Ctrl+K)" className="h-10 px-6 shrink-0 flex items-center justify-center gap-2 rounded-xl text-[12px] font-black text-white bg-zinc-900 hover:bg-zinc-800 transition-colors shadow-lg shadow-zinc-900/20 active:scale-95 w-full sm:w-auto">
                 <Command className="h-3.5 w-3.5 text-zinc-400" /> تسجيل سحب
               </button>
+              </PermissionGate>
 
               <div className="w-px h-6 bg-slate-200 hidden sm:block mx-1" />
 
@@ -590,12 +593,16 @@ export default function WithdrawalsListPage() {
                       
                       {/* Actions (visible on hover) */}
                       <div className="flex items-center gap-1 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                        <PermissionGate page="withdrawals" action="edit">
                         <button onClick={() => openEdit(row)} title="تعديل" className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-50 text-slate-400 hover:text-zinc-900 hover:bg-slate-100 transition-all">
                           <Pencil className="h-4 w-4" />
                         </button>
+                        </PermissionGate>
+                        <PermissionGate page="withdrawals" action="delete">
                         <button onClick={() => handleDelete(row.id)} title="حذف" className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-50 text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-all">
                           <Trash2 className="h-4 w-4" />
                         </button>
+                        </PermissionGate>
                       </div>
                     </div>
                   </motion.div>

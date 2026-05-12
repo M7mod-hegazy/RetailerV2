@@ -11,6 +11,7 @@ import ConfirmDialog from "../../components/ui/ConfirmDialog";
 import { DramaticDeleteConfirm } from "../../components/ui/DramaticDeleteConfirm";
 import toast from "react-hot-toast";
 import useDebounce from "../../hooks/useDebounce";
+import PermissionGate from "../../components/ui/PermissionGate";
 
 function formatMoney(v) {
   return Number(v || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2 });
@@ -171,10 +172,12 @@ export default function QuotationsPage() {
           <h1 className="text-[24px] font-black text-slate-800 tracking-tight">عروض الأسعار</h1>
           <p className="text-[13px] font-bold text-slate-400 mt-0.5">تتبع عروض الأسعار المرسلة للعملاء ومعدلات التحويل للمبيعات</p>
         </div>
+        <PermissionGate page="quotations" action="add">
         <Link to="/operations/quotations/new"
           className="flex items-center gap-2 rounded-lg bg-slate-800 px-5 py-2.5 text-[13px] font-black text-white shadow-lg hover:bg-slate-700 transition-all active:scale-95">
           <Plus className="h-4 w-4" /> إنشاء عرض جديد
         </Link>
+        </PermissionGate>
       </div>
 
       {/* Stats */}
@@ -296,10 +299,12 @@ export default function QuotationsPage() {
                       <td className="px-5 py-3.5">
                         <div className="flex items-center justify-center gap-1">
                           {canConvert(row) && (
+                            <PermissionGate page="quotations" action="edit">
                             <button onClick={() => setConvertTarget(row)}
                               className="flex h-8 items-center gap-1 px-2 rounded-lg bg-emerald-600 text-white text-[11px] font-black hover:bg-emerald-500 transition-colors">
                               <ShoppingCart className="h-3.5 w-3.5" /> تحويل
                             </button>
+                            </PermissionGate>
                           )}
                           <button onClick={() => handleShowDetail(row.id)}
                             className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-800 transition-colors">
@@ -318,20 +323,26 @@ export default function QuotationsPage() {
                             {openMenu === row.id && (
                               <div className="absolute left-0 top-full mt-1 z-20 w-44 rounded-lg border border-slate-200 bg-white py-1 shadow-xl">
                                 {canSend(row) && (
+                                  <PermissionGate page="quotations" action="edit">
                                   <button onClick={() => { handleSend(row.id); setOpenMenu(null); }}
                                     className="flex w-full items-center gap-2 px-3 py-2 text-[12px] font-bold text-blue-600 hover:bg-blue-50 transition-colors">
                                     <Send className="h-3.5 w-3.5" /> تحديد كمُرسل
                                   </button>
+                                  </PermissionGate>
                                 )}
+                                <PermissionGate page="quotations" action="add">
                                 <button onClick={() => { handleDuplicate(row.id); setOpenMenu(null); }}
                                   className="flex w-full items-center gap-2 px-3 py-2 text-[12px] font-bold text-slate-700 hover:bg-slate-50 transition-colors">
                                   <Copy className="h-3.5 w-3.5" /> نسخ العرض
                                 </button>
+                                </PermissionGate>
                                 {canDelete(row) && (
+                                  <PermissionGate page="quotations" action="delete">
                                   <button onClick={() => { setDeleteTarget(row); setOpenMenu(null); }}
                                     className="flex w-full items-center gap-2 px-3 py-2 text-[12px] font-bold text-rose-600 hover:bg-rose-50 transition-colors">
                                     <Trash2 className="h-3.5 w-3.5" /> حذف العرض
                                   </button>
+                                  </PermissionGate>
                                 )}
                               </div>
                             )}
@@ -400,10 +411,12 @@ export default function QuotationsPage() {
             </div>
 
             <div className="flex justify-between gap-3">
+              <PermissionGate page="quotations" action="print">
               <button onClick={() => window.print()}
                 className="flex items-center gap-2 rounded-lg border border-slate-200 px-5 py-2.5 text-[12px] font-black text-slate-700 hover:bg-slate-50 transition-colors">
                 <Printer className="h-4 w-4" /> طباعة
               </button>
+              </PermissionGate>
               <button onClick={() => setActiveQuotation(null)}
                 className="rounded-lg bg-slate-900 px-10 py-2.5 text-[13px] font-black text-white hover:bg-slate-800 transition-all active:scale-95">
                 إغلاق

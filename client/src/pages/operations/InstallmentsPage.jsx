@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import toast from "react-hot-toast";
 import Modal from "../../components/ui/Modal";
+import PermissionGate from "../../components/ui/PermissionGate";
 
 function fmt(v) {
   return Number(v || 0).toLocaleString("ar-EG", { minimumFractionDigits: 2 });
@@ -206,12 +207,14 @@ export default function InstallmentsPage() {
                       </td>
                       <td className="px-5 py-3.5 text-center">
                         {debt.status !== "paid" && (
+                          <PermissionGate page="installments" action="edit">
                           <button
                             onClick={() => { setSelectedDebt(debt); setPayAmount(String(remaining.toFixed(2))); setPayNote(""); }}
                             className="flex h-8 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-[11px] font-black text-emerald-700 hover:bg-emerald-100 transition-colors mx-auto"
                           >
                             <Banknote className="h-3.5 w-3.5" /> سداد
                           </button>
+                          </PermissionGate>
                         )}
                         {debt.status === "paid" && (
                           <CheckCircle2 className="h-5 w-5 text-emerald-400 mx-auto" />
