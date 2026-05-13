@@ -325,57 +325,55 @@ router.get("/source/:sourceKey/classifications", requirePagePermission("reports"
 router.get("/payment-type-options", requirePagePermission("reports", "view"), (_req, res) => {
   try {
     const db = getDb();
-    const types = new Map();
-
-    // Collect distinct payment types from invoices
-    try {
-      const invoiceTypes = db.prepare("SELECT DISTINCT payment_type FROM invoices WHERE payment_type IS NOT NULL AND payment_type != ''").all();
-      invoiceTypes.forEach((r) => types.set(r.payment_type, true));
-    } catch (_e) { /* invoices table may not exist */ }
-
-    // Collect distinct payment types from purchases
-    try {
-      const purchaseTypes = db.prepare("SELECT DISTINCT payment_type FROM purchases WHERE payment_type IS NOT NULL AND payment_type != ''").all();
-      purchaseTypes.forEach((r) => types.set(r.payment_type, true));
-    } catch (_e) { /* purchases table may not exist */ }
-
-    // Collect distinct payment methods from expenses
-    try {
-      const expenseMethods = db.prepare("SELECT DISTINCT payment_method FROM expenses WHERE payment_method IS NOT NULL AND payment_method != ''").all();
-      expenseMethods.forEach((r) => types.set(r.payment_method, true));
-    } catch (_e) { /* expenses table may not exist */ }
-
-    // Collect distinct payment methods from revenues
-    try {
-      const revenueMethods = db.prepare("SELECT DISTINCT payment_method FROM revenues WHERE payment_method IS NOT NULL AND payment_method != ''").all();
-      revenueMethods.forEach((r) => types.set(r.payment_method, true));
-    } catch (_e) { /* revenues table may not exist */ }
-
-    // Look up labels from payment_methods table
-    const labelMap = {};
-    try {
-      const methods = db.prepare("SELECT type, name FROM payment_methods WHERE is_active = 1").all();
-      methods.forEach((m) => {
-        if (m.type) labelMap[m.type] = m.name;
-      });
-    } catch (_e) {
-      // payment_methods table might not exist yet; fall back to SPECIAL_LABELS
-    }
-
-    // Special labels for system types
     const SPECIAL_LABELS = { multi: "متعدد", cash: "نقداً", card: "بطاقة", credit: "آجل", wallet: "محفظة", installments: "تقسيط", bank_transfer: "تحويل بنكي" };
 
-    const options = Array.from(types.keys())
-      .filter((t) => t !== "multi") // exclude multi as a standalone filter option
-      .sort()
-      .map((value) => ({
-        value,
-        label: labelMap[value] || SPECIAL_LABELS[value] || value,
-      }));
+    // Build options map: value → label
+    const optionsMap = new Map();
 
-    // Include 'multi' at the end
-    if (types.has("multi")) {
-      options.push({ value: "multi", label: "متعدد" });
+    // 1. Seed from all active payment_methods rows — one entry per distinct category
+    try {
+      const methods = db.prepare("SELECT name, category FROM payment_methods WHERE is_active = 1 ORDER BY id ASC").all();
+      for (const m of methods) {
+        const key = m.category;
+        if (!key || key === "multi") continue;
+        if (!optionsMap.has(key)) optionsMap.set(key, m.name || SPECIAL_LABELS[key] || key);
+      }
+    } catch (_e) { /* payment_methods may not exist */ }
+
+    // 2. Overlay with distinct values actually present in transactions
+    const txTables = [
+      { table: "invoices",  col: "payment_type" },
+      { table: "purchases", col: "payment_type" },
+      { table: "expenses",  col: "payment_method" },
+      { table: "revenues",  col: "payment_method" },
+    ];
+    let hasMulti = false;
+    for (const { table, col } of txTables) {
+      try {
+        db.prepare(`SELECT DISTINCT ${col} FROM ${table} WHERE ${col} IS NOT NULL AND ${col} != ''`).all()
+          .forEach(({ [col]: v }) => {
+            if (v === "multi") { hasMulti = true; return; }
+            if (!optionsMap.has(v)) optionsMap.set(v, SPECIAL_LABELS[v] || v);
+          });
+      } catch (_e) { /* table may not exist */ }
+    }
+
+    // 3. Build sorted list (standard types first, then alphabetical)
+    const PRIORITY = ["cash", "نقدي", "نقداً", "credit", "أجل", "card", "بطاقة", "wallet", "bank_transfer", "installments"];
+    const entries = Array.from(optionsMap.entries()).filter(([v]) => v !== "multi");
+    entries.sort(([a], [b]) => {
+      const ai = PRIORITY.indexOf(a), bi = PRIORITY.indexOf(b);
+      if (ai !== -1 && bi !== -1) return ai - bi;
+      if (ai !== -1) return -1;
+      if (bi !== -1) return 1;
+      return a.localeCompare(b, "ar");
+    });
+
+    const options = entries.map(([value, label]) => ({ value, label }));
+
+    // 4. متعدد always last — means invoice was split across multiple payment methods
+    if (hasMulti || optionsMap.has("multi")) {
+      options.push({ value: "multi", label: "متعدد (أكثر من طريقة دفع)" });
     }
 
     res.json({ success: true, data: options });

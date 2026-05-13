@@ -22,6 +22,12 @@ const todayStr = () => {
 };
 const DENOMS = [200, 100, 50, 20, 10, 5, 1, 0.5, 0.25];
 
+const PAYMENT_METHOD_AR = {
+  cash: "نقداً", card: "بطاقة", bank: "بنك", bank_transfer: "تحويل بنكي",
+  credit: "آجل", installments: "تقسيط", wallet: "محفظة", multi: "متعدد",
+};
+const arMethod = (key) => PAYMENT_METHOD_AR[key] || key;
+
 const DOC_TYPE_LABEL = {
   pos_invoice: "فاتورة POS",
   expense: "مصروف",
@@ -159,8 +165,9 @@ export default function DailyTreasuryPage() {
         `/api/daily-sessions/today/transactions?type=${typeParam}&search=${encodeURIComponent(searchParam)}${dateParam}&show_cancelled=${showCancelled ? 1 : 0}`
       );
       let rows = r.data.data || [];
-      if (txSort === "amount_asc") rows = [...rows].sort((a, b) => a.amount - b.amount);
-      else if (txSort === "amount_desc") rows = [...rows].sort((a, b) => b.amount - a.amount);
+      const cashEff = (r) => Number(r.cash_effect ?? r.amount ?? 0);
+      if (txSort === "amount_asc") rows = [...rows].sort((a, b) => cashEff(a) - cashEff(b));
+      else if (txSort === "amount_desc") rows = [...rows].sort((a, b) => cashEff(b) - cashEff(a));
       else if (txSort === "time_asc") rows = [...rows].sort((a, b) => a.created_at?.localeCompare(b.created_at));
       else if (txSort === "time_desc") rows = [...rows].sort((a, b) => b.created_at?.localeCompare(a.created_at));
       setTransactions(rows);
@@ -293,7 +300,7 @@ async function handleQuickSave() {
   }
 
   const sortedTransactions = transactions;
-  const txTotal = sortedTransactions.reduce((s, t) => s + Number(t.amount || 0), 0);
+  const txTotal = sortedTransactions.reduce((s, t) => s + Number(t.cash_effect ?? t.amount ?? 0), 0);
   const draftDiscrepancy = actualCash !== "" ? Number(actualCash || 0) - Number(expected || 0) : null;
   const cashIn = Number(summary?.cash_in || 0);
   const cashOut = Number(summary?.cash_out || 0);
@@ -1039,11 +1046,29 @@ async function handleQuickSave() {
                                     </div>
                                   </td>
                                   <td className="px-3 py-3">
-                                    <div className="flex flex-col">
+                                    <div className="flex flex-col gap-0.5">
                                       <span className={`font-black font-mono text-[12px] ${Number(t.cash_effect ?? t.amount) < 0 ? "text-rose-700" : "text-emerald-700"}`}>
                                         {Number(t.cash_effect ?? t.amount) > 0 ? "+" : ""}{fmt(t.cash_effect ?? t.amount)}
                                       </span>
-                                      <span className="text-[9px] font-bold text-slate-400">أصل الحركة: {fmt(t.amount)}</span>
+                                      {t.payment_type === "multi" && t.amount !== t.cash_effect && (
+                                        <span className="text-[9px] font-bold text-slate-400">إجمالي الفاتورة: {fmt(t.amount)}</span>
+                                      )}
+                                      {t.payment_splits && (
+                                        <div className="flex flex-wrap gap-1 mt-0.5">
+                                          {t.payment_splits.split("|||").map((split, i) => {
+                                            const idx = split.lastIndexOf(":");
+                                            const method = split.slice(0, idx);
+                                            const amt = split.slice(idx + 1);
+                                            const isCash = method === "cash";
+                                            return (
+                                              <span key={i} className={`text-[8px] font-black px-1.5 py-0.5 rounded border ${isCash ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-100 text-slate-500 border-slate-200"}`}>
+                                                {arMethod(method)}: {fmt(Number(amt))}
+                                                {!isCash && <span className="text-[7px] opacity-60 mr-0.5">لا يؤثر على الخزنة</span>}
+                                              </span>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
                                     </div>
                                   </td>
                                   <td className="px-3 py-3 text-slate-600 text-[11px] font-bold max-w-[180px] truncate">
@@ -1214,6 +1239,27 @@ async function handleQuickSave() {
                             <span>الإجمالي</span>
                             <span className="font-mono">{fmt(slideOverDetails.total)} ج.م</span>
                           </div>
+                          {slideOverDetails.payment_type === "multi" && slideOverDetails.payments?.length > 0 && (
+                            <div className="mt-3 pt-3 border-t border-slate-700">
+                              <div className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-2">توزيع طرق الدفع</div>
+                              <div className="flex flex-col gap-1.5">
+                                {slideOverDetails.payments.map((p, i) => {
+                                  const isCash = p.method === "cash";
+                                  return (
+                                    <div key={i} className={`flex items-center justify-between rounded-lg px-2 py-1.5 ${isCash ? "bg-emerald-900/40 border border-emerald-700/40" : "bg-slate-700/40 border border-slate-600/40"}`}>
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-[10px] font-black text-white">{p.method_name || arMethod(p.method)}</span>
+                                        {!isCash && (
+                                          <span className="text-[8px] font-bold text-slate-400 bg-slate-600/50 px-1.5 py-0.5 rounded">لا يؤثر على حساب الخزنة</span>
+                                        )}
+                                      </div>
+                                      <span className={`font-mono text-[11px] font-black ${isCash ? "text-emerald-300" : "text-slate-300"}`}>{fmt(p.amount)} ج.م</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ) : (

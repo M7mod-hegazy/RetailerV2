@@ -27,6 +27,16 @@ function ensureDailySessionSchema(db) {
   try { db.exec("ALTER TABLE daily_sessions ADD COLUMN opening_adjust_reason TEXT"); } catch (_) {}
   try { db.exec("ALTER TABLE purchase_returns ADD COLUMN settlement_type TEXT NOT NULL DEFAULT 'account'"); } catch (_) {}
   try { db.exec("ALTER TABLE purchase_returns ADD COLUMN treasury_id INTEGER REFERENCES treasuries(id)"); } catch (_) {}
+  try { db.exec("ALTER TABLE payments ADD COLUMN invoice_id INTEGER REFERENCES invoices(id)"); } catch (_) {}
+  // Backfill invoice_id for existing multi/installment payment splits linked via payment_allocations
+  try {
+    db.exec(`
+      UPDATE payments
+      SET invoice_id = (SELECT pa.invoice_id FROM payment_allocations pa WHERE pa.payment_id = payments.id LIMIT 1)
+      WHERE invoice_id IS NULL
+        AND id IN (SELECT payment_id FROM payment_allocations)
+    `);
+  } catch (_) {}
 }
 
 function ensurePurchaseReturnSettlementSchema(db) {
@@ -101,11 +111,12 @@ function cashBreakdown(db, dateText, session) {
     WHERE date(created_at) = ? AND payment_type = 'installments' AND status != 'cancelled'
   `, [date]);
 
-  // Multi-payment invoices: cash portion from payments table
+  // Multi-payment invoices: cash portion via payment_allocations (authoritative FK)
   const posMultiCash = scalar(db, `
     SELECT COALESCE(SUM(p.amount), 0) AS total
     FROM payments p
-    JOIN invoices i ON p.notes = 'Invoice ' || i.invoice_no
+    JOIN payment_allocations pa ON pa.payment_id = p.id
+    JOIN invoices i ON i.id = pa.invoice_id
     WHERE date(i.created_at) = ? AND i.payment_type = 'multi' AND p.method = 'cash' AND i.status != 'cancelled'
   `, [date]);
   const posMultiCount = countScalar(db, `
@@ -212,12 +223,12 @@ function cashBreakdown(db, dateText, session) {
   const customerPayments = scalar(db, `
     SELECT COALESCE(SUM(amount), 0) AS total
     FROM payments
-    WHERE date(created_at) = ? AND party_type = 'customer' AND method = 'cash'
+    WHERE date(created_at) = ? AND party_type = 'customer' AND method = 'cash' AND invoice_id IS NULL
   `, [date]);
   const customerPaymentsCount = countScalar(db, `
     SELECT COUNT(*) AS count
     FROM payments
-    WHERE date(created_at) = ? AND party_type = 'customer' AND method = 'cash'
+    WHERE date(created_at) = ? AND party_type = 'customer' AND method = 'cash' AND invoice_id IS NULL
   `, [date]);
   const supplierPayments = scalar(db, `
     SELECT COALESCE(SUM(amount), 0) AS total
@@ -344,13 +355,14 @@ function liveOpeningBalance(db, dateText) {
   const posMultiCash = scalar(db, `
     SELECT COALESCE(SUM(p.amount),0) AS total
     FROM payments p
-    JOIN invoices i ON p.notes = 'Invoice ' || i.invoice_no
+    JOIN payment_allocations pa ON pa.payment_id = p.id
+    JOIN invoices i ON i.id = pa.invoice_id
     WHERE date(i.created_at) > ? AND date(i.created_at) < ? AND i.payment_type = 'multi' AND p.method = 'cash' AND i.status != 'cancelled'
   `, [since, date]);
 
   const customerPayments = scalar(db, `
     SELECT COALESCE(SUM(amount),0) AS total FROM payments
-    WHERE date(created_at) > ? AND date(created_at) < ? AND party_type = 'customer' AND method = 'cash'
+    WHERE date(created_at) > ? AND date(created_at) < ? AND party_type = 'customer' AND method = 'cash' AND invoice_id IS NULL
   `, [since, date]);
 
   const customerAjalPayments = scalar(db, `

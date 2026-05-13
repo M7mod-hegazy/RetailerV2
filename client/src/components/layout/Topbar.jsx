@@ -54,32 +54,32 @@ export default function Topbar() {
   }, [openGlobalSearch]);
 
   return (
-    <header className="flex h-[80px] shrink-0 items-center justify-between border-b border-zinc-200/80 bg-white px-8 transition-all z-30 shadow-[0_4px_20px_rgba(0,0,0,0.01)] relative">
-      <div className="flex items-center gap-4">
-        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-zinc-950 text-white shadow-md">
-          <LayoutGrid strokeWidth={1.5} className="h-5 w-5" />
+    <header className="flex h-[56px] shrink-0 items-center justify-between border-b border-zinc-200/60 bg-white px-6 transition-all z-30 relative">
+      <div className="flex items-center gap-3">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-950 text-white">
+          <LayoutGrid strokeWidth={1.5} className="h-4 w-4" />
         </div>
         <div>
-          <h1 className="text-[20px] font-black tracking-tight text-zinc-900 leading-none">{currentLabel}</h1>
-          <p className="text-[12px] font-bold text-zinc-500 mt-1">{today}</p>
+          <h1 className="text-[15px] font-black tracking-tight text-zinc-900 leading-none">{currentLabel}</h1>
+          <p className="text-[10px] font-bold text-zinc-500 mt-0.5">{today}</p>
         </div>
       </div>
 
-      <button onClick={openGlobalSearch} className="group mx-8 hidden max-w-lg flex-1 items-center gap-3 rounded-[14px] bg-zinc-50 border border-zinc-200 px-4 py-2.5 hover:bg-white hover:border-zinc-300 hover:shadow-sm transition-all md:flex">
-        <Search strokeWidth={1.5} className="h-4 w-4 text-zinc-400 group-hover:text-zinc-600 transition-colors" />
-        <span className="flex-1 text-right text-[13px] font-bold text-zinc-400 group-hover:text-zinc-600 transition-colors">البحث السريع (Ctrl+K)...</span>
+      <button onClick={openGlobalSearch} className="group mx-6 hidden max-w-md flex-1 items-center gap-2.5 rounded-lg bg-zinc-50 border border-zinc-200/60 px-3.5 py-1.5 hover:bg-white hover:border-zinc-300 transition-all md:flex">
+        <Search strokeWidth={1.5} className="h-3.5 w-3.5 text-zinc-400 group-hover:text-zinc-600 transition-colors" />
+        <span className="flex-1 text-right text-[12px] font-bold text-zinc-400 group-hover:text-zinc-600 transition-colors">البحث السريع (Ctrl+K)...</span>
       </button>
 
-      <div className="flex items-center gap-4">
-        <div className="hidden items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-bold text-zinc-600 sm:flex">
-          <Coins strokeWidth={1.5} className="h-4 w-4 text-zinc-400" />
+      <div className="flex items-center gap-3">
+        <div className="hidden items-center gap-1.5 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[11px] font-bold text-zinc-600 sm:flex">
+          <Coins strokeWidth={1.5} className="h-3.5 w-3.5 text-zinc-400" />
           <span>{settings.currency_symbol || "EGP"}</span>
         </div>
 
         <div className="relative">
-          <button onClick={() => setOpenBell(!openBell)} className="relative flex h-11 w-11 items-center justify-center rounded-xl border border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50 transition-colors">
-            <Bell strokeWidth={1.5} className={`h-5 w-5 ${unreadCount ? "text-emerald-500 animate-pulse" : ""}`} />
-            {unreadCount > 0 && <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 border-2 border-white text-[10px] font-black text-white shadow-sm">{unreadCount}</span>}
+          <button onClick={() => setOpenBell(!openBell)} className="relative flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50 transition-colors">
+            <Bell strokeWidth={1.5} className={`h-4 w-4 ${unreadCount ? "text-emerald-500" : ""}`} />
+            {unreadCount > 0 && <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 border-2 border-white text-[8px] font-black text-white">{unreadCount}</span>}
           </button>
         </div>
       </div>

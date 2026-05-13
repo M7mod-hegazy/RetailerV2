@@ -4,7 +4,7 @@ import {
   Warehouse, ChevronDown, ArrowLeft, X, CreditCard, Wallet, Banknote,
   AlertTriangle, Clock, ExternalLink, TrendingUp, Building2, Phone,
   ImageIcon, ZoomIn, Printer, CheckCircle2, Layers, Lock, Pencil,
-  FilePlus, Sparkles, Receipt, RefreshCw, ArrowUpDown,
+  FilePlus, Sparkles, Receipt, RefreshCw, ArrowUpDown, Save,
 } from "lucide-react";
 import api from "../../services/api";
 import { Link, useNavigate, useParams, useLocation } from "react-router-dom";
@@ -43,7 +43,7 @@ function LookupList({ items, onPick, activeIndex, query, emptyLabel = "لا تو
             type="button"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => onPick(item)}
-            className={`flex w-full items-center justify-between rounded-[8px] px-3 py-2.5 text-start transition-all ${activeIndex === i ? "bg-indigo-50/80" : "hover:bg-slate-50"}`}
+            className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-start transition-all ${activeIndex === i ? "bg-emerald-50/80" : "hover:bg-zinc-50"}`}
           >
             <div className="flex items-center gap-2">
               {item.primary_image_url || item.image_url || item.image ? (
@@ -639,15 +639,24 @@ export default function PurchaseFormPage() {
   return (
     <div className="flex h-full min-h-[600px] flex-col bg-slate-50 font-sans overflow-hidden pb-6" dir="rtl">
       {/* Header */}
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-300 bg-white px-6">
-        <div className="flex items-center gap-4">
-          <div className="flex flex-col">
-            <h1 className="text-[14px] font-black text-slate-800">
-              {isEditMode ? `فاتورة مشتريات #${refNo}` : "فاتورة مشتريات جديدة"}
-            </h1>
-            <span className="text-[10px] font-bold text-slate-400">
-              {isEditMode ? (isLocked ? "محفوظة — اضغط تعديل للتغيير" : "وضع التعديل") : "إدخال مخزون جديد"}
-            </span>
+      <header className="flex h-14 shrink-0 items-center justify-between border-b-2 border-emerald-500 bg-white px-5">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="flex flex-col">
+              <h1 className="text-[14px] font-black text-emerald-800">
+                {isEditMode ? `فاتورة مشتريات #${refNo}` : "فاتورة مشتريات جديدة"}
+              </h1>
+              <span className="text-[10px] font-bold text-slate-400">
+                {isEditMode ? (isLocked ? "محفوظة — اضغط تعديل للتغيير" : "وضع التعديل") : "إدخال مخزون جديد"}
+              </span>
+            </div>
+            <div className="mx-2 h-8 w-px bg-slate-200" />
+            {invoiceIsActive && (
+              <div className="flex items-center gap-1.5 rounded-sm bg-emerald-50 border border-emerald-200 px-2 py-1 text-[11px] font-bold text-emerald-700">
+                <div className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                {isLocked ? "مقفلة" : "نشطة"}
+              </div>
+            )}
           </div>
           {isLocked && (
             <div className="flex items-center gap-1.5 rounded-sm bg-slate-100 border border-slate-200 px-2.5 py-1 text-[11px] font-bold text-slate-500">
@@ -655,83 +664,59 @@ export default function PurchaseFormPage() {
             </div>
           )}
           {!isLocked && isEditMode && user?.name && (
-            <div className="flex items-center gap-1.5 rounded-sm bg-indigo-50 border border-indigo-200 px-2.5 py-1 text-[11px] font-bold text-indigo-700">
+            <div className="flex items-center gap-1.5 rounded-sm bg-emerald-50 border border-emerald-200 px-2.5 py-1 text-[11px] font-bold text-emerald-700">
               المحرر: {user.name}
             </div>
           )}
           {!isLocked && (
             <div className="flex gap-1.5">
               <input disabled value={invoiceIsActive ? (docNo || refNo || "") : "—"} placeholder="رقم المستند"
-                className="h-7 w-28 rounded-sm border border-slate-200 bg-slate-100 px-2 text-[11px] font-mono font-black text-slate-400 cursor-not-allowed outline-none" />
+                className="h-6 w-24 rounded-sm border border-slate-200 bg-slate-50 px-2 text-[11px] font-mono font-black text-slate-500 cursor-not-allowed outline-none" />
               <input disabled value={invoiceIsActive && invoiceCreatedAt ? new Date(invoiceCreatedAt).toLocaleString("ar-EG") : "—"}
-                className="h-7 w-44 rounded-sm border border-slate-200 bg-slate-100 px-2 text-[11px] font-mono font-black text-slate-400 cursor-not-allowed outline-none" />
+                className="h-6 w-40 rounded-sm border border-slate-200 bg-slate-50 px-2 text-[11px] font-mono font-black text-slate-500 cursor-not-allowed outline-none" />
             </div>
           )}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           {priceChangedLines.length > 0 && !isLocked && (
-            <div className="flex items-center gap-1.5 rounded-sm bg-amber-50 border border-amber-200 px-3 py-1.5 text-[11px] font-bold text-amber-700">
+            <div className="flex items-center gap-1.5 rounded-sm bg-amber-50 border border-amber-200 px-2.5 py-1 text-[11px] font-bold text-amber-700">
               <TrendingUp className="h-3.5 w-3.5" />
               {priceChangedLines.length} أسعار بيع ستتغير
             </div>
           )}
-
           {/* Today's Purchases button */}
-          <button
-            onClick={() => setTodayPurchOpen(true)}
-            className="flex h-9 items-center gap-2 rounded-sm border border-emerald-200 bg-emerald-50 px-4 text-[13px] font-black text-emerald-700 hover:bg-emerald-100 transition-all"
-          >
-            <Receipt className="h-4 w-4" /> مشتريات اليوم
+          <button onClick={() => setTodayPurchOpen(true)}
+            className="flex h-7 items-center gap-1.5 rounded-sm border border-emerald-200 bg-emerald-50 px-2.5 text-[11px] font-bold text-emerald-700 hover:bg-emerald-100 transition-all">
+            <Receipt className="h-3.5 w-3.5" /> مشتريات اليوم
           </button>
-
           {/* Delete button — always visible */}
-          <button
-            onClick={() => setDeleteConfirmOpen(true)}
-            className="flex h-9 items-center gap-2 rounded-sm border border-rose-200 bg-rose-50 px-4 text-[13px] font-black text-rose-600 hover:bg-rose-100 transition-all"
-          >
-            <Trash2 className="h-4 w-4" />
-            {isEditMode ? "حذف الفاتورة" : "مسح الفاتورة"}
+          <button onClick={() => setDeleteConfirmOpen(true)}
+            className="flex h-7 items-center gap-1.5 rounded-sm border border-rose-200 bg-rose-50 px-2.5 text-[11px] font-bold text-rose-600 hover:bg-rose-100 transition-all">
+            <Trash2 className="h-3.5 w-3.5" />
+            {isEditMode ? "حذف" : "مسح"}
           </button>
-
           {isEditMode && isLocked ? (
-            // Locked mode — show Edit button
-            <button
-              onClick={() => setEditWarnOpen(true)}
-              className="flex h-9 items-center gap-2 rounded-sm bg-indigo-600 px-6 text-[13px] font-black text-white hover:bg-indigo-700 transition-all"
-            >
-              <Pencil className="h-4 w-4" /> تعديل الفاتورة
+            <button onClick={() => setEditWarnOpen(true)}
+              className="flex h-7 items-center gap-1.5 rounded-sm border border-slate-200 bg-white px-2.5 text-[11px] font-bold text-slate-600 hover:border-emerald-300 hover:bg-emerald-50 transition-all">
+              <Pencil className="h-3 w-3" /> تعديل
             </button>
           ) : (
-            // Create or unlocked edit — show Save
             <>
-              <button
-                onClick={() => setPrintPreview(true)}
-                disabled={!lines.length}
-                className="flex h-9 items-center gap-2 rounded-sm border border-slate-300 bg-white px-4 text-[13px] font-black text-slate-700 hover:bg-slate-50 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <Printer className="h-4 w-4" /> معاينة وطباعة
+              <button onClick={() => setPrintPreview(true)} disabled={!lines.length}
+                className="flex h-7 items-center gap-1.5 rounded-sm border border-slate-200 bg-white px-2.5 text-[11px] font-bold text-slate-600 hover:border-emerald-300 hover:bg-slate-50 transition-all disabled:opacity-40">
+                <Printer className="h-3 w-3" /> معاينة وطباعة
               </button>
-              <button
-                onClick={() => { if (validateBeforeSave()) setSaveConfirmOpen(true); }}
-                disabled={isSaving || !lines.length}
-                className="flex h-9 items-center gap-2 rounded-sm bg-slate-800 px-6 text-[13px] font-black text-white hover:bg-slate-700 disabled:opacity-50 transition-all"
-              >
-                {isSaving ? "جاري الحفظ..." : isAmendMode ? "إصدار تعديل (F9)" : isEditMode ? "حفظ التعديلات (F9)" : "حفظ الفاتورة (F9)"}
+              <button onClick={() => { if (validateBeforeSave()) setSaveConfirmOpen(true); }} disabled={isSaving || !lines.length}
+                className="flex h-7 items-center gap-1.5 rounded-sm bg-emerald-600 px-3 text-[11px] font-black text-white hover:bg-emerald-700 transition-all disabled:opacity-40 shadow-sm">
+                {isSaving ? "جاري..." : isAmendMode ? "إصدار تعديل" : isEditMode ? "حفظ التعديلات" : "حفظ"}
               </button>
-              <button
-                type="button"
-                onClick={() => setSaveOnlyConfirmOpen(true)}
-                disabled={!lines.length || isSaving}
-                className="flex h-9 items-center gap-2 rounded-sm border border-slate-200 bg-white px-4 text-[13px] font-black text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-              >
-                حفظ فقط
+              <button onClick={() => setSaveOnlyConfirmOpen(true)} disabled={!lines.length || isSaving}
+                className="flex h-7 items-center gap-1.5 rounded-sm border border-slate-200 bg-white px-2.5 text-[11px] font-bold text-slate-600 hover:border-emerald-300 hover:bg-emerald-50 transition-all disabled:opacity-40">
+                <Save className="h-3 w-3" /> حفظ فقط
               </button>
-              <button
-                type="button"
-                onClick={() => setNewInvoiceModalOpen(true)}
-                className="flex h-9 items-center gap-2 rounded-sm border border-emerald-200 bg-emerald-50 px-4 text-[13px] font-black text-emerald-700 hover:bg-emerald-100 transition-all"
-              >
-                <FilePlus className="h-4 w-4" /> جديدة
+              <button onClick={() => setNewInvoiceModalOpen(true)}
+                className="flex h-7 items-center gap-1.5 rounded-sm border border-slate-200 bg-white px-2.5 text-[11px] font-bold text-slate-600 hover:border-emerald-300 hover:bg-emerald-50 transition-all">
+                <FilePlus className="h-3 w-3" /> جديدة
               </button>
             </>
           )}
@@ -893,7 +878,7 @@ export default function PurchaseFormPage() {
                 <button ref={addBtnRef} onClick={addLine}
                   onKeyDown={(e) => { if (e.key === "Enter" && selectedItem) { e.preventDefault(); addLine(); } }}
                   disabled={!selectedItem}
-                  className="flex h-[37px] items-center justify-center gap-2 rounded-sm bg-slate-800 px-4 text-[12px] font-bold text-white hover:bg-slate-700 disabled:opacity-40 self-end transition-all">
+                  className="flex h-[37px] items-center justify-center gap-2 rounded-sm bg-emerald-600 px-4 text-[12px] font-bold text-white hover:bg-emerald-700 disabled:opacity-40 self-end transition-all shadow-sm">
                   <Plus className="h-4 w-4" /> إضافة
                 </button>
               </div>
@@ -932,9 +917,9 @@ export default function PurchaseFormPage() {
                 }
               },
               { id: "quantity", header: "الكمية", width: 90, sortable: true, headerClass: "text-center", cellClass: "p-0 border-l border-slate-100",
-                render: (l, i) => <input type="number" min="0.001" step="any" value={l.quantity} disabled={isLocked} onChange={(e) => updateLineField(i, "quantity", Number(e.target.value))} className="w-full h-[40px] text-center text-[13px] font-mono font-black bg-transparent outline-none border-0 ring-0 focus:ring-0 focus:bg-indigo-50/50 transition-colors disabled:cursor-not-allowed" /> },
+                render: (l, i) => <input type="number" min="0.001" step="any" value={l.quantity} disabled={isLocked} onChange={(e) => updateLineField(i, "quantity", Number(e.target.value))} className="w-full h-[40px] text-center text-[13px] font-mono font-black bg-transparent outline-none border-0 ring-0 focus:ring-0 focus:bg-emerald-50/50 transition-colors disabled:cursor-not-allowed" /> },
               { id: "unit_cost", header: "التكلفة", width: 100, sortable: true, headerClass: "text-center", cellClass: "p-0 border-l border-slate-100",
-                render: (l, i) => <input type="number" step="any" value={l.unit_cost} disabled={isLocked} onChange={(e) => updateLineField(i, "unit_cost", Number(e.target.value))} className="w-full h-[40px] text-center text-[13px] font-mono font-black bg-transparent outline-none border-0 ring-0 focus:ring-0 focus:bg-indigo-50/50 text-slate-700 transition-colors disabled:cursor-not-allowed" /> },
+                render: (l, i) => <input type="number" step="any" value={l.unit_cost} disabled={isLocked} onChange={(e) => updateLineField(i, "unit_cost", Number(e.target.value))} className="w-full h-[40px] text-center text-[13px] font-mono font-black bg-transparent outline-none border-0 ring-0 focus:ring-0 focus:bg-emerald-50/50 text-slate-700 transition-colors disabled:cursor-not-allowed" /> },
               {
                 id: "selling_price", header: "سعر البيع", width: 110, sortable: true, headerClass: "text-center", cellClass: "p-0 border-l border-slate-100",
                 render: (l, i) => {
@@ -947,7 +932,7 @@ export default function PurchaseFormPage() {
                   return (
                     <div className="relative w-full h-full flex flex-col">
                       <input type="number" step="any" value={l.selling_price} disabled={isLocked} onChange={(e) => updateLineField(i, "selling_price", Number(e.target.value))}
-                        className={`w-full h-[32px] text-center text-[13px] font-mono font-black outline-none border-0 ring-0 focus:ring-0 transition-colors disabled:cursor-not-allowed ${belowMargin ? "bg-rose-50 text-rose-800" : changed ? "bg-amber-50 text-amber-800" : "bg-transparent focus:bg-indigo-50/50"}`} />
+                        className={`w-full h-[32px] text-center text-[13px] font-mono font-black outline-none border-0 ring-0 focus:ring-0 transition-colors disabled:cursor-not-allowed ${belowMargin ? "bg-rose-50 text-rose-800" : changed ? "bg-amber-50 text-amber-800" : "bg-transparent focus:bg-emerald-50/50"}`} />
                       {changed && !belowMargin && <span title={`السعر الحالي: ${l.original_sale_price}`} className="absolute top-1 left-1 h-2 w-2 rounded-full bg-amber-400" />}
                       {belowMargin && <span className="text-[9px] font-black text-rose-500 text-center leading-none pb-0.5">هامش {marginPct.toFixed(0)}%</span>}
                     </div>
@@ -1030,7 +1015,7 @@ export default function PurchaseFormPage() {
                 <span className="text-[12px] font-black text-slate-800">{lines.reduce((acc, l) => acc + Number(l.quantity), 0)}</span>
               </div>
               <div className="h-px bg-slate-100" />
-              <div className="mt-3 rounded-sm bg-slate-900 p-4 text-center text-white">
+              <div className="mt-3 rounded-sm bg-emerald-800 p-4 text-center text-white">
                 <div className="text-[10px] font-bold opacity-60 uppercase tracking-widest">إجمالي المستحق</div>
                 <div className="text-[26px] font-black tracking-tighter font-mono">
                   {totals.total.toLocaleString("ar-EG", { minimumFractionDigits: 2 })}
@@ -1166,7 +1151,7 @@ export default function PurchaseFormPage() {
           </div>
           <div className="flex justify-end gap-2 border-t pt-4">
             <button onClick={() => setSupplierModalOpen(false)} className="rounded-sm border border-slate-300 px-4 py-2 text-[13px] font-bold text-slate-700 hover:bg-slate-50">إلغاء</button>
-            <button onClick={createSupplier} className="rounded-sm bg-slate-800 px-6 py-2 text-[13px] font-black text-white hover:bg-slate-700">إنشاء وتحديد</button>
+            <button onClick={createSupplier} className="rounded-sm bg-emerald-600 px-6 py-2 text-[13px] font-black text-white hover:bg-emerald-700">إنشاء وتحديد</button>
           </div>
         </div>
       </Modal>
@@ -1205,7 +1190,7 @@ export default function PurchaseFormPage() {
           </div>
           <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
             <button onClick={() => setSaveConfirmOpen(false)} className="rounded-sm border border-slate-300 bg-white px-5 py-2 text-[13px] font-black text-slate-700 hover:bg-slate-50">تراجع</button>
-            <button onClick={doSave} disabled={isSaving} className="rounded-sm bg-slate-800 px-5 py-2 text-[13px] font-black text-white hover:bg-slate-700 disabled:opacity-50">
+            <button onClick={doSave} disabled={isSaving} className="rounded-sm bg-emerald-600 px-5 py-2 text-[13px] font-black text-white hover:bg-emerald-700 disabled:opacity-50">
               {isSaving ? "جاري الحفظ..." : "نعم، احفظ"}
             </button>
           </div>

@@ -124,6 +124,44 @@ const CLS_ARABIC = {
 function a(key) { return CLS_ARABIC[key] || key; }
 const ID_TO_NAME_COLUMNS = new Set(["warehouse_id", "supplier_id", "customer_id", "cashier_id", "user_id", "category_id"]);
 
+const ARABIC_COL_LABELS = {
+  id: "#", date: "التاريخ", created_at: "تاريخ الإنشاء", updated_at: "تاريخ التحديث",
+  invoice_no: "رقم الفاتورة", doc_no: "رقم المستند", reference_no: "المرجع",
+  customer_name: "العميل", customer_id: "العميل", supplier_name: "المورد", supplier_id: "المورد",
+  item_name: "الصنف", item_code: "كود الصنف", item_id: "الصنف", barcode: "الباركود",
+  category_name: "الفئة", category_id: "الفئة",
+  warehouse_name: "المخزن", warehouse_id: "المخزن",
+  cashier: "الكاشير", cashier_id: "الكاشير", user_id: "المستخدم", full_name: "الاسم",
+  payment_type: "طريقة الدفع", payment_method: "طريقة الدفع", payment_breakdown: "تفاصيل الدفع",
+  status: "الحالة", cancel_reason: "سبب الإلغاء",
+  total: "الإجمالي", subtotal: "قبل الخصم", discount: "الخصم", increase: "الإضافة",
+  net_sales: "صافي المبيعات", gross_sales: "إجمالي المبيعات", total_sales: "إجمالي المبيعات",
+  total_cost: "التكلفة", gross_profit: "إجمالي الربح", net_profit: "صافي الربح",
+  profit_margin: "هامش الربح", avg_transaction: "متوسط الفاتورة",
+  invoice_count: "عدد الفواتير", item_count: "عدد الأصناف", quantity: "الكمية",
+  unit_price: "سعر الوحدة", cost_price: "سعر التكلفة",
+  returns_amount: "المرتجعات", total_discount: "إجمالي الخصومات",
+  amount: "المبلغ", balance: "الرصيد", opening_balance: "الرصيد الافتتاحي",
+  description: "الوصف", reason: "السبب", notes: "ملاحظات", note: "ملاحظة",
+  refund_method: "طريقة الاسترداد", settlement_type: "نوع التسوية",
+  supplier_count: "عدد الموردين", customer_count: "عدد العملاء",
+  transaction_count: "عدد الحركات", running_total: "الإجمالي التراكمي", total_amount: "إجمالي المبلغ",
+  type: "النوع", name: "الاسم", label: "التسمية",
+  from_warehouse: "من مخزن", to_warehouse: "إلى مخزن", movement_type: "نوع الحركة",
+  opening_cash: "نقد الافتتاح", closing_cash: "نقد الإغلاق", cash_variance: "فرق النقد",
+  shift_id: "الوردية", total_withdrawals: "المسحوبات",
+  due_date: "تاريخ الاستحقاق", paid_amount: "المدفوع", remaining: "المتبقي",
+  tax_rate: "نسبة الضريبة", tax_amount: "قيمة الضريبة", vat_amount: "ضريبة القيمة المضافة",
+  role: "الصلاحية", username: "اسم المستخدم", last_login: "آخر دخول",
+  action: "الإجراء", resource: "المورد",
+  aging_0_30: "0-30 يوم", aging_31_60: "31-60 يوم", aging_61_90: "61-90 يوم", aging_90_plus: "أكثر من 90 يوم",
+  weekday_name: "اليوم", hour_slot: "الساعة",
+  stock_status: "حالة المخزون", reorder_level: "حد إعادة الطلب", current_stock: "المخزون الحالي",
+  avg_daily_sales: "متوسط المبيعات اليومية", days_of_stock: "أيام المخزون",
+};
+const NOTE_KEYS = new Set(["notes", "note", "description", "cancel_reason", "reason"]);
+function arColLabel(key) { return ARABIC_COL_LABELS[key] || key; }
+
 function formatDate(date) {
   return date.toISOString().slice(0, 10);
 }
@@ -138,7 +176,29 @@ const DATE_PRESETS = [
   { label: "الربع", days: 90 },
 ];
 
-const FIXED_PAGE_SIZE = 40;
+// Mirror print template constants so workspace pagination matches print pages exactly
+const PRINT_HEADER_MM = 22;
+const PRINT_FOOTER_MM = 14;
+const PRINT_MARGIN_MM = 8;
+const PRINT_HEIGHT_MM = 297; // A4
+
+const PRINT_TEXT_WRAP_KEYS = new Set([
+  "name","item_name","customer_name","supplier_name","description","label",
+  "category_name","warehouse_name","cashier","full_name","reason","notes",
+]);
+
+function calcPrintRowsPerPage(visibleCols) {
+  const colCount = Array.isArray(visibleCols) ? visibleCols.length : visibleCols;
+  const hasWrap = Array.isArray(visibleCols)
+    ? visibleCols.some((c) => c.type === "text" || c.type === "name" || PRINT_TEXT_WRAP_KEYS.has(c.key || c.id))
+    : false; // when only count given, assume no-wrap (conservative initial)
+  const usableHeight = PRINT_HEIGHT_MM - PRINT_MARGIN_MM * 2 - PRINT_HEADER_MM - PRINT_FOOTER_MM - 15;
+  const baseRowH = colCount > 8 ? 5.5 : colCount > 6 ? 6 : 7;
+  const rowH = hasWrap ? baseRowH * 1.2 : baseRowH;
+  const headerRowH = 8;
+  const totalRowH = 7;
+  return Math.max(1, Math.floor((usableHeight - headerRowH - totalRowH) / rowH));
+}
 
 function TableSkeleton({ colCount = 6 }) {
   return (
@@ -188,7 +248,7 @@ function ExportPill({ format, onExport }) {
 }
 
 function FilterInput({ filter, value, onChange, dynamicOptions }) {
-  const opts = dynamicOptions || filter.options || [];
+  const opts = (dynamicOptions && dynamicOptions.length > 0) ? dynamicOptions : (filter.options || []);
   if (filter.type === "lookup") {
     const entityLabel = { category: "تصنيف", product: "منتج", customer: "عميل", supplier: "مورد", user: "مستخدم", warehouse: "مخزن" }[filter.entity] || filter.entity;
     return (
@@ -291,6 +351,7 @@ export default function SourceWorkspacePage() {
   const [costMethod, setCostMethod] = useState("wacc");
   const [exportProgress, setExportProgress] = useState(null);
   const [printOpen, setPrintOpen] = useState(false);
+  const [measuredPrintRowsPerPage, setMeasuredPrintRowsPerPage] = useState(null);
   const [pdfDialogOpen, setPdfDialogOpen] = useState(false);
   const [columnVisibility, setColumnVisibilityState] = useState({});
   const [columnOrder, setColumnOrderState] = useState([]);
@@ -308,7 +369,7 @@ export default function SourceWorkspacePage() {
     if (clsDef?.supportsDates) { params.start_date = defaultFrom; params.end_date = defaultTo; }
     if (clsDef?.hasProfit) { params.cost_method = "wacc"; }
     params.page = 1;
-    params.pageSize = FIXED_PAGE_SIZE;
+    params.pageSize = calcPrintRowsPerPage(6); // initial count estimate; updated once columns load
     return params;
   });
 
@@ -327,7 +388,7 @@ export default function SourceWorkspacePage() {
   });
   useEffect(() => {
     if (invalidRange) return;
-    const params = { page: 1, pageSize: FIXED_PAGE_SIZE };
+    const params = { page: 1, pageSize: calcPrintRowsPerPage(6) }; // refined once visibleColumns stabilizes
     if (clsDef?.supportsDates) { params.start_date = filters.from; params.end_date = filters.to; }
     if (clsDef?.hasProfit) { params.cost_method = costMethod; setCostMethodAction(prefKey, costMethod); }
     (clsDef?.filters || []).forEach((f) => { if (filters[f.key]) params[f.key] = filters[f.key]; });
@@ -372,14 +433,20 @@ export default function SourceWorkspacePage() {
   const allColumns = useMemo(() => {
     let cols;
     if (columnsDef.length > 0) {
-      cols = columnsDef.map((c, index) => {
+      cols = columnsDef.map((c) => {
         const key = c?.key || c?.id || c;
-        return { id: key, key, header: c?.label || key, label: c?.label || key, type: c?.type || "text", defaultVisible: c?.defaultVisible !== false };
+        const label = c?.label || arColLabel(key);
+        const isNote = NOTE_KEYS.has(key);
+        return { id: key, key, header: label, label, type: c?.type || "text", defaultVisible: c?.defaultVisible !== false && !isNote, isNote };
       });
     } else {
       const sample = rows[0];
       if (!sample) return [];
-      cols = Object.keys(sample).map((key) => ({ id: key, key, header: key, label: key, type: "text", defaultVisible: true }));
+      cols = Object.keys(sample).map((key) => {
+        const label = arColLabel(key);
+        const isNote = NOTE_KEYS.has(key);
+        return { id: key, key, header: label, label, type: "text", defaultVisible: !isNote, isNote };
+      });
     }
     if (columnOrder.length > 0 && columnOrder.length === cols.length) {
       const colMap = {};
@@ -402,6 +469,32 @@ export default function SourceWorkspacePage() {
   }, [allColumns]);
 
   const visibleColumns = useMemo(() => allColumns.filter((c) => columnVisibility[c.id] !== false), [allColumns, columnVisibility]);
+
+  // When print template measures exact rows/page, update workspace pagination immediately
+  const handleRowsPerPage = useCallback((measured) => {
+    setMeasuredPrintRowsPerPage(measured);
+    setAppliedParams((prev) => {
+      if (prev.pageSize === measured) return prev;
+      return { ...prev, page: 1, pageSize: measured };
+    });
+  }, []);
+
+  // Reset measurement when column set changes (different report = different row heights)
+  useEffect(() => {
+    setMeasuredPrintRowsPerPage(null);
+  }, [visibleColumns.length]);
+
+  // Keep pageSize in sync with print rows-per-page estimate as visible columns change;
+  // the measured value (from DOM) takes over once the user opens print preview
+  useEffect(() => {
+    if (visibleColumns.length === 0) return;
+    if (measuredPrintRowsPerPage !== null) return; // measured value already in use
+    const printPageSize = calcPrintRowsPerPage(visibleColumns);
+    setAppliedParams((prev) => {
+      if (prev.pageSize === printPageSize) return prev;
+      return { ...prev, page: 1, pageSize: printPageSize };
+    });
+  }, [visibleColumns, measuredPrintRowsPerPage]);
 
   // Smart column ordering by priority, demoting columns related to active filters
   const activeFilterIds = useMemo(() => {
@@ -657,7 +750,7 @@ export default function SourceWorkspacePage() {
                 {(clsDef?.filters || []).map((f) => (
                   <FilterInput key={f.key} filter={f} value={filters[f.key]}
                     onChange={(k, v) => setFilters((prev) => ({ ...prev, [k]: v }))}
-                    dynamicOptions={f.key === 'payment_type' ? paymentTypeOptions : undefined}
+                    dynamicOptions={f.dynamic ? paymentTypeOptions : undefined}
                   />
                 ))}
                 {(clsDef?.multiSelectFilters || []).map((msf) => (
@@ -802,7 +895,7 @@ export default function SourceWorkspacePage() {
               <DataGrid
                 columns={displayColumns.map((c) => ({
                   ...c,
-                  width: c.width || (c.type === "date" ? 90 : c.type === "cur" ? 130 : c.type === "num" ? 80 : c.type === "code" ? 110 : c.type === "percent" ? 80 : 140),
+                  width: c.width || (c.type === "date" ? 90 : c.type === "cur" ? 130 : c.type === "num" ? 80 : c.type === "code" ? 110 : c.type === "percent" ? 80 : (c.key?.includes("name") || c.key?.includes("item") || c.key?.includes("label") || c.key?.includes("description") ? 220 : 140)),
                   render: ID_TO_NAME_COLUMNS.has(c.id)
                     ? (row) => {
                         const nameKey = c.id.replace("_id", "_name");
@@ -914,12 +1007,15 @@ export default function SourceWorkspacePage() {
           <ReportPrintTemplate
             rows={rows}
             columns={visibleColumns}
+            noteColumns={allColumns.filter((c) => c.isNote)}
             title={`${sourceDef?.label || ''} - ${a(classificationId)}`}
             filters={filters}
             settings={s}
             totals={columnTotals}
             currentPage={s.currentPage || 1}
             onPageCount={s.onPageCount}
+            onRowsPerPage={handleRowsPerPage}
+            forcedRowsPerPage={measuredPrintRowsPerPage || undefined}
           />
         )}
       />

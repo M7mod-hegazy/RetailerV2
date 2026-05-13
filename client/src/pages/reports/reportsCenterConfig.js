@@ -252,14 +252,14 @@ export const FILTER_DIMENSIONS = {
     { key: "customer_id", type: "lookup", entity: "customer", label: "العميل" },
     { key: "cashier_id", type: "lookup", entity: "user", label: "الكاشير" },
     { key: "status", type: "select", label: "الحالة", options: [{ value: "paid", label: "مدفوع" }, { value: "unpaid", label: "غير مدفوع" }, { value: "cancelled", label: "ملغي" }] },
-    { key: "payment_type", type: "select", label: "طريقة الدفع", dynamic: true, options: [] },
+    { key: "payment_type", type: "select", label: "طريقة الدفع", dynamic: true, options: [{ value: "cash", label: "نقداً" }, { value: "credit", label: "آجل" }, { value: "card", label: "بطاقة" }, { value: "bank_transfer", label: "تحويل بنكي" }, { value: "multi", label: "متعدد" }] },
   ],
   purchases: [
     { key: "supplier_id", type: "lookup", entity: "supplier", label: "المورد" },
     { key: "category_id", type: "lookup", entity: "category", label: "فئة المنتجات" },
     { key: "item_id", type: "lookup", entity: "product", label: "المنتج" },
     { key: "status", type: "select", label: "الحالة", options: [{ value: "paid", label: "مدفوع" }, { value: "unpaid", label: "غير مدفوع" }, { value: "cancelled", label: "ملغي" }] },
-    { key: "payment_type", type: "select", label: "طريقة الدفع", dynamic: true, options: [] },
+    { key: "payment_type", type: "select", label: "طريقة الدفع", dynamic: true, options: [{ value: "cash", label: "نقداً" }, { value: "credit", label: "آجل" }, { value: "card", label: "بطاقة" }, { value: "bank_transfer", label: "تحويل بنكي" }, { value: "multi", label: "متعدد" }] },
   ],
   "purchase-returns": [
     { key: "supplier_id", type: "lookup", entity: "supplier", label: "المورد" },

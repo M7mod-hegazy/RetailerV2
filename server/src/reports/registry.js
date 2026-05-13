@@ -38,14 +38,14 @@ const REPORT_REGISTRY = {
       { key: "customer_id", type: "lookup", entity: "customer", label_key: "customer" },
       { key: "cashier_id", type: "lookup", entity: "user", label_key: "cashier" },
       { key: "status", type: "select", label_key: "status", options: [{ value: "paid", label_key: "paid" }, { value: "unpaid", label_key: "unpaid" }, { value: "cancelled", label_key: "cancelled" }] },
-      { key: "payment_type", type: "select", label_key: "payment_type", options: [{ value: "cash", label_key: "cash" }, { value: "card", label_key: "card" }, { value: "credit", label_key: "credit" }, { value: "wallet", label_key: "wallet" }] },
+      { key: "payment_type", type: "select", label_key: "payment_type", dynamic: true, options: [{ value: "cash", label: "نقداً" }, { value: "credit", label: "آجل" }, { value: "card", label: "بطاقة" }, { value: "bank_transfer", label: "تحويل بنكي" }, { value: "multi", label: "متعدد" }] },
     ],
     purchases: [
       { key: "supplier_id", type: "lookup", entity: "supplier", label_key: "supplier" },
       { key: "category_id", type: "lookup", entity: "category", label_key: "category" },
       { key: "item_id", type: "lookup", entity: "product", label_key: "product" },
       { key: "status", type: "select", label_key: "status", options: [{ value: "paid", label_key: "paid" }, { value: "unpaid", label_key: "unpaid" }, { value: "cancelled", label_key: "cancelled" }] },
-      { key: "payment_type", type: "select", label_key: "payment_type", options: [{ value: "cash", label_key: "cash" }, { value: "card", label_key: "card" }, { value: "credit", label_key: "credit" }, { value: "wallet", label_key: "wallet" }] },
+      { key: "payment_type", type: "select", label_key: "payment_type", dynamic: true, options: [{ value: "cash", label: "نقداً" }, { value: "credit", label: "آجل" }, { value: "card", label: "بطاقة" }, { value: "bank_transfer", label: "تحويل بنكي" }, { value: "multi", label: "متعدد" }] },
     ],
     "purchase-returns": [
       { key: "supplier_id", type: "lookup", entity: "supplier", label_key: "supplier" },
@@ -115,7 +115,7 @@ const REPORT_REGISTRY = {
       { id: "daily-summary", label_key: "cls_sales_daily", detailedQuery: null, summaryQuery: "daily-sales", availableModes: ["summary"], supportsDates: true, hasProfit: true, supportsScope: true, dimensions: ["payment_type", "cashier_id"], filters: [], multiSelectFilters: [] },
       { id: "detailed", label_key: "cls_sales_detailed", detailedQuery: "detailed-sales", summaryQuery: "daily-sales", availableModes: ["detailed", "summary"], supportsDates: true, hasProfit: false, supportsScope: true, dimensions: ["category_id", "item_id", "customer_id", "cashier_id", "status", "payment_type"], filters: [
         { key: "status", type: "select", label_key: "status", options: [{ value: "paid", label_key: "paid" }, { value: "unpaid", label_key: "unpaid" }, { value: "cancelled", label_key: "cancelled" }] },
-        { key: "payment_type", type: "select", label_key: "payment_type", options: [{ value: "cash", label_key: "cash" }, { value: "card", label_key: "card" }, { value: "credit", label_key: "credit" }, { value: "wallet", label_key: "wallet" }] },
+        { key: "payment_type", type: "select", label_key: "payment_type", dynamic: true, options: [{ value: "cash", label: "نقداً" }, { value: "credit", label: "آجل" }, { value: "card", label: "بطاقة" }, { value: "bank_transfer", label: "تحويل بنكي" }, { value: "multi", label: "متعدد" }] },
       ], multiSelectFilters: [] },
       { id: "by-item", label_key: "cls_sales_by_item", detailedQuery: "sales-by-item", summaryQuery: null, availableModes: ["detailed"], supportsDates: true, hasProfit: true, supportsScope: true, dimensions: ["category_id", "item_id", "customer_id", "cashier_id", "status", "payment_type"], filters: [
         { key: "category_id", type: "lookup", label_key: "category", entity: "category" },
@@ -128,14 +128,14 @@ const REPORT_REGISTRY = {
         { key: "cashier_id", type: "lookup", label_key: "cashier", entity: "user" },
       ], multiSelectFilters: [] },
       { id: "by-payment", label_key: "cls_sales_by_payment", detailedQuery: "sales-by-payment", summaryQuery: null, availableModes: ["detailed"], supportsDates: true, hasProfit: false, supportsScope: true, dimensions: ["payment_type", "customer_id", "cashier_id", "status"], filters: [
-        { key: "payment_type", type: "select", label_key: "payment_type", options: [{ value: "cash", label_key: "cash" }, { value: "card", label_key: "card" }, { value: "credit", label_key: "credit" }, { value: "wallet", label_key: "wallet" }] },
+        { key: "payment_type", type: "select", label_key: "payment_type", dynamic: true, options: [{ value: "cash", label: "نقداً" }, { value: "credit", label: "آجل" }, { value: "card", label: "بطاقة" }, { value: "bank_transfer", label: "تحويل بنكي" }, { value: "multi", label: "متعدد" }] },
       ], multiSelectFilters: [] },
       { id: "heatmap", label_key: "cls_sales_heatmap", detailedQuery: null, summaryQuery: "sales-heatmap", availableModes: ["summary"], supportsDates: true, hasProfit: false, supportsScope: true, dimensions: ["category_id", "customer_id", "payment_type"], filters: [
         { key: "category_id", type: "lookup", label_key: "category", entity: "category" },
       ], multiSelectFilters: [] },
       { id: "period-compare", label_key: "cls_sales_period_compare", detailedQuery: "period-comparison", summaryQuery: null, availableModes: ["detailed"], supportsDates: true, hasProfit: false, supportsScope: true, dimensions: ["category_id", "item_id", "customer_id", "cashier_id", "status", "payment_type"], filters: [], multiSelectFilters: [] },
       { id: "discounts", label_key: "cls_sales_discounts", detailedQuery: "discount-analysis", summaryQuery: null, availableModes: ["detailed"], supportsDates: true, hasProfit: false, supportsScope: true, dimensions: ["category_id", "item_id", "customer_id", "cashier_id", "payment_type", "status"], filters: [
-        { key: "payment_type", type: "select", label_key: "payment_type", options: [{ value: "cash", label_key: "cash" }, { value: "card", label_key: "card" }, { value: "credit", label_key: "credit" }, { value: "wallet", label_key: "wallet" }] },
+        { key: "payment_type", type: "select", label_key: "payment_type", dynamic: true, options: [{ value: "cash", label: "نقداً" }, { value: "credit", label: "آجل" }, { value: "card", label: "بطاقة" }, { value: "bank_transfer", label: "تحويل بنكي" }, { value: "multi", label: "متعدد" }] },
       ], multiSelectFilters: [] },
       { id: "margin", label_key: "cls_sales_margin", detailedQuery: "margin-by-item", summaryQuery: null, availableModes: ["detailed"], supportsDates: true, hasProfit: true, supportsScope: true, dimensions: ["category_id", "item_id", "customer_id", "cashier_id"], filters: [
         { key: "category_id", type: "lookup", label_key: "category", entity: "category" },
@@ -151,7 +151,7 @@ const REPORT_REGISTRY = {
       { id: "detailed", label_key: "cls_purchases_detailed", detailedQuery: "detailed-purchases", summaryQuery: "purchase-summary", availableModes: ["detailed", "summary"], supportsDates: true, hasProfit: false, supportsScope: true, dimensions: ["supplier_id", "category_id", "item_id", "status", "payment_type"], filters: [
         { key: "supplier_id", type: "lookup", label_key: "supplier", entity: "supplier" },
         { key: "status", type: "select", label_key: "status", options: [{ value: "paid", label_key: "paid" }, { value: "unpaid", label_key: "unpaid" }, { value: "cancelled", label_key: "cancelled" }] },
-        { key: "payment_type", type: "select", label_key: "payment_type", options: [{ value: "cash", label_key: "cash" }, { value: "card", label_key: "card" }, { value: "credit", label_key: "credit" }, { value: "wallet", label_key: "wallet" }] },
+        { key: "payment_type", type: "select", label_key: "payment_type", dynamic: true, options: [{ value: "cash", label: "نقداً" }, { value: "credit", label: "آجل" }, { value: "card", label: "بطاقة" }, { value: "bank_transfer", label: "تحويل بنكي" }, { value: "multi", label: "متعدد" }] },
       ], multiSelectFilters: [] },
       { id: "by-supplier", label_key: "cls_purchases_by_supplier", detailedQuery: "purchases-by-supplier", summaryQuery: null, availableModes: ["detailed"], supportsDates: true, hasProfit: false, supportsScope: true, dimensions: ["supplier_id", "category_id", "item_id", "status", "payment_type"], filters: [
         { key: "supplier_id", type: "lookup", label_key: "supplier", entity: "supplier" },

@@ -150,7 +150,28 @@ const COST_METHODS = [
   { value: "purchase_price", label_key: "reports_purchase_price" },
 ];
 
-const FIXED_PAGE_SIZE = 40;
+// Mirror print template constants so workspace pagination matches print pages exactly
+const PRINT_HEADER_MM = 22;
+const PRINT_FOOTER_MM = 14;
+const PRINT_MARGIN_MM = 8;
+const PRINT_HEIGHT_MM = 297; // A4
+const PRINT_TEXT_WRAP_KEYS = new Set([
+  "name","item_name","customer_name","supplier_name","description","label",
+  "category_name","warehouse_name","cashier","full_name","reason","notes",
+]);
+
+function calcPrintRowsPerPage(visibleCols) {
+  const colCount = Array.isArray(visibleCols) ? visibleCols.length : visibleCols;
+  const hasWrap = Array.isArray(visibleCols)
+    ? visibleCols.some((c) => c.type === "text" || c.type === "name" || PRINT_TEXT_WRAP_KEYS.has(c.key || c.id))
+    : false;
+  const usableHeight = PRINT_HEIGHT_MM - PRINT_MARGIN_MM * 2 - PRINT_HEADER_MM - PRINT_FOOTER_MM - 15;
+  const baseRowH = colCount > 8 ? 5.5 : colCount > 6 ? 6 : 7;
+  const rowH = hasWrap ? baseRowH * 1.2 : baseRowH;
+  const headerRowH = 8;
+  const totalRowH = 7;
+  return Math.max(1, Math.floor((usableHeight - headerRowH - totalRowH) / rowH));
+}
 
 const CHART_COLORS = ["#059669", "#2563EB", "#7C3AED", "#D97706", "#DC2626", "#0891B2", "#F59E0B", "#EC4899"];
 
@@ -384,12 +405,15 @@ export default function ReportWorkspacePage() {
     }
     params.q = searchParams.get("q") || "";
     params.page = 1;
-    params.pageSize = FIXED_PAGE_SIZE;
+    params.pageSize = calcPrintRowsPerPage(6);
     return params;
   });
 
   const columnDropdownRef = useRef(null);
   const [printOpen, setPrintOpen] = useState(false);
+  const [printAllData, setPrintAllData] = useState(null);
+  const [printAllLoading, setPrintAllLoading] = useState(false);
+  const [measuredPrintRowsPerPage, setMeasuredPrintRowsPerPage] = useState(null);
   const [costMethod, setCostMethod] = useState(initialCostMethod);
   const [exportProgress, setExportProgress] = useState(null);
   const [paymentTypeOptions, setPaymentTypeOptions] = useState([]);
@@ -430,7 +454,7 @@ export default function ReportWorkspacePage() {
     }
     params.q = "";
     params.page = 1;
-    params.pageSize = FIXED_PAGE_SIZE;
+    params.pageSize = calcPrintRowsPerPage(6);
     setAppliedParams(params);
     setScope(() => {
       const cat = searchParams.get("category_id");
@@ -585,6 +609,31 @@ export default function ReportWorkspacePage() {
     });
   }
 
+  // When print template measures exact rows/page, update workspace pagination immediately
+  const handleRowsPerPage = useCallback((measured) => {
+    setMeasuredPrintRowsPerPage(measured);
+    setAppliedParams((prev) => {
+      if (prev.pageSize === measured) return prev;
+      return { ...prev, page: 1, pageSize: measured };
+    });
+  }, []);
+
+  // Reset measurement when column set changes
+  useEffect(() => {
+    setMeasuredPrintRowsPerPage(null);
+  }, [visibleColumns.length]);
+
+  // Keep pageSize in sync with print rows-per-page estimate as visible columns change
+  useEffect(() => {
+    if (visibleColumns.length === 0) return;
+    if (measuredPrintRowsPerPage !== null) return;
+    const printPageSize = calcPrintRowsPerPage(visibleColumns);
+    setAppliedParams((prev) => {
+      if (prev.pageSize === printPageSize) return prev;
+      return { ...prev, page: 1, pageSize: printPageSize };
+    });
+  }, [visibleColumns, measuredPrintRowsPerPage]);
+
   const chartType = useMemo(() => suggestChartType(allColumns), [allColumns]);
   const { data: chartData, xKey, yKey } = useMemo(() => prepareChartData(rows, allColumns, chartType), [rows, allColumns, chartType]);
 
@@ -669,10 +718,12 @@ export default function ReportWorkspacePage() {
   const filterSignature = JSON.stringify({
     from: filters.from, to: filters.to, q: debouncedQ, scope, costMethod,
     dims: (definition?.filters || []).map((f) => filters[f.key] || ""),
+    printPageSize: measuredPrintRowsPerPage || (visibleColumns.length > 0 ? calcPrintRowsPerPage(visibleColumns) : calcPrintRowsPerPage(6)),
   });
   useEffect(() => {
     if (invalidRange) return;
-    const params = { page: 1, pageSize: FIXED_PAGE_SIZE };
+    const pageSize = measuredPrintRowsPerPage || (visibleColumns.length > 0 ? calcPrintRowsPerPage(visibleColumns) : calcPrintRowsPerPage(6));
+    const params = { page: 1, pageSize };
     if (definition?.supportsDates) { params.start_date = filters.from; params.end_date = filters.to; }
     if (definition?.hasProfit) { params.cost_method = costMethod; setCostMethodAction(reportSlug, costMethod); }
     if (definition?.filters) {
@@ -712,7 +763,22 @@ export default function ReportWorkspacePage() {
   }
 
   const handleExport = useCallback(async (format, exportColumns = visibleColumns) => {
-    if (format === "print") { setPrintOpen(true); return; }
+    if (format === "print") {
+      setPrintOpen(true);
+      setPrintAllLoading(true);
+      try {
+        const allData = await reportsApi.fetchReport(reportSlug, {
+          ...appliedParams,
+          page: 1,
+          pageSize: Math.max(totalRows, 10000),
+        });
+        setPrintAllData(allData);
+      } catch {
+        setPrintAllData(null);
+      }
+      setPrintAllLoading(false);
+      return;
+    }
     setExportProgress({ format, percent: 0 });
     try {
       const blob = await reportsApi.exportReport(reportSlug, format, {
@@ -741,7 +807,7 @@ export default function ReportWorkspacePage() {
     } finally {
       setTimeout(() => setExportProgress(null), 2000);
     }
-  }, [reportSlug, appliedParams, definition, visibleColumns]);
+  }, [reportSlug, appliedParams, definition, visibleColumns, totalRows]);
 
   if (!definition) {
     return (
@@ -1147,24 +1213,26 @@ export default function ReportWorkspacePage() {
 
       <PrintPreviewModal
         open={printOpen}
-        onClose={() => setPrintOpen(false)}
+        onClose={() => { setPrintOpen(false); setPrintAllData(null); }}
         settings={{}}
         operationLabel={definition.title}
         docType="reports_generic"
         reportColumns={visibleColumns}
-        totalRows={totalRows}
+        totalRows={printAllData?.total || totalRows}
         onExportAllColumns={() => handleExport("excel", allColumns)}
         renderContent={(printSettings) => (
           <ReportPrintTemplate
             title={definition.title}
             subtitle={definition.desc}
-            rows={rows}
+            rows={printAllData?.data || rows}
             columns={visibleColumns}
-            totalRows={totalRows}
+            totalRows={printAllData?.total || totalRows}
             currentPage={printSettings.currentPage || 1}
             filters={definition.supportsDates ? { from: appliedParams.start_date, to: appliedParams.end_date } : null}
             settings={printSettings}
             onPageCount={printSettings.onPageCount}
+            onRowsPerPage={handleRowsPerPage}
+            forcedRowsPerPage={measuredPrintRowsPerPage || undefined}
           />
         )}
       />

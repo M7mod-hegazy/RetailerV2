@@ -165,6 +165,8 @@ export default function ReportsCenter() {
     if (SOURCES.length > 0 && !selectedId) setSelectedId(SOURCES[0].id);
   }, [selectedId]);
 
+  const populatedCatIds = useMemo(() => new Set(SOURCES.map((s) => SOURCE_CAT_MAP[s.id]).filter(Boolean)), []);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     let rows = SOURCES;
@@ -256,7 +258,7 @@ export default function ReportsCenter() {
           >
             الكل
           </button>
-          {CATEGORIES.map((cat) => {
+          {CATEGORIES.filter((cat) => populatedCatIds.has(cat.id)).map((cat) => {
             const active = activeCat === cat.id;
             return (
               <button
@@ -359,7 +361,7 @@ export default function ReportsCenter() {
                       </div>
 
                       <p className="text-[13px] leading-relaxed text-zinc-500 line-clamp-2 mb-4">
-                        {classifications.length} تصنيف · {clsDef ? (clsDef.availableModes || ["detailed"]).join(" / ") : ""}
+                        {classifications.length} تصنيف · {clsDef ? (clsDef.availableModes || ["detailed"]).map((m) => m === "detailed" ? "تفصيلي" : m === "summary" ? "ملخص" : m).join(" / ") : ""}
                       </p>
 
                       {/* Embedded Preview */}

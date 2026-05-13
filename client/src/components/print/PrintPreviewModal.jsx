@@ -170,10 +170,17 @@ export default function PrintPreviewModal({
     setPrintPage(1);
   };
 
-  const handleWheel = (e) => {
+  const handleWheel = useCallback((e) => {
     e.preventDefault();
     setViewZoom((prev) => Math.min(2, Math.max(0.2, prev + (e.deltaY > 0 ? -0.07 : 0.07))));
-  };
+  }, []);
+
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleWheel);
+  }, [handleWheel]);
 
   const handleMouseDown = (e) => {
     if (e.button !== 0) return;
@@ -315,7 +322,6 @@ export default function PrintPreviewModal({
               ref={viewportRef}
               className="flex-1 bg-[#e8ecf0] rounded-[12px] border border-slate-200/60 shadow-inner relative overflow-hidden"
               style={{ cursor: "grab" }}
-              onWheel={handleWheel}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}

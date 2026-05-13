@@ -64,17 +64,50 @@ function cashConsistency(startDate, endDate, opts = {}) {
 
 function paymentMethodFlow(startDate, endDate, opts = {}) {
   const db = getDb();
-  const params = [];
-  return db.prepare(`
+
+  const paramsA = [];
+  const nonMulti = db.prepare(`
     SELECT i.payment_type, DATE(i.created_at) AS date,
-      COUNT(*) AS transaction_count,
-      SUM(i.total) AS total_amount,
-      SUM(SUM(i.total)) OVER (PARTITION BY i.payment_type ORDER BY DATE(i.created_at)) AS running_total
+      COUNT(*) AS transaction_count, SUM(i.total) AS total_amount
     FROM invoices i
-    WHERE i.status = 'paid' ${addDateFilter("i.created_at", startDate, endDate, params)}
+    WHERE i.status = 'paid' AND i.payment_type != 'multi'
+      ${addDateFilter("i.created_at", startDate, endDate, paramsA)}
     GROUP BY i.payment_type, DATE(i.created_at)
-    ORDER BY date DESC, total_amount DESC
-  `).all(...params);
+  `).all(...paramsA);
+
+  const paramsB = [];
+  const multiSplits = db.prepare(`
+    SELECT p.method AS payment_type, DATE(i.created_at) AS date,
+      COUNT(DISTINCT i.id) AS transaction_count, SUM(p.amount) AS total_amount
+    FROM invoices i
+    JOIN payment_allocations pa ON pa.invoice_id = i.id
+    JOIN payments p ON p.id = pa.payment_id
+    WHERE i.status = 'paid' AND i.payment_type = 'multi'
+      ${addDateFilter("i.created_at", startDate, endDate, paramsB)}
+    GROUP BY p.method, DATE(i.created_at)
+  `).all(...paramsB);
+
+  const mergeMap = new Map();
+  for (const row of [...nonMulti, ...multiSplits]) {
+    const key = `${row.payment_type}::${row.date}`;
+    if (!mergeMap.has(key)) {
+      mergeMap.set(key, { ...row, transaction_count: Number(row.transaction_count), total_amount: Number(row.total_amount) });
+    } else {
+      const e = mergeMap.get(key);
+      e.transaction_count += Number(row.transaction_count);
+      e.total_amount      += Number(row.total_amount);
+    }
+  }
+
+  const rows = Array.from(mergeMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+  const runningMap = new Map();
+  for (const row of rows) {
+    const prev = runningMap.get(row.payment_type) || 0;
+    row.running_total = prev + row.total_amount;
+    runningMap.set(row.payment_type, row.running_total);
+  }
+
+  return rows.sort((a, b) => b.date.localeCompare(a.date) || b.total_amount - a.total_amount);
 }
 
 function bankCashSplit(startDate, endDate, opts = {}) {

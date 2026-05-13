@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useEffect } from "react";
+import React, { useMemo, useRef, useEffect, useLayoutEffect } from "react";
 
 function safeText(value) {
   if (value == null) return "";
@@ -40,9 +40,73 @@ function parseFontSize(val, fallback) {
   return isNaN(n) ? fallback : n;
 }
 
+const TEXT_WRAP_KEYS = new Set([
+  "name","item_name","customer_name","supplier_name","description","label",
+  "category_name","warehouse_name","cashier","full_name","reason","notes",
+]);
+const DATE_KEYS = new Set(["date","created_at","updated_at"]);
+const CODE_KEYS = new Set(["item_code","code","sku","barcode","invoice_no","reference_id"]);
+
+// Proportional column widths:
+//   name/text cols → large share (long Arabic names need room to avoid wrapping)
+//   numeric/money cols → small share (5-6 digit numbers)
+//   date/code cols → medium share
+// ── Column width weights ──────────────────────────────────────────────────────
+// Unit abbreviations: "kg", "pcs", "box" — 2-3 chars, low importance
+const UNIT_KEYS = new Set(["unit", "uom", "unit_type", "unit_name"]);
+// Quantity/count: short integer, important
+const QTY_KEYS = new Set(["qty", "quantity", "count", "item_count", "invoice_count", "transaction_count"]);
+// Core money values: need enough room for readable numbers + currency
+const MONEY_KEYS = new Set([
+  "price", "unit_price", "cost", "rate",
+  "total", "subtotal", "net", "net_total", "grand_total", "total_sales",
+  "amount", "total_amount", "sales_total",
+]);
+// Secondary numeric: less critical, can be a bit narrower
+const MINOR_NUM_KEYS = new Set([
+  "discount", "tax", "balance", "paid", "remaining",
+  "debit", "credit", "running_total", "avg_transaction", "points", "percentage",
+  "returns_amount", "total_discount", "opening_cash", "closing_cash",
+  "cash_variance", "expected_cash",
+]);
+
+function colWeight(c) {
+  const key = c.key || c.id;
+  // Primary name columns — most important, longest Arabic text
+  if (key === "item_name" || key === "product_name") return 5;
+  // Other long-text / name cols
+  if (TEXT_WRAP_KEYS.has(key) || c.type === "name" || c.type === "text") return 3.5;
+  // Unit abbreviations — barely any content needed
+  if (UNIT_KEYS.has(key)) return 0.5;
+  // Qty/count — short integer but important
+  if (QTY_KEYS.has(key)) return 1.2;
+  // Core money/price/total — important, needs readable width
+  if (MONEY_KEYS.has(key)) return 1.5;
+  // Secondary numeric
+  if (MINOR_NUM_KEYS.has(key)) return 0.9;
+  // Date columns
+  if (c.type === "date" || DATE_KEYS.has(key) || key.endsWith("_date")) return 1.3;
+  // Code/reference columns
+  if (c.type === "code" || CODE_KEYS.has(key)) return 1.4;
+  return 1;
+}
+
+function colGroupWidths(cols) {
+  const total = cols.reduce((s, c) => s + colWeight(c), 0);
+  return cols.map((c) => `${((colWeight(c) / total) * 100).toFixed(1)}%`);
+}
+
+function hasWrapCols(visibleCols) {
+  return visibleCols.some(
+    (c) => c.type === "text" || c.type === "name" || TEXT_WRAP_KEYS.has(c.key || c.id)
+  );
+}
+
 function getRowsPerPage(visibleCols, pageSizeMM, marginMM) {
   const usableHeight = pageSizeMM.height - marginMM * 2 - HEADER_MM - FOOTER_MM - 15;
-  const rowH = visibleCols.length > 8 ? 5.5 : visibleCols.length > 6 ? 6 : 7;
+  const baseRowH = visibleCols.length > 8 ? 5.5 : visibleCols.length > 6 ? 6 : 7;
+  // Name cols get 3× width share → typically fit on 1 line; use 1.3× as light safety margin
+  const rowH = hasWrapCols(visibleCols) ? baseRowH * 1.3 : baseRowH;
   const headerRowH = 8;
   const totalRowH = 7;
   return Math.max(1, Math.floor((usableHeight - headerRowH - totalRowH) / rowH));
@@ -76,16 +140,18 @@ export default function ReportPrintTemplate({
   subtitle,
   rows = [],
   columns = [],
+  noteColumns = [],
   filters,
   settings = {},
   totalRows = 0,
   currentPage = 1,
   totals = {},
   onPageCount,
+  onRowsPerPage,
+  forcedRowsPerPage,   // parent passes measured value so hidden print container uses same count
 }) {
   const accent = settings.accent_color || "#0f172a";
   const currency = settings.currency_symbol || "";
-  const hiddenColumns = Array.isArray(settings.report_print_hidden_columns) ? settings.report_print_hidden_columns : [];
   const template = settings.template || "A4";
 
   const pageSizeMM = getPageSizeMM(template);
@@ -117,13 +183,41 @@ export default function ReportPrintTemplate({
     return columns.filter((column) => selected.has(column.key || column.id));
   }, [columns, settings.report_print_column_keys]);
 
-  const rowsPerPage = getRowsPerPage(visibleColumns, pageSizeMM, marginMM);
+  const [measuredRowsPerPage, setMeasuredRowsPerPage] = React.useState(null);
+  const tbodyRef = useRef(null);
+
+  // Priority: parent-forced (exact, from prior measurement) → locally measured → formula estimate
+  const rowsPerPage = forcedRowsPerPage || measuredRowsPerPage || getRowsPerPage(visibleColumns, pageSizeMM, marginMM);
   const totalPrintPages = Math.max(1, Math.ceil((rows.length || 1) / rowsPerPage));
   const pageStart = (currentPage - 1) * rowsPerPage;
   const pageRows = rows.slice(pageStart, pageStart + rowsPerPage);
   const isLastPage = currentPage >= totalPrintPages;
 
   const tableFontSize = visibleColumns.length > 8 ? "9px" : visibleColumns.length > 6 ? "10px" : itemFontSize;
+
+  // DOM measurement: measure actual rendered tr heights to get exact rows-per-page.
+  // Uses offsetHeight (not getBoundingClientRect) so CSS scale() transforms on ancestors
+  // (e.g. the 55% zoom in PrintPreviewModal) do NOT distort the result.
+  // Skip when forcedRowsPerPage is already provided — avoids remeasure loops.
+  useLayoutEffect(() => {
+    if (forcedRowsPerPage) return;
+    if (!tbodyRef.current || visibleColumns.length === 0) return;
+    const trs = tbodyRef.current.querySelectorAll("tr");
+    if (trs.length < 2) return;
+    let total = 0;
+    trs.forEach((tr) => { total += tr.offsetHeight; });
+    const avgRowPx = total / trs.length;
+    if (avgRowPx < 1) return; // element is not laid out (display:none parent)
+    // Convert usable page height to CSS pixels at 96 DPI (1mm = 3.7795px)
+    const MM_TO_PX = 3.7795;
+    const usableHeightPx =
+      (pageSizeMM.height - marginMM * 2 - HEADER_MM - FOOTER_MM - 15) * MM_TO_PX;
+    const headerRowPx = 8 * MM_TO_PX;
+    const totalRowPx = 7 * MM_TO_PX;
+    const measured = Math.max(1, Math.floor((usableHeightPx - headerRowPx - totalRowPx) / avgRowPx));
+    setMeasuredRowsPerPage(measured);
+    if (onRowsPerPage) onRowsPerPage(measured);
+  }, [forcedRowsPerPage, pageRows.length, visibleColumns.length, pageSizeMM.height, marginMM]);
 
   useEffect(() => {
     if (onPageCount) onPageCount(totalPrintPages);
@@ -178,19 +272,24 @@ export default function ReportPrintTemplate({
     : template === "A5" ? "148mm 210mm"
     : "210mm 297mm";
 
+  // Thermal paper has no fixed height (continuous roll)
+  const fixedPageHeight = isThermal ? undefined : `${pageSizeMM.height}mm`;
+
   return (
     <div
       dir="rtl"
+      className="rpt-page-outer"
       style={{
         background: "#fff",
         color: "#0f172a",
-        padding: `${marginMM}mm ${marginMM}mm ${marginMM}mm ${marginMM}mm`,
-        paddingTop: `${marginTopMM}mm`,
+        padding: `${marginTopMM}mm ${marginMM}mm ${marginMM}mm ${marginMM}mm`,
         fontFamily: printFont,
-        width: `${pageWidthMM - marginMM * 2}mm`,
+        width: `${pageSizeMM.width}mm`,
         boxSizing: "border-box",
-        margin: "0 auto",
+        display: "flex",
+        flexDirection: "column",
         fontSize: bodyFontSize,
+        // height + overflow applied via @media screen in <style> below
       }}
     >
       {/* Logo */}
@@ -252,28 +351,12 @@ export default function ReportPrintTemplate({
       {/* Custom blocks: before_items */}
       {renderCustomBlocks(customBlocks, "before_items")}
 
-      {/* Hidden columns warning */}
-      {hiddenColumns.length > 0 && currentPage === 1 ? (
-        <div
-          style={{
-            marginBottom: "4mm",
-            border: "1px solid #fde68a",
-            background: "#fffbeb",
-            color: "#92400e",
-            borderRadius: "4px",
-            padding: "2mm",
-            fontSize: footerFontSize,
-            fontWeight: 800,
-          }}
-        >
-          الأعمدة غير المطبوعة: {hiddenColumns.map((c) => c.label || c.header || c.key).join("، ")}.
-        </div>
-      ) : null}
 
-      {/* Table */}
+      {/* Table — flex:1 so it fills space between header and footer */}
       {pageRows.length === 0 || visibleColumns.length === 0 ? (
         <div
           style={{
+            flex: 1,
             padding: "10mm 0",
             textAlign: "center",
             color: "#64748b",
@@ -286,9 +369,13 @@ export default function ReportPrintTemplate({
       ) : (
         <div
           style={{
+            flex: 1,
+            minHeight: 0,
             border: isThermal ? "none" : "1px solid #e2e8f0",
             borderRadius: isThermal ? "0" : "4px",
             overflow: "hidden",
+            display: "flex",
+            flexDirection: "column",
           }}
         >
           <table
@@ -299,6 +386,11 @@ export default function ReportPrintTemplate({
               tableLayout: "fixed",
             }}
           >
+            <colgroup>
+              {colGroupWidths(visibleColumns).map((w, i) => (
+                <col key={visibleColumns[i]?.key || i} style={{ width: w }} />
+              ))}
+            </colgroup>
             <thead>
               <tr style={{ background: accent, color: "#fff" }}>
                 {visibleColumns.map((column) => (
@@ -316,7 +408,7 @@ export default function ReportPrintTemplate({
                 ))}
               </tr>
             </thead>
-            <tbody>
+            <tbody ref={tbodyRef}>
               {pageRows.map((row, idx) => (
                 <tr
                   key={row?.id ?? idx}
@@ -339,6 +431,8 @@ export default function ReportPrintTemplate({
                           ? `${column.type === "money" && currency ? `${currency} ` : ""}${Number(value).toLocaleString("ar-EG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${column.type === "percent" ? "%" : ""}`
                           : safeText(value);
 
+                    const isTextWrap = column.type === "text" || column.type === "name" ||
+                      ["name","item_name","customer_name","supplier_name","description","label","category_name","warehouse_name","cashier","full_name"].includes(key);
                     return (
                       <td
                         key={key}
@@ -348,10 +442,9 @@ export default function ReportPrintTemplate({
                           color: "#0f172a",
                           fontFamily: isCode ? "monospace" : undefined,
                           direction: isCode ? "ltr" : undefined,
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
+                          whiteSpace: "normal",
                           wordBreak: "break-word",
+                          overflow: "hidden",
                           fontSize: tableFontSize,
                         }}
                         title={String(value ?? "")}
@@ -406,6 +499,34 @@ export default function ReportPrintTemplate({
         </div>
       )}
 
+      {/* Notes section — shown outside the table for rows that have note values */}
+      {isLastPage && noteColumns.length > 0 && (() => {
+        const noteRows = pageRows.filter((row) => noteColumns.some((nc) => row?.[nc.key]));
+        if (!noteRows.length) return null;
+        return (
+          <div style={{ marginTop: "4mm", borderTop: "1px dashed #e2e8f0", paddingTop: "3mm" }}>
+            <div style={{ fontWeight: 900, fontSize: footerFontSize, color: "#475569", marginBottom: "2mm", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              ملاحظات
+            </div>
+            {noteRows.map((row, i) => {
+              const id = row?.invoice_no || row?.doc_no || row?.id || (i + 1);
+              const noteTexts = noteColumns.map((nc) => {
+                const val = row?.[nc.key];
+                if (!val) return null;
+                return `${nc.label}: ${val}`;
+              }).filter(Boolean);
+              if (!noteTexts.length) return null;
+              return (
+                <div key={i} style={{ display: "flex", gap: "4mm", fontSize: footerFontSize, marginBottom: "1.5mm", color: "#334155" }}>
+                  <span style={{ fontWeight: 900, color: "#64748b", whiteSpace: "nowrap" }}>{id}</span>
+                  <span>{noteTexts.join(" | ")}</span>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
+
       {/* Custom blocks: after_items */}
       {renderCustomBlocks(customBlocks, "after_items")}
 
@@ -428,8 +549,17 @@ export default function ReportPrintTemplate({
       </div>
 
       <style>{`
+        @media screen {
+          /* Lock page to exact physical dimensions so preview looks like a real sheet */
+          .rpt-page-outer {
+            height: ${fixedPageHeight || "auto"};
+            overflow: hidden;
+          }
+        }
         @media print {
           @page { size: ${pageSizeCSS}; margin: ${marginMM}mm; }
+          /* On real print the browser lays out pages — let content flow, never clip */
+          .rpt-page-outer { height: auto !important; overflow: visible !important; }
           thead { display: table-header-group; }
           tfoot { display: table-footer-group; }
           tr { break-inside: avoid; page-break-inside: avoid; }

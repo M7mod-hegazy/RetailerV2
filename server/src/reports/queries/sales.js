@@ -44,7 +44,12 @@ function detailedSales(startDate, endDate, opts = {}) {
       i.customer_id,
       i.payment_type, i.status,
       i.subtotal, i.discount, i.total,
-      COUNT(il.id) AS item_count
+      COUNT(il.id) AS item_count,
+      CASE WHEN i.payment_type = 'multi' THEN (
+        SELECT GROUP_CONCAT(p.method || ':' || CAST(ROUND(p.amount, 2) AS TEXT), ' / ')
+        FROM payments p
+        JOIN payment_allocations pa ON pa.payment_id = p.id AND pa.invoice_id = i.id
+      ) ELSE NULL END AS payment_breakdown
     FROM invoices i
     LEFT JOIN customers c ON c.id = i.customer_id
     LEFT JOIN users u ON u.id = COALESCE(i.user_id, (SELECT user_id FROM shifts WHERE id = i.shift_id))
@@ -82,7 +87,12 @@ function _detailSalesQuery(startDate, endDate, opts = {}) {
       i.payment_type, i.status,
       i.subtotal, i.discount, i.total,
       i.total - i.discount AS net_sales,
-      COUNT(il.id) AS item_count
+      COUNT(il.id) AS item_count,
+      CASE WHEN i.payment_type = 'multi' THEN (
+        SELECT GROUP_CONCAT(p.method || ':' || CAST(ROUND(p.amount, 2) AS TEXT), ' / ')
+        FROM payments p
+        JOIN payment_allocations pa ON pa.payment_id = p.id AND pa.invoice_id = i.id
+      ) ELSE NULL END AS payment_breakdown
     FROM invoices i
     LEFT JOIN customers c ON c.id = i.customer_id
     LEFT JOIN users u ON u.id = COALESCE(i.user_id, (SELECT user_id FROM shifts WHERE id = i.shift_id))
@@ -232,24 +242,69 @@ function salesByCashier(startDate, endDate, opts = {}) {
 
 function salesByPayment(startDate, endDate, opts = {}) {
   const db = getDb();
-  const params = [];
   const { customer_id, category_id } = opts;
   if (customer_id || opts.cashier_id || opts.status || category_id || opts.item_id) return _detailSalesQuery(startDate, endDate, opts);
-  return db.prepare(`
+
+  const scopeClause = (params) => [
+    addDateFilter("i.created_at", startDate, endDate, params),
+    customer_id ? " AND i.customer_id = ?" : "",
+    category_id ? " AND i.id IN (SELECT DISTINCT il2.invoice_id FROM invoice_lines il2 JOIN items it2 ON it2.id = il2.item_id WHERE it2.category_id = ?)" : "",
+  ].join("");
+  const scopeArgs = [
+    ...(customer_id ? [customer_id] : []),
+    ...(category_id ? [category_id] : []),
+  ];
+
+  const paramsA = [];
+  const nonMulti = db.prepare(`
     SELECT i.payment_type,
       COUNT(DISTINCT i.id) AS invoice_count,
       SUM(i.total) AS total_sales,
       SUM(i.discount) AS total_discount,
-      AVG(i.total) AS avg_transaction,
       COALESCE(SUM(sr.total), 0) AS returns_amount
     FROM invoices i
     LEFT JOIN sales_returns sr ON sr.invoice_id = i.id
-    WHERE i.status != 'cancelled' ${addDateFilter("i.created_at", startDate, endDate, params)}
-      ${customer_id ? " AND i.customer_id = ?" : ""}
-      ${category_id ? " AND i.id IN (SELECT DISTINCT il2.invoice_id FROM invoice_lines il2 JOIN items it2 ON it2.id = il2.item_id WHERE it2.category_id = ?)" : ""}
+    WHERE i.status != 'cancelled' AND i.payment_type != 'multi'
+      ${scopeClause(paramsA)}
     GROUP BY i.payment_type
-    ORDER BY total_sales DESC
-  `).all(...params, ...(customer_id ? [customer_id] : []), ...(category_id ? [category_id] : []));
+  `).all(...paramsA, ...scopeArgs);
+
+  const paramsB = [];
+  const multiSplits = db.prepare(`
+    SELECT p.method AS payment_type,
+      COUNT(DISTINCT i.id) AS invoice_count,
+      SUM(p.amount) AS total_sales,
+      0 AS total_discount,
+      0 AS returns_amount
+    FROM invoices i
+    JOIN payment_allocations pa ON pa.invoice_id = i.id
+    JOIN payments p ON p.id = pa.payment_id
+    WHERE i.status != 'cancelled' AND i.payment_type = 'multi'
+      ${scopeClause(paramsB)}
+    GROUP BY p.method
+  `).all(...paramsB, ...scopeArgs);
+
+  const merged = new Map();
+  for (const row of [...nonMulti, ...multiSplits]) {
+    if (!merged.has(row.payment_type)) {
+      merged.set(row.payment_type, {
+        payment_type: row.payment_type,
+        invoice_count: Number(row.invoice_count || 0),
+        total_sales: Number(row.total_sales || 0),
+        total_discount: Number(row.total_discount || 0),
+        returns_amount: Number(row.returns_amount || 0),
+      });
+    } else {
+      const e = merged.get(row.payment_type);
+      e.invoice_count  += Number(row.invoice_count || 0);
+      e.total_sales    += Number(row.total_sales || 0);
+      e.total_discount += Number(row.total_discount || 0);
+      e.returns_amount += Number(row.returns_amount || 0);
+    }
+  }
+  return Array.from(merged.values())
+    .map(r => ({ ...r, avg_transaction: r.invoice_count > 0 ? r.total_sales / r.invoice_count : 0 }))
+    .sort((a, b) => b.total_sales - a.total_sales);
 }
 
 function salesHeatmap(startDate, endDate, opts = {}) {

@@ -8,6 +8,17 @@ import { fuzzyFilterRows } from "../../utils/search";
 import api from "../../services/api";
 
 const BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:5000";
+
+const AR_LABELS = {
+  cash: "نقداً", card: "بطاقة", credit: "آجل", wallet: "محفظة",
+  bank_transfer: "تحويل بنكي", installments: "تقسيط", multi: "متعدد",
+  paid: "مدفوع", unpaid: "غير مدفوع", cancelled: "ملغي",
+  pending: "قيد التحصيل", cleared: "تم الصرف", bounced: "مرتجع", replaced: "مستبدل",
+  in: "وارد", out: "صادر", transfer: "تحويل",
+  admin: "مدير", cashier: "كاشير", manager: "مشرف",
+  payment_type: "طريقة الدفع", status: "الحالة",
+};
+function arLabel(key) { return AR_LABELS[key] || key; }
 function resolveImageUrl(u) {
   if (!u) return null;
   if (u.startsWith("http") || u.startsWith("data:")) return u;
@@ -769,7 +780,7 @@ export function DimensionFilter({ dimension, value, onChange, formatLabel }) {
     );
   }
   if (dimension.type === "select") {
-    const opts = dimension.dynamic ? dynamicOptions : (dimension.options || []);
+    const opts = dimension.dynamic ? (dynamicOptions.length > 0 ? dynamicOptions : (dimension.options || [])) : (dimension.options || []);
     return (
       <div className="space-y-1.5">
         <label className="block text-[11px] font-bold text-zinc-500">{fmt(dimension.label)}</label>
@@ -777,7 +788,7 @@ export function DimensionFilter({ dimension, value, onChange, formatLabel }) {
           className="w-full h-10 px-3 rounded-xl border border-zinc-200 bg-zinc-50 text-[13px] text-zinc-900 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all font-medium">
           <option value="">الكل</option>
           {opts.map((opt) => (
-            <option key={opt.value} value={opt.value}>{fmt(opt.label || opt.label_key)}</option>
+            <option key={opt.value} value={opt.value}>{opt.label || arLabel(opt.label_key) || fmt(opt.label_key)}</option>
           ))}
         </select>
       </div>
@@ -911,7 +922,7 @@ export function FilterPanelTop({
 
                 {/* Dimension filters */}
                 {dimensions.map((dim) => {
-                  const opts = dim.dynamic ? paymentTypeOptions : (dim.options || []);
+                  const opts = dim.dynamic ? (paymentTypeOptions.length > 0 ? paymentTypeOptions : (dim.options || [])) : (dim.options || []);
                   return (
                     <motion.div
                       key={dim.key}
@@ -930,7 +941,7 @@ export function FilterPanelTop({
                           >
                             <option value="">الكل</option>
                             {opts.map((opt) => (
-                              <option key={opt.value} value={opt.value}>{opt.label || opt.label_key}</option>
+                              <option key={opt.value} value={opt.value}>{opt.label || arLabel(opt.label_key) || opt.label_key}</option>
                             ))}
                           </select>
                         </div>
