@@ -764,17 +764,51 @@ export default function ReportWorkspacePage() {
 
   const handleExport = useCallback(async (format, exportColumns = visibleColumns) => {
     if (format === "print") {
-      setPrintOpen(true);
+      console.group("[PrintDebug] handleExport print");
+      console.log("totalRows:", totalRows, "pageSize requested:", Math.max(totalRows, 10000), "appliedParams:", appliedParams);
       setPrintAllLoading(true);
       try {
-        const allData = await reportsApi.fetchReport(reportSlug, {
-          ...appliedParams,
-          page: 1,
-          pageSize: Math.max(totalRows, 10000),
-        });
+        const MAX_PAGE_SIZE = 10000;
+        const batchSize = Math.min(Math.max(totalRows, 1), MAX_PAGE_SIZE);
+        const totalPagesNeeded = Math.ceil(totalRows / batchSize);
+
+        let allData;
+        if (totalPagesNeeded <= 1) {
+          allData = await reportsApi.fetchReport(reportSlug, {
+            ...appliedParams,
+            page: 1,
+            pageSize: batchSize,
+          });
+        } else {
+          // Batch fetch data in chunks for large reports
+          const batchPromises = [];
+          for (let p = 1; p <= totalPagesNeeded; p++) {
+            batchPromises.push(reportsApi.fetchReport(reportSlug, {
+              ...appliedParams,
+              page: p,
+              pageSize: batchSize,
+            }));
+          }
+          const batchResults = await Promise.all(batchPromises);
+          const mergedData = batchResults.flatMap(r => r?.data || []);
+          allData = {
+            ...batchResults[0],
+            data: mergedData,
+            total: totalRows,
+          };
+          console.log("batched fetch — batches:", totalPagesNeeded, "total rows merged:", mergedData.length);
+        }
+
+        const rowCount = allData?.data?.length;
+        console.log("fetchReport response — rows received:", rowCount, "server total:", allData?.total, "hasData array:", Array.isArray(allData?.data));
+        console.groupEnd();
         setPrintAllData(allData);
-      } catch {
+        setPrintOpen(true);
+      } catch (err) {
+        console.warn("[PrintDebug] fetchReport error", err);
+        console.groupEnd();
         setPrintAllData(null);
+        setPrintOpen(true);
       }
       setPrintAllLoading(false);
       return;
@@ -1232,7 +1266,7 @@ export default function ReportWorkspacePage() {
             settings={printSettings}
             onPageCount={printSettings.onPageCount}
             onRowsPerPage={handleRowsPerPage}
-            forcedRowsPerPage={measuredPrintRowsPerPage || undefined}
+            forcedRowsPerPage={appliedParams.pageSize}
           />
         )}
       />

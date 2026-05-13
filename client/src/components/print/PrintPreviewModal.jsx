@@ -41,6 +41,7 @@ export default function PrintPreviewModal({
   const [reportPrintKeys, setReportPrintKeys] = useState([]);
   const [printPage, setPrintPage] = useState(1);
   const [totalPrintPages, setTotalPrintPages] = useState(1);
+  const [columnWeights, setColumnWeights] = useState({});
 
   const isDragging = useRef(false);
   const lastPos = useRef({ x: 0, y: 0 });
@@ -149,6 +150,7 @@ export default function PrintPreviewModal({
       orientation: "portrait",
       report_total_rows: totalRows,
       template: activeTemplate,
+      columnWeights: Object.keys(columnWeights).length > 0 ? columnWeights : undefined,
     } : {}),
   };
 
@@ -224,33 +226,32 @@ export default function PrintPreviewModal({
       return;
     }
 
-    // Capture HTML from the hidden all-pages container
-    const sourceNode = printAllRef.current;
-    if (!sourceNode) {
-      const singleNode = printContentRef.current;
-      if (singleNode) {
-        printIframe(singleNode.innerHTML);
-      } else {
-        window.print();
-      }
-      return;
-    }
-
-    printIframe(sourceNode.innerHTML);
-  };
-
-  function printIframe(contentHtml) {
-    const pageSize =
+    const pageSizeStr =
       activeTemplate === "58mm" ? "58mm auto"
         : activeTemplate === "80mm" ? "80mm auto"
         : activeTemplate === "A5" ? "148mm 210mm"
         : "210mm 297mm";
 
+    // Give React one frame to flush layout effects before capturing
+    requestAnimationFrame(() => {
+      const sourceNode = printAllRef.current;
+      if (!sourceNode) {
+        const singleNode = printContentRef.current;
+        const html = singleNode ? singleNode.innerHTML : "";
+        buildIframeAndPrint(html, pageSizeStr);
+        return;
+      }
+      const rawHtml = sourceNode.innerHTML;
+      buildIframeAndPrint(rawHtml, pageSizeStr);
+    });
+  };
+
+  function buildIframeAndPrint(contentHtml, pageSizeStr) {
+    const cleaned = contentHtml.replace(/@page\s*\{[^}]*\}/g, "");
     const iframe = document.createElement("iframe");
     iframe.setAttribute("title", "print-frame");
     iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;";
     document.body.appendChild(iframe);
-
     const idoc = iframe.contentWindow.document;
     idoc.open();
     idoc.write(`<!DOCTYPE html>
@@ -259,7 +260,7 @@ export default function PrintPreviewModal({
   <meta charset="utf-8">
   <title>${operationLabel || "طباعة"}</title>
   <style>
-    @page { size: ${pageSize}; margin: 6mm; }
+    @page { size: ${pageSizeStr}; margin: 0; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: "Tajawal", "Noto Sans Arabic", system-ui, sans-serif;
@@ -270,14 +271,13 @@ export default function PrintPreviewModal({
     th, td { padding: 4px 6px; text-align: center; }
     thead { display: table-header-group; }
     tfoot { display: table-footer-group; }
-    tr { break-inside: avoid; page-break-inside: avoid; }
     img { max-width: 100%; height: auto; }
+    .rpt-page-outer { page-break-inside: avoid; }
   </style>
 </head>
-<body>${contentHtml}</body>
+<body>${cleaned}</body>
 </html>`);
     idoc.close();
-
     iframe.contentWindow.focus();
     requestAnimationFrame(() => {
       iframe.contentWindow.print();
@@ -285,18 +285,10 @@ export default function PrintPreviewModal({
     });
   }
 
-  // Simple helper to render a React element to HTML string
-  function renderToHtml(element) {
-    if (!element) return "";
-    const container = document.createElement("div");
-    // We use the innerHTML approach via the printContentRef
-    return "";
-  }
-
   return (
     <>
-      {/* Hidden all-pages container for printing */}
-      <div ref={printAllRef} style={{ display: "none" }}>
+      {/* Hidden container — all pages rendered via React for measurement only */}
+      <div ref={printAllRef} style={{ position: "fixed", left: "-9999px", top: 0, visibility: "hidden", pointerEvents: "none" }}>
         {renderContent && totalPrintPages > 0
           ? Array.from({ length: totalPrintPages }).map((_, i) => (
               <div key={i} style={{ pageBreakAfter: i < totalPrintPages - 1 ? "always" : undefined }}>
@@ -368,22 +360,28 @@ export default function PrintPreviewModal({
                 عجلة الفأرة للتكبير • اسحب للتنقل
               </div>
 
-              {/* Page indicator overlay */}
-              {totalPrintPages > 1 && (
-                <div className="absolute bottom-4 right-4 flex items-center gap-1.5 rounded-[10px] bg-white/90 border border-slate-200 shadow-md backdrop-blur-sm px-3 py-1.5 z-50" dir="ltr">
-                  <button onClick={() => goToPage(printPage - 1)} disabled={printPage <= 1}
-                    className="p-0.5 rounded text-slate-500 hover:text-slate-900 disabled:opacity-30 transition-colors">
-                    <ChevronRight size={14} />
-                  </button>
-                  <span className="text-[11px] font-bold text-slate-700 tabular-nums min-w-[40px] text-center">
-                    {printPage.toLocaleString("ar-EG")} / {totalPrintPages.toLocaleString("ar-EG")}
-                  </span>
-                  <button onClick={() => goToPage(printPage + 1)} disabled={printPage >= totalPrintPages}
-                    className="p-0.5 rounded text-slate-500 hover:text-slate-900 disabled:opacity-30 transition-colors">
-                    <ChevronLeft size={14} />
-                  </button>
-                </div>
-              )}
+              {/* Page indicator overlay — always visible */}
+              <div className="absolute bottom-4 right-4 flex items-center gap-0.5 rounded-[10px] bg-white/90 border border-slate-200 shadow-md backdrop-blur-sm px-2 py-1 z-50" dir="ltr">
+                <button onClick={() => goToPage(1)} disabled={printPage <= 1}
+                  className="p-1 rounded text-slate-500 hover:text-slate-900 disabled:opacity-25 transition-colors">
+                  <SkipBack size={12} />
+                </button>
+                <button onClick={() => goToPage(printPage - 1)} disabled={printPage <= 1}
+                  className="p-1 rounded text-slate-500 hover:text-slate-900 disabled:opacity-25 transition-colors">
+                  <ChevronRight size={14} />
+                </button>
+                <span className="text-[11px] font-bold text-slate-700 tabular-nums min-w-[44px] text-center mx-1">
+                  {printPage.toLocaleString("ar-EG")} / {totalPrintPages.toLocaleString("ar-EG")}
+                </span>
+                <button onClick={() => goToPage(printPage + 1)} disabled={printPage >= totalPrintPages}
+                  className="p-1 rounded text-slate-500 hover:text-slate-900 disabled:opacity-25 transition-colors">
+                  <ChevronLeft size={14} />
+                </button>
+                <button onClick={() => goToPage(totalPrintPages)} disabled={printPage >= totalPrintPages}
+                  className="p-1 rounded text-slate-500 hover:text-slate-900 disabled:opacity-25 transition-colors">
+                  <SkipForward size={12} />
+                </button>
+              </div>
             </div>
 
             {/* Right sidebar: all controls under print button */}
@@ -461,30 +459,72 @@ export default function PrintPreviewModal({
                     </span>
                   </div>
 
-                  {/* Column toggles */}
-                  <div className="space-y-0.5 max-h-[200px] overflow-y-auto scrollbar-thin">
+                  {/* Column toggles + width cycling */}
+                  <div className="space-y-0.5 max-h-[240px] overflow-y-auto scrollbar-thin">
                     {reportColumns.map((col) => {
                       const key = col.key || col.id;
                       const active = reportPrintKeys.includes(key);
+                      const weight = columnWeights[key];
+                      const weightPresets = [undefined, 0.5, 1, 2, 3];
+                      const nextWeight = () => {
+                        const idx = weightPresets.indexOf(weight);
+                        const next = weightPresets[(idx + 1) % weightPresets.length];
+                        setColumnWeights((prev) => {
+                          const updated = { ...prev };
+                          if (next === undefined) delete updated[key];
+                          else updated[key] = next;
+                          return updated;
+                        });
+                      };
+                      const weightLabel = weight == null ? "تلقائي" : weight.toFixed(1);
                       return (
-                        <button
+                        <div
                           key={key}
-                          type="button"
-                          onClick={() => setReportPrintKeys((keys) =>
-                            active ? keys.filter((k) => k !== key) : [...keys, key]
-                          )}
-                          className={`w-full flex items-center gap-2 px-2 py-1 rounded-[6px] text-[10px] font-bold transition-all text-right ${
+                          className={`flex items-center gap-1 px-2 py-1 rounded-[6px] text-[10px] font-bold transition-all ${
                             active
                               ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                              : "text-slate-500 hover:bg-slate-50 border border-transparent"
+                              : "text-slate-500 border border-transparent"
                           }`}
                         >
-                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${active ? "bg-emerald-500" : "bg-slate-300"}`} />
-                          <span className="truncate">{col.label || col.header}</span>
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() => setReportPrintKeys((keys) =>
+                              active ? keys.filter((k) => k !== key) : [...keys, key]
+                            )}
+                            className="flex items-center gap-1.5 flex-1 min-w-0 text-right"
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${active ? "bg-emerald-500" : "bg-slate-300"}`} />
+                            <span className="truncate">{col.label || col.header}</span>
+                          </button>
+                          {active && (
+                            <button
+                              type="button"
+                              onClick={nextWeight}
+                              className={`shrink-0 px-1.5 py-0.5 rounded-[4px] text-[8px] font-bold border transition-all hover:bg-slate-100 ${
+                                weight != null
+                                  ? "bg-indigo-50 border-indigo-200 text-indigo-600"
+                                  : "bg-slate-50 border-slate-200 text-slate-400"
+                              }`}
+                              title="اضغط لتغيير العرض"
+                            >
+                              {weightLabel}
+                            </button>
+                          )}
+                        </div>
                       );
                     })}
                   </div>
+
+                  {/* Reset widths */}
+                  {Object.keys(columnWeights).length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setColumnWeights({})}
+                      className="w-full text-[9px] font-bold text-slate-400 hover:text-slate-700 transition-colors py-1"
+                    >
+                      إعادة ضبط العرض التلقائي
+                    </button>
+                  )}
                 </div>
               )}
 

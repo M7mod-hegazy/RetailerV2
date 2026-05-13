@@ -70,8 +70,9 @@ const MINOR_NUM_KEYS = new Set([
   "cash_variance", "expected_cash",
 ]);
 
-function colWeight(c) {
+function colWeight(c, customWeights) {
   const key = c.key || c.id;
+  if (customWeights && customWeights[key] != null) return customWeights[key];
   // Primary name columns — most important, longest Arabic text
   if (key === "item_name" || key === "product_name") return 5;
   // Other long-text / name cols
@@ -91,9 +92,9 @@ function colWeight(c) {
   return 1;
 }
 
-function colGroupWidths(cols) {
-  const total = cols.reduce((s, c) => s + colWeight(c), 0);
-  return cols.map((c) => `${((colWeight(c) / total) * 100).toFixed(1)}%`);
+function colGroupWidths(cols, customWeights) {
+  const total = cols.reduce((s, c) => s + colWeight(c, customWeights), 0);
+  return cols.map((c) => `${((colWeight(c, customWeights) / total) * 100).toFixed(1)}%`);
 }
 
 function hasWrapCols(visibleCols) {
@@ -175,6 +176,7 @@ export default function ReportPrintTemplate({
   const footerText = settings.receipt_footer || "";
   const customBlocks = settings.custom_text_blocks;
 
+  const customWeights = settings.columnWeights;
   const visibleColumns = useMemo(() => {
     if (!Array.isArray(columns) || columns.length === 0) return [];
     const selectedKeys = Array.isArray(settings.report_print_column_keys) ? settings.report_print_column_keys : null;
@@ -219,7 +221,7 @@ export default function ReportPrintTemplate({
     if (onRowsPerPage) onRowsPerPage(measured);
   }, [forcedRowsPerPage, pageRows.length, visibleColumns.length, pageSizeMM.height, marginMM]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (onPageCount) onPageCount(totalPrintPages);
   }, [totalPrintPages, onPageCount]);
 
@@ -387,7 +389,7 @@ export default function ReportPrintTemplate({
             }}
           >
             <colgroup>
-              {colGroupWidths(visibleColumns).map((w, i) => (
+              {colGroupWidths(visibleColumns, customWeights).map((w, i) => (
                 <col key={visibleColumns[i]?.key || i} style={{ width: w }} />
               ))}
             </colgroup>
@@ -419,17 +421,21 @@ export default function ReportPrintTemplate({
                 >
                   {visibleColumns.map((column) => {
                     const key = column.key || column.id;
-                    const value = row?.[key];
+                    // If column is an _id field, try to show the _name counterpart
+                    const nameKey = key.endsWith("_id") ? key.replace("_id", "_name") : null;
+                    const value = nameKey && row?.[nameKey] != null ? row[nameKey] : (row?.[key]);
                     const numeric = isNumericLike(value);
                     const isCode =
                       column.type === "code" ||
                       ["item_code", "code", "sku", "barcode", "invoice_no", "reference_id"].includes(key);
                     const content =
-                      column.type === "date" || key === "date" || key.endsWith("_date")
-                        ? formatDateEG(value)
-                        : numeric
-                          ? `${column.type === "money" && currency ? `${currency} ` : ""}${Number(value).toLocaleString("ar-EG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${column.type === "percent" ? "%" : ""}`
-                          : safeText(value);
+                      isCode
+                        ? safeText(value)
+                        : column.type === "date" || key === "date" || key.endsWith("_date")
+                          ? formatDateEG(value)
+                          : numeric
+                            ? `${column.type === "money" && currency ? `${currency} ` : ""}${Number(value).toLocaleString("ar-EG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${column.type === "percent" ? "%" : ""}`
+                            : safeText(value);
 
                     const isTextWrap = column.type === "text" || column.type === "name" ||
                       ["name","item_name","customer_name","supplier_name","description","label","category_name","warehouse_name","cashier","full_name"].includes(key);

@@ -1,6 +1,5 @@
 const jwt = require("jsonwebtoken");
 const { UserModel } = require("../models/user.model");
-const { getLicenseAccessState } = require("../services/license.service");
 
 function issueToken(user) {
   return jwt.sign({ sub: user.id, role: user.role }, process.env.JWT_SECRET || "dev-secret", { expiresIn: "8h" });
@@ -28,14 +27,6 @@ function authRequired(req, _res, next) {
     if (!user || !user.is_active) {
       const err = new Error("الحساب غير نشط");
       err.status = 401;
-      return next(err);
-    }
-
-    const licenseState = getLicenseAccessState(user);
-    if (!licenseState.allowed) {
-      const err = new Error("الترخيص غير صالح لاستخدام النظام");
-      err.status = 403;
-      err.code = "LICENSE_REQUIRED";
       return next(err);
     }
 

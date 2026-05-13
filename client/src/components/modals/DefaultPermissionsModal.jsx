@@ -207,9 +207,9 @@ export default function DefaultPermissionsModal({ open, onClose }) {
                       جاري التحميل...
                     </div>
                   ) : (
-                    <div className="rounded-xl bg-white border border-slate-200 overflow-x-auto max-h-[55vh]">
+                    <div className="rounded-xl bg-white border border-slate-200 overflow-x-auto overflow-y-auto max-h-[55vh]">
                       <table className="w-full text-xs">
-                        <thead className="bg-slate-50 sticky top-0">
+                        <thead className="bg-slate-50 sticky top-0 z-10">
                           <tr>
                             <th className="text-right p-2 text-[10px] font-black uppercase tracking-widest text-slate-600">
                               الصفحة

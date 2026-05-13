@@ -206,8 +206,9 @@ export default function DataGrid({
                     key={c.id}
                     className={`px-2 py-2 text-[13px] text-slate-800 border-l border-slate-100/50 truncate align-middle ${c.cellClass || "text-center"}`}
                     style={{ maxWidth: colWidths[c.id] }}
+                    title={(row[c.id] ?? "") !== "" ? String(row[c.id]) : "-"}
                   >
-                    {c.render ? c.render(row, i) : (row[c.id] || "-")}
+                    {c.render ? c.render(row, i) : ((row[c.id] ?? "") !== "" ? row[c.id] : "-")}
                   </td>
                 ))}
               </tr>

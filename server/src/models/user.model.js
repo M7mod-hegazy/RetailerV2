@@ -34,7 +34,13 @@ class UserModel {
   }
 
   static verifyPassword(user, rawPassword) {
-    return bcrypt.compareSync(rawPassword, user.password_hash);
+    const stored = user.password_hash || "";
+    // Existing bcrypt hashes (admin/system accounts) — compare with bcrypt
+    if (stored.startsWith("$2b$") || stored.startsWith("$2a$") || stored.startsWith("$2y$")) {
+      return bcrypt.compareSync(rawPassword, stored);
+    }
+    // New users — plaintext comparison
+    return stored === String(rawPassword);
   }
 }
 

@@ -351,6 +351,8 @@ export default function SourceWorkspacePage() {
   const [costMethod, setCostMethod] = useState("wacc");
   const [exportProgress, setExportProgress] = useState(null);
   const [printOpen, setPrintOpen] = useState(false);
+  const [printAllData, setPrintAllData] = useState(null);
+  const [printAllLoading, setPrintAllLoading] = useState(false);
   const [measuredPrintRowsPerPage, setMeasuredPrintRowsPerPage] = useState(null);
   const [pdfDialogOpen, setPdfDialogOpen] = useState(false);
   const [columnVisibility, setColumnVisibilityState] = useState({});
@@ -614,11 +616,59 @@ export default function SourceWorkspacePage() {
   }, [sourceKey, classificationId, appliedParams]);
 
   const handleExport = useCallback(async (format, exportColumns = visibleColumns) => {
-    if (format === "print") { setPrintOpen(true); return; }
+    if (format === "print") {
+      console.group("[PrintDebug] SourceWorkspace handleExport print");
+      console.log("totalRows:", totalRows, "appliedParams:", appliedParams);
+      setPrintAllLoading(true);
+      try {
+        const MAX_PAGE_SIZE = 10000;
+        const batchSize = Math.min(Math.max(totalRows, 1), MAX_PAGE_SIZE);
+        const totalPagesNeeded = Math.ceil(totalRows / batchSize);
+
+        let allData;
+        if (totalPagesNeeded <= 1) {
+          allData = await reportsApi.fetchSourceReport(sourceKey, classificationId, dataMode, {
+            ...appliedParams,
+            page: 1,
+            pageSize: batchSize,
+          });
+        } else {
+          const batchPromises = [];
+          for (let p = 1; p <= totalPagesNeeded; p++) {
+            batchPromises.push(reportsApi.fetchSourceReport(sourceKey, classificationId, dataMode, {
+              ...appliedParams,
+              page: p,
+              pageSize: batchSize,
+            }));
+          }
+          const batchResults = await Promise.all(batchPromises);
+          const mergedData = batchResults.flatMap(r => r?.data || []);
+          allData = {
+            ...batchResults[0],
+            data: mergedData,
+            total: totalRows,
+          };
+          console.log("batched fetch — batches:", totalPagesNeeded, "total rows merged:", mergedData.length);
+        }
+
+        const rowCount = allData?.data?.length;
+        console.log("fetch response — rows received:", rowCount, "server total:", allData?.total);
+        console.groupEnd();
+        setPrintAllData(allData);
+        setPrintOpen(true);
+      } catch (err) {
+        console.warn("[PrintDebug] fetchSourceReport error", err);
+        console.groupEnd();
+        setPrintAllData(null);
+        setPrintOpen(true);
+      }
+      setPrintAllLoading(false);
+      return;
+    }
     if (format === "pdf") { setPdfDialogOpen(true); return; }
     const querySlug = dataMode === "summary" ? clsDef?.summaryQuery : clsDef?.detailedQuery;
     await doDownload(format, querySlug, exportColumns);
-  }, [visibleColumns, dataMode, clsDef, doDownload]);
+  }, [visibleColumns, dataMode, clsDef, doDownload, sourceKey, classificationId, appliedParams, totalRows]);
 
   const handlePdfExport = useCallback(async (exportColumns, pdfParams) => {
     const querySlug = dataMode === "summary" ? clsDef?.summaryQuery : clsDef?.detailedQuery;
@@ -994,7 +1044,7 @@ export default function SourceWorkspacePage() {
       {/* Print Modal */}
       <PrintPreviewModal
         open={printOpen}
-        onClose={() => setPrintOpen(false)}
+        onClose={() => { setPrintOpen(false); setPrintAllData(null); }}
         docType="reports_generic"
         reportColumns={visibleColumns.map((c) => ({
           key: c.key || c.id,
@@ -1002,10 +1052,10 @@ export default function SourceWorkspacePage() {
           type: c.type,
           printPriority: c.printPriority,
         }))}
-        totalRows={totalRows}
+        totalRows={printAllData?.total || totalRows}
         renderContent={(s) => (
           <ReportPrintTemplate
-            rows={rows}
+            rows={printAllData?.data || rows}
             columns={visibleColumns}
             noteColumns={allColumns.filter((c) => c.isNote)}
             title={`${sourceDef?.label || ''} - ${a(classificationId)}`}
@@ -1015,7 +1065,7 @@ export default function SourceWorkspacePage() {
             currentPage={s.currentPage || 1}
             onPageCount={s.onPageCount}
             onRowsPerPage={handleRowsPerPage}
-            forcedRowsPerPage={measuredPrintRowsPerPage || undefined}
+            forcedRowsPerPage={appliedParams.pageSize}
           />
         )}
       />

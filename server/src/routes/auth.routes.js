@@ -4,7 +4,6 @@ const crypto = require("crypto");
 const { issueToken, authRequired, requireRole } = require("../middleware/auth");
 const { UserModel } = require("../models/user.model");
 const { getDb } = require("../config/database");
-const { getLicenseAccessState } = require("../services/license.service");
 
 const router = express.Router();
 
@@ -96,14 +95,6 @@ router.post("/login", (req, res, next) => {
 
   // Reset on success
   loginAttempts.delete(normalizedUsername);
-
-  const licenseState = getLicenseAccessState(user);
-  if (!licenseState.allowed) {
-    const err = new Error("License is required to access the application");
-    err.status = 403;
-    err.code = "LICENSE_REQUIRED";
-    return next(err);
-  }
 
   const token = issueToken(user);
   return res.json({ success: true, data: { token, user: { id: user.id, username: user.username, role: user.role, page_permissions: user.page_permissions } } });

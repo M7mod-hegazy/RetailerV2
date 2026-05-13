@@ -11,6 +11,8 @@ import {
   User as UserIcon,
   Save,
   Settings,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import api from "../../services/api";
 import toast from "react-hot-toast";
@@ -32,7 +34,8 @@ const ACTION_LABELS = {
   print: "طباعة",
 };
 
-const EMPTY_FORM = { full_name: "", username: "", password: "", role: "user" };
+const EMPTY_FORM = { full_name: "", username: "", password: "", role: "user", is_active: true };
+const CREATE_TEMPLATE_ROLE = { user: "user", admin: "admin", none: "user" };
 
 function buildEmptyPermissions() {
   return Object.keys(PAGE_PERMISSIONS).reduce((acc, key) => {
@@ -68,6 +71,13 @@ export default function UsersPage() {
   const [permLoading, setPermLoading] = useState(false);
   const [permSaving, setPermSaving] = useState(false);
 
+  const [showPassword, setShowPassword] = useState(false);
+
+  // For new-user creation template
+  const [createTemplate, setCreateTemplate] = useState("user");
+  // Server-saved default permissions (used by تطبيق القالب)
+  const [serverDefaultPermissions, setServerDefaultPermissions] = useState(null);
+
   async function loadRows() {
     setLoading(true);
     try {
@@ -84,11 +94,20 @@ export default function UsersPage() {
     loadRows();
   }, []);
 
+  useEffect(() => {
+    if (!isAdmin) return;
+    api.get("/api/settings/default-user-permissions")
+      .then((res) => setServerDefaultPermissions(res.data?.data || DEFAULT_USER_PERMISSIONS))
+      .catch(() => setServerDefaultPermissions(DEFAULT_USER_PERMISSIONS));
+  }, [isAdmin]);
+
   function startCreate() {
     setEditingRow(null);
     setForm(EMPTY_FORM);
     setActiveTab("info");
     setPermissions(buildEmptyPermissions());
+    setCreateTemplate("user");
+    setShowPassword(false);
   }
 
   async function startEdit(row) {
@@ -98,8 +117,20 @@ export default function UsersPage() {
       username: row.username || "",
       password: "",
       role: row.role || "user",
+      is_active: row.is_active !== 0,
     });
+    setPermTemplate(row.role === "admin" ? "admin" : "user");
+    setShowPassword(false);
     setActiveTab("info");
+    // Load actual password for display
+    try {
+      const res = await api.get(`/api/users/${row.id}`);
+      const pw = res.data?.data?.password || "";
+      // Only show plaintext passwords (skip bcrypt hashes)
+      if (pw && !pw.startsWith("$2")) {
+        setForm((p) => ({ ...p, password: pw }));
+      }
+    } catch { /* non-critical */ }
     // Load permissions
     if (isAdmin) {
       setPermLoading(true);
@@ -135,19 +166,60 @@ export default function UsersPage() {
     e.preventDefault();
     setIsSubmitting(true);
     try {
-      const payload = { ...form };
-      if (editingRow && !payload.password) delete payload.password;
       if (editingRow) {
-        await api.put(`/api/users/${editingRow.id}`, payload);
-        toast.success("تم التحديث");
+        const payload = { ...form, role: permTemplate === "admin" ? "admin" : "user" };
+        if (!payload.password) delete payload.password;
+        const res = await api.put(`/api/users/${editingRow.id}`, payload);
+        toast.success("✓ تم حفظ التعديلات بنجاح");
+        // Stay on the same user — refresh its data in the form
+        const updated = res.data?.data;
+        if (updated) {
+          setEditingRow(updated);
+          setForm((p) => ({
+            ...p,
+            full_name: updated.full_name || "",
+            username: updated.username || "",
+            role: updated.role || "user",
+            is_active: updated.is_active !== 0,
+            password: updated.password || p.password,
+          }));
+        }
+        loadRows();
       } else {
-        await api.post("/api/users", payload);
-        toast.success("تمت الإضافة");
+        const role = CREATE_TEMPLATE_ROLE[createTemplate] || "user";
+        const payload = { ...form, role };
+        const res = await api.post("/api/users", payload);
+        // Apply template permissions (non-critical, non-admin only)
+        const newId = res.data?.data?.id || res.data?.id;
+        if (newId && isAdmin && createTemplate !== "admin") {
+          try {
+            const templatePerms = createTemplate === "user"
+              ? applyTemplate(serverDefaultPermissions || DEFAULT_USER_PERMISSIONS)
+              : buildEmptyPermissions();
+            const compact = {};
+            Object.entries(templatePerms).forEach(([k, v]) => {
+              if (Array.isArray(v) && v.length) compact[k] = v;
+            });
+            await api.put(`/api/users/${newId}/permissions`, { permissions: compact });
+          } catch {
+            // non-critical — user created, permissions can be set later
+          }
+        }
+        toast.success("✓ تمت إضافة المستخدم بنجاح");
+        loadRows();
+        startCreate();
       }
-      startCreate();
-      loadRows();
-    } catch {
-      toast.error("فشل الحفظ");
+    } catch (err) {
+      const serverError = err?.response?.data?.error || err?.response?.data?.message;
+      const ERROR_MESSAGES = {
+        "Username already taken": "اسم المستخدم مستخدم بالفعل",
+        "System owner username is reserved": "اسم المستخدم هذا محجوز",
+        "User not found": "المستخدم غير موجود",
+        "System owner account cannot be edited": "لا يمكن تعديل حساب مالك النظام",
+      };
+      const msg = ERROR_MESSAGES[serverError] || serverError || "حدث خطأ، يرجى المحاولة مجدداً";
+      toast.error(msg);
+      // Form stays open — user can correct and retry
     } finally {
       setIsSubmitting(false);
     }
@@ -166,7 +238,7 @@ export default function UsersPage() {
 
   function handleApplyTemplate() {
     if (permTemplate === "user") {
-      setPermissions(applyTemplate(DEFAULT_USER_PERMISSIONS));
+      setPermissions(applyTemplate(serverDefaultPermissions || DEFAULT_USER_PERMISSIONS));
       toast.success("تم تطبيق القالب");
     } else if (permTemplate === "admin") {
       const full = buildEmptyPermissions();
@@ -193,13 +265,13 @@ export default function UsersPage() {
       await api.put(`/api/users/${editingRow.id}/permissions`, {
         permissions: compact,
       });
-      toast.success("تم حفظ الصلاحيات");
+      toast.success("✓ تم حفظ الصلاحيات بنجاح");
     } catch (err) {
       const code = err?.response?.data?.error;
       if (code === "cannot_modify_admin_permissions") {
-        toast.error("لا يمكن تعديل صلاحيات المدير");
+        toast.error("المدير يملك صلاحيات كاملة تلقائياً — لا يمكن تقييدها");
       } else {
-        toast.error("فشل حفظ الصلاحيات");
+        toast.error("فشل حفظ الصلاحيات، يرجى المحاولة مجدداً");
       }
     } finally {
       setPermSaving(false);
@@ -456,7 +528,6 @@ export default function UsersPage() {
                     type: "password",
                     required: !editingRow,
                   },
-                  { name: "role", label: "الدور" },
                 ].map((field) => (
                   <div key={field.name} className="flex flex-col gap-2">
                     <label
@@ -471,22 +542,75 @@ export default function UsersPage() {
                         </span>
                       )}
                     </label>
-                    <input
-                      type={field.type || "text"}
-                      required={field.required}
-                      value={form[field.name] ?? ""}
-                      onChange={(e) =>
-                        setForm((p) => ({ ...p, [field.name]: e.target.value }))
-                      }
-                      className={`w-full h-12 bg-white rounded-xl px-4 text-sm font-bold outline-none transition-all shadow-sm border ${
-                        editingRow
-                          ? "text-amber-950 border-amber-200 focus:border-amber-500"
-                          : "text-zinc-900 border-slate-200 focus:border-zinc-400"
-                      }`}
-                      placeholder={`إدخال ${field.label}...`}
-                    />
+                    <div className="relative">
+                      <input
+                        type={field.name === "password" ? (showPassword ? "text" : "password") : "text"}
+                        autoComplete={field.name === "password" ? (editingRow ? "new-password" : "new-password") : field.name === "username" ? "username" : "off"}
+                        required={field.required}
+                        value={form[field.name] ?? ""}
+                        onChange={(e) =>
+                          setForm((p) => ({ ...p, [field.name]: e.target.value }))
+                        }
+                        className={`w-full h-12 bg-white rounded-xl px-4 text-sm font-bold outline-none transition-all shadow-sm border ${
+                          field.name === "password" ? "pl-11" : ""
+                        } ${
+                          editingRow
+                            ? "text-amber-950 border-amber-200 focus:border-amber-500"
+                            : "text-zinc-900 border-slate-200 focus:border-zinc-400"
+                        }`}
+                        placeholder={`إدخال ${field.label}...`}
+                      />
+                      {field.name === "password" && (
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword((v) => !v)}
+                          className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-zinc-700 transition-colors"
+                          tabIndex={-1}
+                        >
+                          {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
+
+                {/* Create-only: privilege template (auto-sets role) */}
+                {!editingRow && (
+                  <div className="flex flex-col gap-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                      نمط الصلاحيات
+                    </label>
+                    <select
+                      value={createTemplate}
+                      onChange={(e) => {
+                        const t = e.target.value;
+                        setCreateTemplate(t);
+                        setForm((p) => ({ ...p, role: CREATE_TEMPLATE_ROLE[t] || "user" }));
+                      }}
+                      className="w-full h-12 bg-white rounded-xl px-4 text-sm font-bold outline-none transition-all shadow-sm border text-zinc-900 border-slate-200 focus:border-zinc-400"
+                    >
+                      <option value="user">مستخدم — صلاحيات افتراضية</option>
+                      <option value="admin">مدير — كامل الصلاحيات</option>
+                      <option value="none">بدون صلاحيات</option>
+                    </select>
+                  </div>
+                )}
+
+                {/* Edit-only: show auto-derived role badge + is_active toggle */}
+                {editingRow && (
+                  <>
+                    <div className="flex flex-col gap-2">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-amber-900/70">
+                        الدور (مشتق من الصلاحيات)
+                      </label>
+                      <div className="h-12 bg-white/60 rounded-xl px-4 flex items-center border border-amber-200">
+                        <span className="text-[11px] font-black uppercase tracking-wider px-2 py-1 rounded-md bg-amber-100 text-amber-800">
+                          {permTemplate === "admin" ? "admin" : "user"}
+                        </span>
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 <motion.button
                   whileTap={{ scale: 0.98 }}
@@ -516,7 +640,7 @@ export default function UsersPage() {
 
             {/* Permissions tab */}
             {activeTab === "permissions" && showPermissionsTab && (
-              <div className="p-6 flex flex-col gap-4 bg-amber-100/20 max-h-[70vh] overflow-y-auto">
+              <div className="p-6 flex flex-col gap-4 bg-amber-100/20">
                 {/* Template selector */}
                 <div className="flex items-center gap-2 p-3 rounded-xl bg-white border border-amber-200">
                   <label className="text-[10px] font-black uppercase tracking-widest text-amber-900/70 whitespace-nowrap">
@@ -546,9 +670,9 @@ export default function UsersPage() {
                     جاري التحميل...
                   </div>
                 ) : (
-                  <div className="rounded-xl bg-white border border-slate-200 overflow-hidden">
+                  <div className="rounded-xl bg-white border border-slate-200 overflow-hidden max-h-[50vh] overflow-y-auto">
                     <table className="w-full text-xs">
-                      <thead className="bg-slate-50 sticky top-0">
+                      <thead className="bg-slate-50 sticky top-0 z-10">
                         <tr>
                           <th className="text-right p-2 text-[10px] font-black uppercase tracking-widest text-slate-600">
                             الصفحة

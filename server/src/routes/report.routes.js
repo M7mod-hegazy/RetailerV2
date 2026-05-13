@@ -139,7 +139,8 @@ router.get("/run/:slug", requirePagePermission("reports", "view"), (req, res, ne
 
     const total = rows.length;
     const p = Math.max(1, parseInt(page) || 1);
-    const ps = Math.min(500, Math.max(1, parseInt(pageSize) || 50));
+    // Allow up to 10,000 rows for print preview / full-export requests
+    const ps = Math.min(10000, Math.max(1, parseInt(pageSize) || 50));
     const paginated = rows.slice((p - 1) * ps, p * ps);
     const columns = getReportColumns(slug, rows.length ? rows : paginated);
 
@@ -287,7 +288,8 @@ router.get("/source/:sourceKey/run", requirePagePermission("reports", "view"), (
 
     const total = rows.length;
     const p = Math.max(1, parseInt(page) || 1);
-    const ps = Math.min(500, Math.max(1, parseInt(pageSize) || 50));
+    // Allow up to 10,000 rows for print preview / full-export requests
+    const ps = Math.min(10000, Math.max(1, parseInt(pageSize) || 50));
     const paginated = rows.slice((p - 1) * ps, p * ps);
     const columns = getReportColumns(clsDef.detailedQuery || clsDef.summaryQuery, rows.length ? rows : paginated);
     const totals = computeTotals(rows, columns);
